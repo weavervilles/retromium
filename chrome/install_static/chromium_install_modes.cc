@@ -16,7 +16,7 @@ namespace install_static {
 
 const wchar_t kCompanyPathName[] = L"";
 
-const wchar_t kProductPathName[] = L"Chromium";
+const wchar_t kProductPathName[] = L"Supermium";
 
 const size_t kProductPathNameLength = _countof(kProductPathName) - 1;
 
@@ -34,8 +34,8 @@ const InstallConstants kInstallModes[] = {
         .logo_suffix = L"",  // No logo suffix for the primary install mode.
         .app_guid =
             L"",  // Empty app_guid since no integration with Google Update.
-        .base_app_name = L"Chromium",      // A distinct base_app_name.
-        .base_app_id = L"Chromium",        // A distinct base_app_id.
+        .base_app_name = L"Supermium",      // A distinct base_app_name.
+        .base_app_id = L"Supermium",        // A distinct base_app_id.
         .prog_id_prefix = L"ChromiumHTM",  // ProgID prefix.
         .prog_id_description =
             L"Chromium HTML Document",  // ProgID description.
