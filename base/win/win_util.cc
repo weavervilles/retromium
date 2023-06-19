@@ -124,8 +124,10 @@ bool SetProcessDpiAwarenessWrapper(PROCESS_DPI_AWARENESS value) {
     return false;
   }
 
-  NOTREACHED() << "SetProcessDpiAwarenessInternal "
-                  "should be available on all platforms >= Windows 8.1";
+  DCHECK_LT(GetVersion(), Version::WIN8_1) << "SetProcessDpiAwarenessInternal "
+                                              "should be available on all "
+                                              "platforms >= Windows 8.1";
+
   return false;
 }
 
