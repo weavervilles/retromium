@@ -42,6 +42,9 @@ bool HStringReference::ResolveCoreWinRTStringDelayload() {
 }
 
 HStringReference::HStringReference(const wchar_t* str, size_t length) {
+
+  // This was added because otherwise, the checks below would consistently fail.
+  ResolveCoreWinRTStringDelayload();
   DCHECK(g_winrt_string_loaded);
   // String must be null terminated for WindowsCreateStringReference.
   // nullptr str is OK so long as the length is 0.
