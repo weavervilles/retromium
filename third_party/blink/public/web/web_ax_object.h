@@ -66,8 +66,8 @@ class BLINK_EXPORT WebAXObject {
  public:
   ~WebAXObject() { Reset(); }
 
-  WebAXObject() = default;
-  WebAXObject(const WebAXObject& o) { Assign(o); }
+  WebAXObject();
+  WebAXObject(const WebAXObject& o);
   WebAXObject& operator=(const WebAXObject& o) {
     Assign(o);
     return *this;
@@ -206,7 +206,6 @@ class BLINK_EXPORT WebAXObject {
   //
   // OLD: the od way is that we had separate APIs for every individual
   // action. We're migrating to use PerformAction() for everything.
-  bool SetSelected(bool) const;
   bool SetSelection(const WebAXObject& anchor_object,
                     int anchor_offset,
                     const WebAXObject& focus_object,

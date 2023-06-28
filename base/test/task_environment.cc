@@ -28,6 +28,7 @@
 #include "base/task/common/lazy_now.h"
 #include "base/task/sequence_manager/sequence_manager.h"
 #include "base/task/sequence_manager/sequence_manager_impl.h"
+#include "base/task/sequence_manager/task_queue.h"
 #include "base/task/sequence_manager/time_domain.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool/thread_pool_impl.h"
@@ -567,7 +568,7 @@ void TaskEnvironment::DestroyTaskEnvironment() {
   }
 
   ShutdownAndJoinThreadPool();
-  task_queue_ = nullptr;
+  task_queue_.reset();
   // SequenceManagerImpl must outlive the threads in the ThreadPoolInstance()
   // (ShutdownAndJoinThreadPool() above) as TaskEnvironment::MockTimeDomain can
   // invoke its SequenceManagerImpl* from worker threads.
@@ -616,6 +617,9 @@ void TaskEnvironment::DestroyThreadPool() {
   // threads. Make sure this is allowed to avoid flaking tests that have
   // disallowed waits on their main thread.
   ScopedAllowBaseSyncPrimitivesForTesting allow_waits_to_destroy_task_tracker;
+
+  // Drop unowned resource before destroying thread pool which owns it.
+  task_tracker_ = nullptr;
   ThreadPoolInstance::Set(nullptr);
 }
 

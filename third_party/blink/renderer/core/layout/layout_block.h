@@ -154,25 +154,8 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   void AddChild(LayoutObject* new_child,
                 LayoutObject* before_child = nullptr) override;
 
-  virtual void UpdateBlockLayout();
-
-  void InsertPositionedObject(LayoutBox*);
-  static void RemovePositionedObject(LayoutBox*);
   void RemovePositionedObjects(LayoutObject*,
                                ContainingBlockState = kSameContainingBlock);
-
-  TrackedLayoutBoxLinkedHashSet* PositionedObjects() const {
-    NOT_DESTROYED();
-    return UNLIKELY(HasPositionedObjects()) ? PositionedObjectsInternal()
-                                            : nullptr;
-  }
-  bool HasPositionedObjects() const {
-    NOT_DESTROYED();
-    DCHECK(has_positioned_objects_ ? (PositionedObjectsInternal() &&
-                                      !PositionedObjectsInternal()->empty())
-                                   : !PositionedObjectsInternal());
-    return has_positioned_objects_;
-  }
 
   void AddSvgTextDescendant(LayoutBox& svg_text);
   void RemoveSvgTextDescendant(LayoutBox& svg_text);
@@ -191,10 +174,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   LayoutBox* CreateAnonymousBoxWithSameTypeAs(
       const LayoutObject* parent) const override;
-
-#if DCHECK_IS_ON()
-  void CheckPositionedObjectsNeedLayout();
-#endif
 
   // This method returns the size that percentage logical heights should
   // resolve against *if* this LayoutBlock is the containing block for the
@@ -236,14 +215,13 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
  protected:
   void WillBeDestroyed() override;
 
-  void UpdateLayout() override;
+  void UpdateLayout() override {
+    NOT_DESTROYED();
+    NOTREACHED_NORETURN();
+  }
 
  public:
   void Paint(const PaintInfo&) const override;
-  virtual void PaintObject(const PaintInfo&,
-                           const PhysicalOffset& paint_offset) const;
-  virtual void PaintChildren(const PaintInfo&,
-                             const PhysicalOffset& paint_offset) const;
   MinMaxSizes PreferredLogicalWidths() const override;
 
   virtual bool HasLineIfEmpty() const;
@@ -303,8 +281,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   virtual void RemoveLeftoverAnonymousBlock(LayoutBlock* child);
 
-  TrackedLayoutBoxLinkedHashSet* PositionedObjectsInternal() const;
-
  protected:
   void InvalidatePaint(const PaintInvalidatorContext&) const override;
 
@@ -326,11 +302,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
 
   LayoutObjectChildList children_;
 
-  // Note these quirk values can't be put in LayoutBlockRareData since they are
-  // set too frequently.
-  unsigned descendants_with_floats_marked_for_layout_ : 1;
-
-  unsigned has_positioned_objects_ : 1;
   unsigned has_svg_text_descendants_ : 1;
 
   // FIXME: This is temporary as we move code that accesses block flow

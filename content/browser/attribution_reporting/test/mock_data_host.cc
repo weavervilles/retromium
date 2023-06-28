@@ -63,7 +63,7 @@ void MockDataHost::SourceDataAvailable(
 void MockDataHost::TriggerDataAvailable(
     attribution_reporting::SuitableOrigin reporting_origin,
     attribution_reporting::TriggerRegistration data,
-    absl::optional<network::TriggerVerification> verification) {
+    std::vector<network::TriggerVerification> verifications) {
   trigger_data_.push_back(std::move(data));
   if (trigger_data_.size() < min_trigger_data_count_ ||
       source_data_.size() < min_source_data_count_) {
@@ -72,16 +72,16 @@ void MockDataHost::TriggerDataAvailable(
   wait_loop_.Quit();
 }
 
-void MockDataHost::OsSourceDataAvailable(const GURL& registration_url) {
-  os_sources_.push_back(registration_url);
+void MockDataHost::OsSourceDataAvailable(std::vector<GURL> registration_urls) {
+  os_sources_.emplace_back(std::move(registration_urls));
   if (os_sources_.size() < min_os_sources_count_) {
     return;
   }
   wait_loop_.Quit();
 }
 
-void MockDataHost::OsTriggerDataAvailable(const GURL& registration_url) {
-  os_triggers_.push_back(registration_url);
+void MockDataHost::OsTriggerDataAvailable(std::vector<GURL> registration_urls) {
+  os_triggers_.emplace_back(std::move(registration_urls));
   if (os_triggers_.size() < min_os_triggers_count_) {
     return;
   }

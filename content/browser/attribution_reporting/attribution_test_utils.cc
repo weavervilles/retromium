@@ -14,11 +14,11 @@
 #include "base/check.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
+#include "base/functional/function_ref.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind.h"
 #include "base/time/time.h"
-#include "components/aggregation_service/aggregation_service.mojom-forward.h"
 #include "components/attribution_reporting/aggregatable_dedup_key.h"
 #include "components/attribution_reporting/aggregatable_trigger_data.h"
 #include "components/attribution_reporting/destination_set.h"
@@ -28,6 +28,7 @@
 #include "components/attribution_reporting/suitable_origin.h"
 #include "components/attribution_reporting/test_utils.h"
 #include "components/attribution_reporting/trigger_registration.h"
+#include "content/browser/attribution_reporting/attribution_config.h"
 #include "content/browser/attribution_reporting/attribution_manager.h"
 #include "content/browser/attribution_reporting/attribution_observer.h"
 #include "content/browser/attribution_reporting/attribution_reporting.mojom.h"
@@ -38,8 +39,10 @@
 #include "content/public/browser/attribution_data_model.h"
 #include "net/base/net_errors.h"
 #include "net/base/schemeful_site.h"
+#include "net/http/structured_headers.h"
 #include "services/network/public/cpp/trigger_verification.h"
 #include "services/network/public/cpp/trigger_verification_test_utils.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/numeric/int128.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
@@ -82,6 +85,34 @@ absl::optional<base::Time> GetReportWindowTimeForTesting(
     return absl::nullopt;
   }
   return source_time + *declared_window;
+}
+
+AttributionConfig::RateLimitConfig RateLimitWith(
+    base::FunctionRef<void(AttributionConfig::RateLimitConfig&)> f) {
+  AttributionConfig::RateLimitConfig limit;
+  f(limit);
+  return limit;
+}
+
+AttributionConfig::EventLevelLimit EventLevelLimitWith(
+    base::FunctionRef<void(content::AttributionConfig::EventLevelLimit&)> f) {
+  content::AttributionConfig::EventLevelLimit limit;
+  f(limit);
+  return limit;
+}
+
+AttributionConfig::AggregateLimit AggregateLimitWith(
+    base::FunctionRef<void(content::AttributionConfig::AggregateLimit&)> f) {
+  content::AttributionConfig::AggregateLimit limit;
+  f(limit);
+  return limit;
+}
+
+AttributionConfig AttributionConfigWith(
+    base::FunctionRef<void(AttributionConfig&)> f) {
+  AttributionConfig limit;
+  f(limit);
+  return limit;
 }
 
 // Builds an impression with default values. This is done as a builder because
@@ -339,10 +370,9 @@ TriggerBuilder& TriggerBuilder::SetDebugReporting(bool debug_reporting) {
   return *this;
 }
 
-TriggerBuilder& TriggerBuilder::SetAggregationCoordinator(
-    ::aggregation_service::mojom::AggregationCoordinator
-        aggregation_coordinator) {
-  aggregation_coordinator_ = aggregation_coordinator;
+TriggerBuilder& TriggerBuilder::SetAggregationCoordinatorOrigin(
+    SuitableOrigin aggregation_coordinator_origin) {
+  aggregation_coordinator_origin_ = std::move(aggregation_coordinator_origin);
   return *this;
 }
 
@@ -353,9 +383,9 @@ TriggerBuilder& TriggerBuilder::SetSourceRegistrationTimeConfig(
   return *this;
 }
 
-TriggerBuilder& TriggerBuilder::SetVerification(
-    absl::optional<network::TriggerVerification> verification) {
-  verification_ = std::move(verification);
+TriggerBuilder& TriggerBuilder::SetVerifications(
+    std::vector<network::TriggerVerification> verifications) {
+  verifications_ = std::move(verifications);
   return *this;
 }
 
@@ -385,9 +415,9 @@ AttributionTrigger TriggerBuilder::Build(
           {attribution_reporting::AggregatableDedupKey(
               /*dedup_key=*/aggregatable_dedup_key_, FilterPair())},
           std::move(event_triggers), aggregatable_trigger_data_,
-          aggregatable_values_, debug_reporting_, aggregation_coordinator_,
-          source_registration_time_config_),
-      destination_origin_, verification_, is_within_fenced_frame_);
+          aggregatable_values_, debug_reporting_,
+          aggregation_coordinator_origin_, source_registration_time_config_),
+      destination_origin_, verifications_, is_within_fenced_frame_);
 }
 
 AttributionInfoBuilder::AttributionInfoBuilder(
@@ -457,10 +487,9 @@ ReportBuilder& ReportBuilder::SetAggregatableHistogramContributions(
   return *this;
 }
 
-ReportBuilder& ReportBuilder::SetAggregationCoordinator(
-    ::aggregation_service::mojom::AggregationCoordinator
-        aggregation_coordinator) {
-  aggregation_coordinator_ = aggregation_coordinator;
+ReportBuilder& ReportBuilder::SetAggregationCoordinatorOrigin(
+    SuitableOrigin aggregation_coordinator_origin) {
+  aggregation_coordinator_origin_ = std::move(aggregation_coordinator_origin);
   return *this;
 }
 
@@ -493,7 +522,7 @@ AttributionReport ReportBuilder::BuildAggregatableAttribution() const {
       /*failed_send_attempts=*/0,
       AttributionReport::AggregatableAttributionData(
           AttributionReport::CommonAggregatableData(
-              aggregation_coordinator_, verification_token_,
+              aggregation_coordinator_origin_, verification_token_,
               source_registration_time_config_),
           contributions_, source_));
 }
@@ -505,7 +534,7 @@ AttributionReport ReportBuilder::BuildNullAggregatable() const {
       /*failed_send_attempts=*/0,
       AttributionReport::NullAggregatableData(
           AttributionReport::CommonAggregatableData(
-              aggregation_coordinator_, verification_token_,
+              aggregation_coordinator_origin_, verification_token_,
               source_registration_time_config_),
           source_.common_info().reporting_origin(), source_.source_time()));
 }
@@ -598,7 +627,7 @@ bool operator==(const AttributionReport::CommonAggregatableData& a,
                 const AttributionReport::CommonAggregatableData& b) {
   const auto tie = [](const AttributionReport::CommonAggregatableData& data) {
     return std::make_tuple(data.verification_token,
-                           data.aggregation_coordinator,
+                           data.aggregation_coordinator_origin,
                            data.source_registration_time_config);
   };
   return tie(a) == tie(b);
@@ -714,6 +743,8 @@ std::ostream& operator<<(std::ostream& out,
       return out << "deduplicated";
     case AttributionTrigger::AggregatableResult::kReportWindowPassed:
       return out << "reportWindowPassed";
+    case AttributionTrigger::AggregatableResult::kExcessiveReports:
+      return out << "excessiveReports";
   }
 }
 
@@ -756,13 +787,14 @@ std::ostream& operator<<(std::ostream& out,
                          const AttributionTrigger& conversion) {
   out << "{registration=" << conversion.registration()
       << ",destination_origin=" << conversion.destination_origin()
-      << ",is_within_fenced_frame=" << conversion.is_within_fenced_frame();
-
-  if (conversion.verification().has_value()) {
-    out << ",verification=" << conversion.verification().value();
-  } else {
-    out << ",verification=(null)";
+      << ",is_within_fenced_frame=" << conversion.is_within_fenced_frame()
+      << ",verifications=[";
+  const char* separator = "";
+  for (const auto& verification : conversion.verifications()) {
+    out << separator << verification;
+    separator = ", ";
   }
+  out << "]";
 
   return out << "}";
 }
@@ -851,7 +883,10 @@ std::ostream& operator<<(std::ostream& out,
 std::ostream& operator<<(
     std::ostream& out,
     const AttributionReport::CommonAggregatableData& data) {
-  out << "{aggregation_coordinator=" << data.aggregation_coordinator
+  out << "{aggregation_coordinator_origin="
+      << (data.aggregation_coordinator_origin.has_value()
+              ? data.aggregation_coordinator_origin->Serialize()
+              : "null")
       << ",verification_token=";
 
   if (const auto& verification_token = data.verification_token;
@@ -916,8 +951,10 @@ std::ostream& operator<<(std::ostream& out, SendResult::Status status) {
       return out << "kFailure";
     case SendResult::Status::kDropped:
       return out << "kDropped";
-    case SendResult::Status::kFailedToAssemble:
-      return out << "kFailedToAssemble";
+    case SendResult::Status::kAssemblyFailure:
+      return out << "kAssemblyFailure";
+    case SendResult::Status::kTransientAssemblyFailure:
+      return out << "kTransientAssemblyFailure";
   }
 }
 
@@ -1010,8 +1047,8 @@ TriggerRegistrationMatcherConfig::TriggerRegistrationMatcherConfig(
         aggregatable_trigger_data,
     ::testing::Matcher<const attribution_reporting::AggregatableValues&>
         aggregatable_values,
-    ::testing::Matcher<::aggregation_service::mojom::AggregationCoordinator>
-        aggregation_coordinator,
+    ::testing::Matcher<const absl::optional<SuitableOrigin>&>
+        aggregation_coordinator_origin,
     ::testing::Matcher<
         attribution_reporting::mojom::SourceRegistrationTimeConfig>
         source_registration_time_config)
@@ -1022,6 +1059,7 @@ TriggerRegistrationMatcherConfig::TriggerRegistrationMatcherConfig(
       debug_reporting(std::move(debug_reporting)),
       aggregatable_trigger_data(std::move(aggregatable_trigger_data)),
       aggregatable_values(std::move(aggregatable_values)),
+      aggregation_coordinator_origin(std::move(aggregation_coordinator_origin)),
       source_registration_time_config(
           std::move(source_registration_time_config)) {}
 
@@ -1051,10 +1089,10 @@ TriggerRegistrationMatches(const TriggerRegistrationMatcherConfig& cfg) {
       Field("aggregatable_values",
             &attribution_reporting::TriggerRegistration::aggregatable_values,
             cfg.aggregatable_values),
-      Field(
-          "aggregation_coordinator",
-          &attribution_reporting::TriggerRegistration::aggregation_coordinator,
-          cfg.aggregation_coordinator),
+      Field("aggregation_coordinator_origin",
+            &attribution_reporting::TriggerRegistration::
+                aggregation_coordinator_origin,
+            cfg.aggregation_coordinator_origin),
       Field("source_registration_time_config",
             &attribution_reporting::TriggerRegistration::
                 source_registration_time_config,
@@ -1086,8 +1124,8 @@ AttributionTriggerMatcherConfig::~AttributionTriggerMatcherConfig() = default;
       Property("is_within_fenced_frame",
                &AttributionTrigger::is_within_fenced_frame,
                cfg.is_within_fenced_frame),
-      Property("trigger_verification", &AttributionTrigger::verification,
-               cfg.verification));
+      Property("verifications", &AttributionTrigger::verifications,
+               cfg.verifications));
 }
 
 std::vector<AttributionReport> GetAttributionReportsForTesting(
@@ -1167,6 +1205,73 @@ std::ostream& operator<<(std::ostream& out, const OsRegistration& r) {
   return out << "{registration_url=" << r.registration_url
              << ",top_level_origin=" << r.top_level_origin
              << ",type=" << r.GetType() << "}";
+}
+
+namespace {
+
+void CheckAttributionReportingHeader(
+    const std::string& header,
+    const std::vector<std::string>& required_keys,
+    const std::vector<std::string>& prohibited_keys) {
+  auto dict = net::structured_headers::ParseDictionary(header);
+  EXPECT_TRUE(dict.has_value());
+  if (!dict.has_value()) {
+    return;
+  }
+
+  for (const auto& key : required_keys) {
+    EXPECT_TRUE(dict->contains(key)) << key;
+  }
+
+  for (const auto& key : prohibited_keys) {
+    EXPECT_FALSE(dict->contains(key)) << key;
+  }
+}
+
+}  // namespace
+
+void ExpectValidAttributionReportingEligibleHeaderForEventBeacon(
+    const std::string& header) {
+  CheckAttributionReportingHeader(
+      header,
+      /*required_keys=*/{"event-source"},
+      /*prohibited_keys=*/{"navigation-source", "trigger"});
+}
+
+void ExpectValidAttributionReportingEligibleHeaderForImg(
+    const std::string& header) {
+  CheckAttributionReportingHeader(header,
+                                  /*required_keys=*/{"event-source", "trigger"},
+                                  /*prohibited_keys=*/{"navigation-source"});
+}
+
+void ExpectValidAttributionReportingEligibleHeaderForNavigation(
+    const std::string& header) {
+  CheckAttributionReportingHeader(
+      header,
+      /*required_keys=*/{"navigation-source"},
+      /*prohibited_keys=*/{"event-source", "trigger"});
+}
+
+void ExpectValidAttributionReportingSupportHeader(const std::string& header,
+                                                  bool web_expected,
+                                                  bool os_expected) {
+  std::vector<std::string> required_keys;
+  std::vector<std::string> prohibited_keys;
+
+  if (web_expected) {
+    required_keys.emplace_back("web");
+  } else {
+    prohibited_keys.emplace_back("web");
+  }
+
+  if (os_expected) {
+    required_keys.emplace_back("os");
+  } else {
+    prohibited_keys.emplace_back("os");
+  }
+
+  CheckAttributionReportingHeader(header, required_keys, prohibited_keys);
 }
 
 }  // namespace content

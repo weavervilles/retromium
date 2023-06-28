@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/text/text_boundaries.h"
 #include "third_party/blink/renderer/platform/wtf/decimal.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -38,6 +39,7 @@ EditContext::EditContext(ScriptState* script_state, const EditContextInit* dict)
     : ActiveScriptWrappable<EditContext>({}),
       ExecutionContextClient(ExecutionContext::From(script_state)) {
   DCHECK(IsMainThread());
+  UseCounter::Count(GetExecutionContext(), WebFeature::kEditContext);
 
   if (dict->hasText())
     text_ = dict->text();
@@ -754,6 +756,15 @@ void EditContext::AttachElement(Element* element_to_attach) {
                      &Member<Element>::Get))
     return;
 
+  // Currently an EditContext can only have one associated element.
+  // However, the spec is written with the expectation that this limit may be
+  // relaxed in the future; e.g. attachedElements() returns a list. For now, the
+  // EditContext implementation still uses a list of attached_elements_, but
+  // this could be changed to just a single Element pointer. See
+  // https://w3c.github.io/edit-context/#editcontext-interface
+  CHECK(attached_elements_.empty())
+      << "An EditContext can be only be associated with a single element";
+
   attached_elements_.push_back(element_to_attach);
 }
 
@@ -894,10 +905,18 @@ bool EditContext::FirstRectForCharacterRange(uint32_t location,
     }
   }
 
-  // If we couldn't get a result from the composition bounds, we'll fall back to
-  // using the control bounds. In this case the IME might not be drawn exactly
-  // in the right spot, but will at least be adjacent to the editable region
-  // rather than in the corner of the screen.
+  // If we couldn't get a result from the composition bounds then we'll fall
+  // back to using the selection bounds, since these will generally be close to
+  // where the composition is happening.
+  if (!selection_bounds_.IsEmpty()) {
+    rect_in_viewport = selection_bounds_;
+    return true;
+  }
+
+  // If we have neither composition bounds nor selection bounds, we'll fall back
+  // to using the control bounds. In this case the IME might not be drawn
+  // exactly in the right spot, but will at least be adjacent to the editable
+  // region rather than in the corner of the screen.
   if (!control_bounds_.IsEmpty()) {
     rect_in_viewport = control_bounds_;
     return true;

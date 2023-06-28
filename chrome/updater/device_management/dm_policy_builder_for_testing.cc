@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "chrome/updater/protos/omaha_settings.pb.h"
-#include "chrome/updater/util/unittest_util.h"
+#include "chrome/updater/util/unit_test_util.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "crypto/rsa_private_key.h"
 #include "crypto/signature_creator.h"
@@ -166,7 +166,7 @@ GetDefaultTestingOmahaPolicyProto() {
   omaha_settings->set_proxy_mode("pac_script");
   omaha_settings->set_proxy_pac_url("foo.c/proxy.pa");
   omaha_settings->set_install_default(
-      ::wireless_android_enterprise_devicemanagement::INSTALL_ENABLED);
+      ::wireless_android_enterprise_devicemanagement::INSTALL_DEFAULT_ENABLED);
   omaha_settings->set_update_default(
       ::wireless_android_enterprise_devicemanagement::MANUAL_UPDATES_ONLY);
 

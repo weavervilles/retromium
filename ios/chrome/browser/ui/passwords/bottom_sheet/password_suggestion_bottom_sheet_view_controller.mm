@@ -5,62 +5,32 @@
 #import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_view_controller.h"
 
 #import "base/mac/foundation_util.h"
-#import "base/memory/raw_ptr.h"
-#import "base/strings/sys_string_conversions.h"
 #import "components/autofill/ios/browser/form_suggestion.h"
-#import "components/password_manager/core/browser/password_ui_utils.h"
 #import "components/password_manager/core/browser/ui/credential_ui_entry.h"
 #import "components/password_manager/ios/shared_password_controller.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_url_item.h"
-#import "ios/chrome/browser/shared/ui/table_view/chrome_table_view_controller.h"
-#import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_constants.h"
 #import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_delegate.h"
 #import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_handler.h"
 #import "ios/chrome/browser/ui/settings/password/branded_navigation_item_title_view.h"
 #import "ios/chrome/browser/ui/settings/password/create_password_manager_title_view.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
-#import "ios/chrome/common/ui/favicon/favicon_attributes.h"
+#import "ios/chrome/common/ui/confirmation_alert/confirmation_alert_action_handler.h"
 #import "ios/chrome/common/ui/favicon/favicon_view.h"
 #import "ios/chrome/common/ui/table_view/table_view_cells_constants.h"
 #import "ios/chrome/grit/ios_google_chrome_strings.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util_mac.h"
-#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-namespace {
-// Base height value for the bottom sheet without the table view.
-// TODO(crbug.com/1422350): This needs some proper calculation.
-CGFloat const kBaseHeightForBottomSheet = 195;
-
-// Sets a custom radius for the half sheet presentation.
-CGFloat const kHalfSheetCornerRadius = 20;
-
-// Row height for each cell in the table view.
-CGFloat const kTableViewRowHeight = 75;
-
-// Radius size of the table view.
-CGFloat const kTableViewCornerRadius = 10;
-
-// TableView's width constraint multiplier in portrait mode.
-CGFloat const kPortraitTableViewWidthMultiplier = 0.95;
-
-// TableView's width constraint multiplier in landscape mode.
-CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
-}  // namespace
-
 @interface PasswordSuggestionBottomSheetViewController () <
     ConfirmationAlertActionHandler,
-    UIGestureRecognizerDelegate,
     UITableViewDataSource,
     UITableViewDelegate> {
-  // Row in the table of suggestions of the use selectesd suggestion.
-  NSInteger _row;
-
   // If YES: the table view is currently showing a single suggestion
   // If NO: the table view is currently showing all suggestions
   BOOL _tableViewIsMinimized;
@@ -84,9 +54,13 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
   // The property is defined by PasswordSuggestionBottomSheetConsumer protocol.
   NSArray<FormSuggestion*>* _suggestions;
 
-  // The password controller handler used to open the password manager.
-  id<PasswordSuggestionBottomSheetHandler> _handler;
+  // The current's page domain. This is used for the password bottom sheet
+  // description label.
+  NSString* _domain;
 }
+
+// The password controller handler used to open the password manager.
+@property(nonatomic, weak) id<PasswordSuggestionBottomSheetHandler> handler;
 
 @end
 
@@ -96,9 +70,7 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
     (id<PasswordSuggestionBottomSheetHandler>)handler {
   self = [super init];
   if (self) {
-    _handler = handler;
-
-    [self setUpBottomSheet];
+    self.handler = handler;
   }
   return self;
 }
@@ -109,37 +81,23 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
   _tableViewIsMinimized = YES;
 
   self.titleView = [self setUpTitleView];
-  self.underTitleView = [self createTableView];
 
   // Set the properties read by the super when constructing the
   // views in `-[ConfirmationAlertViewController viewDidLoad]`.
-  self.imageHasFixedSize = YES;
-  self.showsVerticalScrollIndicator = NO;
-  self.showDismissBarButton = NO;
-  self.customSpacing = 0;
-  self.customSpacingAfterImage = 0;
-  self.titleTextStyle = UIFontTextStyleTitle2;
-  self.topAlignedLayout = YES;
   self.actionHandler = self;
-  self.scrollEnabled = NO;
 
   self.primaryActionString =
       l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_PASSWORD);
   self.secondaryActionString =
-      l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_NO_THANKS);
+      l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_KEYBOARD);
 
   [super viewDidLoad];
-
-  // Assign table view's width anchor now that it is in the same hierarchy as
-  // the top view.
-  [self createTableViewWidthConstraint:self.view.layoutMarginsGuide];
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size
        withTransitionCoordinator:
            (id<UIViewControllerTransitionCoordinator>)coordinator {
   [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
-  [self adjustTableViewWidthConstraint];
   if (!_tableViewIsMinimized) {
     // Recompute sheet height and enable/disable scrolling if required.
     __weak __typeof(self) weakSelf = self;
@@ -153,28 +111,54 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
   }
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+  // Update height constraints for the table view.
+  CGFloat minimizedTableViewHeight = _tableView.contentSize.height;
+  if (minimizedTableViewHeight > 0 &&
+      minimizedTableViewHeight != [self tableViewEstimatedRowHeight]) {
+    _minimizedHeightConstraint.constant = minimizedTableViewHeight;
+    _fullHeightConstraint.constant =
+        minimizedTableViewHeight * _suggestions.count;
+  }
+
+  [super viewWillAppear:animated];
+}
+
 - (void)viewWillDisappear:(BOOL)animated {
-  [self.delegate refocus];
+  [self.delegate dismiss];
 }
 
 #pragma mark - PasswordSuggestionBottomSheetConsumer
 
-- (void)setSuggestions:(NSArray<FormSuggestion*>*)suggestions {
+- (void)setSuggestions:(NSArray<FormSuggestion*>*)suggestions
+             andDomain:(NSString*)domain {
   _suggestions = suggestions;
+  _domain = domain;
 }
 
 - (void)dismiss {
-  [self dismissViewControllerAnimated:NO completion:NULL];
+  __weak __typeof(self) weakSelf = self;
+  [self dismissViewControllerAnimated:NO
+                           completion:^{
+                             [weakSelf.handler stop];
+                           }];
 }
 
 #pragma mark - UITableViewDelegate
 
 - (void)tableView:(UITableView*)tableView
     didSelectRowAtIndexPath:(NSIndexPath*)indexPath {
-  _row = indexPath.row;
+  if (_suggestions.count <= 1) {
+    return;
+  }
 
   if (_tableViewIsMinimized) {
     _tableViewIsMinimized = NO;
+    [_tableView cellForRowAtIndexPath:indexPath].accessoryView = nil;
+    // Make separator visible on first cell.
+    [_tableView cellForRowAtIndexPath:indexPath].separatorInset =
+        UIEdgeInsetsMake(0.f, kTableViewHorizontalSpacing, 0.f, 0.f);
+    [self addSuggestionsToTableView];
 
     // Update table view height.
     __weak __typeof(self) weakSelf = self;
@@ -186,8 +170,7 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
     [self expand];
   }
 
-  // Refresh cells to show the checkmark icon next to the selected suggestion.
-  [_tableView reloadData];
+  [super tableView:tableView didSelectRowAtIndexPath:indexPath];
 }
 
 // Long press open context menu.
@@ -239,9 +222,11 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
   // and URL.
   cell.titleLabel.text = [self suggestionAtRow:indexPath.row];
   cell.titleLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-  cell.URLLabel.text = [self descriptionAtRow:indexPath.row];
+  cell.URLLabel.text = _domain;
   cell.URLLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
   cell.URLLabel.hidden = NO;
+
+  cell.userInteractionEnabled = YES;
 
   // Make separator invisible on last cell
   CGFloat separatorLeftMargin =
@@ -250,8 +235,12 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
           : kTableViewHorizontalSpacing;
   cell.separatorInset = UIEdgeInsetsMake(0.f, separatorLeftMargin, 0.f, 0.f);
 
-  [cell setFaviconContainerBackgroundColor:
-            [UIColor colorNamed:kPrimaryBackgroundColor]];
+  [cell
+      setFaviconContainerBackgroundColor:
+          (self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark)
+              ? [UIColor colorNamed:kSeparatorColor]
+              : [UIColor colorNamed:kPrimaryBackgroundColor]];
+  [cell setFaviconContainerBorderColor:UIColor.clearColor];
   cell.titleLabel.textColor = [UIColor colorNamed:kTextPrimaryColor];
   cell.backgroundColor = [UIColor colorNamed:kSecondaryBackgroundColor];
 
@@ -262,17 +251,6 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
         initWithImage:DefaultSymbolTemplateWithPointSize(
                           kChevronDownSymbol, kSymbolAccessoryPointSize)];
     cell.accessoryView.tintColor = [UIColor colorNamed:kTextQuaternaryColor];
-  } else if (_row == indexPath.row) {
-    // The table view is showing all suggestions, and this cell contains the
-    // currently selected suggestion, so we display a checkmark on this cell.
-    cell.accessoryView = [[UIImageView alloc]
-        initWithImage:DefaultSymbolTemplateWithPointSize(
-                          kCheckmarkSymbol, kSymbolAccessoryPointSize)];
-    cell.accessoryView.tintColor = [UIColor colorNamed:kBlueColor];
-  } else {
-    // The table view is showing all suggestions, and this cell does not contain
-    // the currently selected suggestion.
-    cell.accessoryView = nil;
   }
   [self loadFaviconAtIndexPath:indexPath forCell:cell];
   return cell;
@@ -282,7 +260,7 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
 
 - (void)confirmationAlertPrimaryAction {
   // Use password button
-  [self.delegate disableRefocus];
+  [self.delegate willSelectSuggestion:_tableView.indexPathForSelectedRow.row];
   __weak __typeof(self) weakSelf = self;
   [self dismissViewControllerAnimated:NO
                            completion:^{
@@ -299,111 +277,43 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
 
 #pragma mark - Private
 
-// Configures the bottom sheet's appearance and detents.
-- (void)setUpBottomSheet {
-  self.modalPresentationStyle = UIModalPresentationPageSheet;
-  UISheetPresentationController* presentationController =
-      self.sheetPresentationController;
-  presentationController.prefersEdgeAttachedInCompactHeight = YES;
-  presentationController.widthFollowsPreferredContentSizeWhenEdgeAttached = YES;
-  if (@available(iOS 16, *)) {
-    CGFloat bottomSheetHeight = [self initialHeight];
-    auto detentBlock = ^CGFloat(
-        id<UISheetPresentationControllerDetentResolutionContext> context) {
-      return bottomSheetHeight;
-    };
-    UISheetPresentationControllerDetent* customDetent =
-        [UISheetPresentationControllerDetent
-            customDetentWithIdentifier:@"customDetent"
-                              resolver:detentBlock];
-    presentationController.detents = @[ customDetent ];
-    presentationController.selectedDetentIdentifier = @"customDetent";
-  } else {
-    presentationController.detents = @[
-      [UISheetPresentationControllerDetent mediumDetent],
-      [UISheetPresentationControllerDetent largeDetent]
-    ];
-  }
-  presentationController.preferredCornerRadius = kHalfSheetCornerRadius;
-}
-
 // Configures the title view of this ViewController.
 - (UIView*)setUpTitleView {
   NSString* title = l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_TITLE);
-  return password_manager::CreatePasswordManagerTitleView(title);
+  UIView* titleView = password_manager::CreatePasswordManagerTitleView(title);
+  titleView.backgroundColor = [UIColor colorNamed:kPrimaryBackgroundColor];
+  return titleView;
 }
 
 // Returns the string to display at a given row in the table view.
 - (NSString*)suggestionAtRow:(NSInteger)row {
-  FormSuggestion* formSuggestion = [_suggestions objectAtIndex:row];
-
-  // Removing suffix ' ••••••••' appended to the username in the suggestion.
-  NSString* username = formSuggestion.value;
-  if ([username containsString:kPasswordFormSuggestionSuffix]) {
-    username = [username
-        stringByReplacingOccurrencesOfString:kPasswordFormSuggestionSuffix
-                                  withString:@""];
-  }
-  return username;
-}
-
-// Returns the display description at a given row in the table view.
-- (NSString*)descriptionAtRow:(NSInteger)row {
-  FormSuggestion* formSuggestion = [_suggestions objectAtIndex:row];
-  GURL URL(base::SysNSStringToUTF8(formSuggestion.displayDescription));
-  if (!URL.is_empty()) {
-    return base::SysUTF8ToNSString(
-        password_manager::GetShownOrigin(url::Origin::Create(URL)));
-  }
-  return formSuggestion.displayDescription;
+  NSString* username = [self.delegate usernameAtRow:row];
+  return ([username length] == 0)
+             ? l10n_util::GetNSString(IDS_IOS_PASSWORD_BOTTOM_SHEET_NO_USERNAME)
+             : username;
 }
 
 // Creates the password bottom sheet's table view, initially at minimized
 // height.
 - (UITableView*)createTableView {
-  CGRect frame = [[UIScreen mainScreen] bounds];
-  _tableView = [[UITableView alloc] initWithFrame:frame
-                                            style:UITableViewStylePlain];
+  _tableView = [super createTableView];
 
-  _tableView.layer.cornerRadius = kTableViewCornerRadius;
-  _tableView.rowHeight = [self rowHeight];
-  _tableView.scrollEnabled = NO;
-  _tableView.showsVerticalScrollIndicator = NO;
-  _tableView.delegate = self;
   _tableView.dataSource = self;
+  _tableView.accessibilityIdentifier =
+      kPasswordSuggestionBottomSheetTableViewId;
   [_tableView registerClass:TableViewURLCell.class
       forCellReuseIdentifier:@"cell"];
 
-  _minimizedHeightConstraint =
-      [_tableView.heightAnchor constraintEqualToConstant:_tableView.rowHeight];
+  _minimizedHeightConstraint = [_tableView.heightAnchor
+      constraintEqualToConstant:[self tableViewEstimatedRowHeight]];
   _minimizedHeightConstraint.active = YES;
 
   _fullHeightConstraint = [_tableView.heightAnchor
-      constraintEqualToConstant:_tableView.rowHeight * _suggestions.count];
+      constraintEqualToConstant:[self tableViewEstimatedRowHeight] *
+                                _suggestions.count];
   _fullHeightConstraint.active = NO;
 
-  _tableView.translatesAutoresizingMaskIntoConstraints = NO;
-
   return _tableView;
-}
-
-// Creates the tableview's width constraints and set their initial active state.
-- (void)createTableViewWidthConstraint:(UILayoutGuide*)margins {
-  _portraitTableWidthConstraint = [_tableView.widthAnchor
-      constraintGreaterThanOrEqualToAnchor:margins.widthAnchor
-                                multiplier:kPortraitTableViewWidthMultiplier];
-  _landscapeTableWidthConstraint = [_tableView.widthAnchor
-      constraintGreaterThanOrEqualToAnchor:margins.widthAnchor
-                                multiplier:kLandscapeTableViewWidthMultiplier];
-  [self adjustTableViewWidthConstraint];
-}
-
-// Change the tableview's width constraint based on the screen's orientation.
-- (void)adjustTableViewWidthConstraint {
-  BOOL isLandscape =
-      UIDeviceOrientationIsLandscape([UIDevice currentDevice].orientation);
-  _landscapeTableWidthConstraint.active = isLandscape;
-  _portraitTableWidthConstraint.active = !isLandscape;
 }
 
 // Loads the favicon associated with the provided cell.
@@ -431,7 +341,7 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
 
 // Notifies the delegate that a password suggestion was selected by the user.
 - (void)didSelectSuggestion {
-  [self.delegate didSelectSuggestion:_row];
+  [self.delegate didSelectSuggestion:_tableView.indexPathForSelectedRow.row];
 }
 
 // Returns whether the provided index path points to the last row of the table
@@ -440,77 +350,23 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
   return NSUInteger(indexPath.row) == (_suggestions.count - 1);
 }
 
-// Height of 1 row in the table view
-- (CGFloat)rowHeight {
-  // TODO(crbug.com/1422350): The row height below must be dynamic for
-  // accessibility.
-  return kTableViewRowHeight;
-}
-
-// Returns the initial height of the bottom sheet.
-- (CGFloat)initialHeight {
-  // Initial height for the bottom sheet while showing a single row.
-  return kBaseHeightForBottomSheet + [self rowHeight];
-}
-
-// Returns the desired height for the bottom sheet (can be larger than the
-// screen).
-- (CGFloat)fullHeight {
-  // Desired height for the bottom sheet while showing all rows.
-  return kBaseHeightForBottomSheet + ([self rowHeight] * _suggestions.count);
-}
-
-// Enables scrolling of the table view
-- (void)setTableViewScrollEnabled:(BOOL)enabled {
-  _tableView.scrollEnabled = enabled;
-  self.scrollEnabled = enabled;
-}
-
 // Performs the expand bottom sheet animation.
 - (void)expand {
-  UISheetPresentationController* presentationController =
-      self.sheetPresentationController;
-  if (@available(iOS 16, *)) {
-    // Expand to custom size (only available for iOS 16+).
-    CGFloat fullHeight = [self fullHeight];
+  [self expand:_suggestions.count];
+}
 
-    __weak __typeof(self) weakSelf = self;
-    auto fullHeightBlock = ^CGFloat(
-        id<UISheetPresentationControllerDetentResolutionContext> context) {
-      BOOL tooLarge = (fullHeight > context.maximumDetentValue);
-      [weakSelf setTableViewScrollEnabled:tooLarge];
-      return tooLarge ? context.maximumDetentValue : fullHeight;
-    };
-    UISheetPresentationControllerDetent* customDetentExpand =
-        [UISheetPresentationControllerDetent
-            customDetentWithIdentifier:@"customDetentExpand"
-                              resolver:fullHeightBlock];
-    NSMutableArray* currentDetents =
-        [presentationController.detents mutableCopy];
-    [currentDetents addObject:customDetentExpand];
-    presentationController.detents = [currentDetents copy];
-    [presentationController animateChanges:^{
-      presentationController.selectedDetentIdentifier = @"customDetentExpand";
-    }];
-  } else {
-    // Expand to large detent.
-    [self setTableViewScrollEnabled:YES];
-    [presentationController animateChanges:^{
-      presentationController.selectedDetentIdentifier =
-          UISheetPresentationControllerDetentIdentifierLarge;
-    }];
+// Starting with a table view containing a single suggestion, add all other
+// suggestions to the table view.
+- (void)addSuggestionsToTableView {
+  [_tableView beginUpdates];
+  NSMutableArray<NSIndexPath*>* indexPaths =
+      [NSMutableArray arrayWithCapacity:_suggestions.count - 1];
+  for (NSUInteger i = 1; i < _suggestions.count; i++) {
+    [indexPaths addObject:[NSIndexPath indexPathForRow:i inSection:0]];
   }
-}
-
-// Opens the password manager settings page.
-- (void)displayPasswordManager {
-  [_handler displayPasswordManager];
-}
-
-// Opens the password details for form suggestion.
-- (void)displayPasswordDetailsForFormSuggestion:
-    (FormSuggestion*)formSuggestion {
-  [_handler displayPasswordDetailsForFormSuggestion:formSuggestion];
+  [_tableView insertRowsAtIndexPaths:indexPaths
+                    withRowAnimation:UITableViewRowAnimationNone];
+  [_tableView endUpdates];
 }
 
 // Creates the UI action used to open the password manager.
@@ -519,7 +375,7 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
   void (^passwordManagerButtonTapHandler)(UIAction*) = ^(UIAction* action) {
     // Open Password Manager.
     [weakSelf.delegate disableRefocus];
-    [weakSelf displayPasswordManager];
+    [weakSelf.handler displayPasswordManager];
   };
   UIImage* keyIcon =
       CustomSymbolWithPointSize(kPasswordSymbol, kSymbolActionPointSize);
@@ -539,7 +395,7 @@ CGFloat const kLandscapeTableViewWidthMultiplier = 0.65;
   void (^showDetailsButtonTapHandler)(UIAction*) = ^(UIAction* action) {
     // Open Password Details.
     [weakSelf.delegate disableRefocus];
-    [weakSelf displayPasswordDetailsForFormSuggestion:formSuggestion];
+    [weakSelf.handler displayPasswordDetailsForFormSuggestion:formSuggestion];
   };
 
   UIImage* infoIcon =

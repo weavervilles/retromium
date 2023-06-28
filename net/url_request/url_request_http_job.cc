@@ -58,6 +58,7 @@
 #include "net/filter/filter_source_stream.h"
 #include "net/filter/gzip_source_stream.h"
 #include "net/filter/source_stream.h"
+#include "net/filter/zstd_source_stream.h"
 #include "net/first_party_sets/first_party_set_metadata.h"
 #include "net/first_party_sets/same_party_context.h"
 #include "net/http/http_content_disposition.h"
@@ -261,6 +262,7 @@ void URLRequestHttpJob::Start() {
       request_->isolation_info().network_anonymization_key();
   request_info_.possibly_top_frame_origin =
       request_->isolation_info().top_frame_origin();
+  request_info_.frame_origin = request_->isolation_info().frame_origin();
   request_info_.is_subframe_document_resource =
       request_->isolation_info().request_type() ==
       net::IsolationInfo::RequestType::kSubFrame;
@@ -585,6 +587,10 @@ void URLRequestHttpJob::StartTransactionInternal() {
       transaction_->SetEarlyResponseHeadersCallback(
           early_response_headers_callback_);
       transaction_->SetResponseHeadersCallback(response_headers_callback_);
+      if (is_shared_dictionary_read_allowed_callback_) {
+        transaction_->SetIsSharedDictionaryReadAllowedCallback(
+            is_shared_dictionary_read_allowed_callback_);
+      }
 
       if (!throttling_entry_.get() ||
           !throttling_entry_->ShouldRejectRequest(*request_)) {
@@ -1255,6 +1261,7 @@ std::unique_ptr<SourceStream> URLRequestHttpJob::SetUpSourceStream() {
       case SourceStream::TYPE_BROTLI:
       case SourceStream::TYPE_DEFLATE:
       case SourceStream::TYPE_GZIP:
+      case SourceStream::TYPE_ZSTD:
         if (request_->accepted_stream_types() &&
             !request_->accepted_stream_types()->contains(source_type)) {
           // If the source type is disabled, we treat it
@@ -1283,6 +1290,9 @@ std::unique_ptr<SourceStream> URLRequestHttpJob::SetUpSourceStream() {
       case SourceStream::TYPE_GZIP:
       case SourceStream::TYPE_DEFLATE:
         downstream = GzipSourceStream::Create(std::move(upstream), type);
+        break;
+      case SourceStream::TYPE_ZSTD:
+        downstream = CreateZstdSourceStream(std::move(upstream));
         break;
       case SourceStream::TYPE_NONE:
       case SourceStream::TYPE_UNKNOWN:
@@ -1586,6 +1596,13 @@ void URLRequestHttpJob::SetEarlyResponseHeadersCallback(
   early_response_headers_callback_ = std::move(callback);
 }
 
+void URLRequestHttpJob::SetIsSharedDictionaryReadAllowedCallback(
+    base::RepeatingCallback<bool()> callback) {
+  DCHECK(!transaction_);
+  DCHECK(!is_shared_dictionary_read_allowed_callback_);
+  is_shared_dictionary_read_allowed_callback_ = std::move(callback);
+}
+
 void URLRequestHttpJob::SetResponseHeadersCallback(
     ResponseHeadersCallback callback) {
   DCHECK(!transaction_);
@@ -1642,19 +1659,11 @@ void URLRequestHttpJob::RecordCompletionHistograms(CompletionCause reason) {
       UMA_HISTOGRAM_TIMES("Net.HttpJob.TotalTimeCached", total_time);
       UMA_HISTOGRAM_CUSTOM_COUNTS("Net.HttpJob.PrefilterBytesRead.Cache",
                                   prefilter_bytes_read(), 1, 50000000, 50);
-
-      if (response_info_->unused_since_prefetch)
-        UMA_HISTOGRAM_COUNTS_1M("Net.Prefetch.HitBytes",
-                                prefilter_bytes_read());
     } else {
       UMA_HISTOGRAM_TIMES("Net.HttpJob.TotalTimeNotCached", total_time);
       UMA_HISTOGRAM_CUSTOM_COUNTS("Net.HttpJob.PrefilterBytesRead.Net",
                                   prefilter_bytes_read(), 1, 50000000, 50);
 
-      if (request_info_.load_flags & LOAD_PREFETCH) {
-        UMA_HISTOGRAM_COUNTS_1M("Net.Prefetch.PrefilterBytesReadFromNetwork",
-                                prefilter_bytes_read());
-      }
       if (is_https_google && used_quic) {
         UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTimeNotCached.Secure.Quic",
                                    total_time);

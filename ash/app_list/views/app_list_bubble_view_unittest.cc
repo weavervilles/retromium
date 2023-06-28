@@ -29,16 +29,16 @@
 #include "ash/app_list/views/scrollable_apps_grid_view.h"
 #include "ash/app_list/views/search_box_view.h"
 #include "ash/assistant/model/assistant_ui_model.h"
+#include "ash/constants/ash_features.h"
 #include "ash/controls/gradient_layer_delegate.h"
 #include "ash/controls/scroll_view_gradient_helper.h"
-#include "ash/drag_drop/drag_drop_controller.h"
 #include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/assistant/controller/assistant_ui_controller.h"
 #include "ash/public/cpp/style/color_provider.h"
 #include "ash/public/cpp/test/assistant_test_api.h"
-#include "ash/public/cpp/test/shell_test_api.h"
 #include "ash/shell.h"
 #include "ash/style/ash_color_provider.h"
+#include "ash/system/notification_center/notification_center_tray.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
@@ -196,30 +196,6 @@ class AppListBubbleViewDragTest : public AppListBubbleViewTest,
     scoped_feature_list_.InitWithFeatureState(
         app_list_features::kDragAndDropRefactor, GetParam());
     AppListBubbleViewTest::SetUp();
-  }
-
-  void MaybeRunDragAndDropSequence(std::list<base::OnceClosure>* tasks) {
-    if (!GetParam()) {
-      while (!tasks->empty()) {
-        std::move(tasks->front()).Run();
-        tasks->pop_front();
-      }
-      return;
-    }
-
-    ShellTestApi().drag_drop_controller()->SetLoopClosureForTesting(
-        base::BindLambdaForTesting([&]() {
-          auto task = std::move(tasks->front());
-          tasks->pop_front();
-          std::move(task).Run();
-        }),
-        base::DoNothing());
-    tasks->push_front(base::BindLambdaForTesting([&]() {
-      // Generate OnDragEnter() event for the host view.
-      GetEventGenerator()->MoveMouseBy(10, 10);
-    }));
-    // Start Drag and Drop Sequence by moving the mouse.
-    GetEventGenerator()->MoveMouseBy(10, 10);
   }
   base::test::ScopedFeatureList scoped_feature_list_;
 };
@@ -627,49 +603,6 @@ TEST_F(AppListBubbleViewTest, ClosingBubbleClearsSearch) {
   search_box_input = GetSearchBoxView()->search_box();
   EXPECT_TRUE(search_box_input->HasFocus());
   EXPECT_EQ(u"", search_box_input->GetText());
-}
-
-// Regression test for https://crbug.com/1313140
-TEST_F(AppListBubbleViewTest, CanOpenMessageCenterWithKeyboardShortcut) {
-  // Add a notification so there's something to focus in the message center.
-  auto notification = std::make_unique<message_center::Notification>(
-      message_center::NOTIFICATION_TYPE_SIMPLE, "id", u"Title", u"Message",
-      ui::ImageModel(), /*display_source=*/std::u16string(), GURL(),
-      message_center::NotifierId(), message_center::RichNotificationData(),
-      /*delegate=*/nullptr);
-  message_center::MessageCenter::Get()->AddNotification(
-      std::move(notification));
-
-  // Message center starts closed.
-  auto* system_tray = GetPrimaryUnifiedSystemTray();
-  ASSERT_FALSE(system_tray->IsMessageCenterBubbleShown());
-
-  // Open the launcher and do a search.
-  AddAppItems(1);
-  ShowAppList();
-  PressAndReleaseKey(ui::VKEY_A);
-
-  // Search box has focus.
-  views::Textfield* search_box_input = GetSearchBoxView()->search_box();
-  ASSERT_TRUE(search_box_input->HasFocus());
-
-  // Enable animations.
-  ui::ScopedAnimationDurationScaleMode duration(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
-
-  // Move focus to the message center notification area with Alt-Shift-N. The
-  // message center will open and the app list will dismiss.
-  PressAndReleaseKey(ui::VKEY_N, ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN);
-
-  // Wait for the app list hide animation to finish.
-  AppListBubbleView* view = GetBubblePresenter()->bubble_view_for_test();
-  ui::LayerAnimationStoppedWaiter().Wait(view->layer());
-
-  // Search box did not steal focus.
-  EXPECT_FALSE(search_box_input->HasFocus());
-
-  // Message center is still open.
-  EXPECT_TRUE(system_tray->IsMessageCenterBubbleShown());
 }
 
 TEST_F(AppListBubbleViewTest, SearchBoxTextUsesPrimaryTextColor) {
@@ -1296,7 +1229,7 @@ TEST_P(AppListBubbleViewDragTest, ReparentDragOutOfFolderClosesFolder) {
     generator->ReleaseLeftButton();
     EXPECT_FALSE(GetAppListTestHelper()->GetBubbleFolderView()->GetVisible());
   }));
-  MaybeRunDragAndDropSequence(&tasks);
+  MaybeRunDragAndDropSequenceForAppList(&tasks, /*is_touch=*/false);
 
   // End the drag.
   generator->ReleaseLeftButton();
@@ -1328,7 +1261,7 @@ TEST_P(AppListBubbleViewDragTest, DragItemInsideFolderDoesNotSelectItem) {
     EXPECT_FALSE(folder_view->items_grid_view()->has_selected_view());
     EXPECT_FALSE(GetFocusedView()) << GetFocusedViewName();
   }));
-  MaybeRunDragAndDropSequence(&tasks);
+  MaybeRunDragAndDropSequenceForAppList(&tasks, /*is_touch=*/false);
 }
 
 TEST_F(AppListBubbleViewTest, OpenFolderWithMouseDoesNotFocusItem) {
@@ -1667,7 +1600,7 @@ TEST_P(AppListBubbleViewDragTest, AutoScrollOnTopOfTheBubble) {
   }));
   tasks.push_back(
       base::BindLambdaForTesting([&]() { generator->ReleaseLeftButton(); }));
-  MaybeRunDragAndDropSequence(&tasks);
+  MaybeRunDragAndDropSequenceForAppList(&tasks, /*is_touch=*/false);
 }
 
 // Verifies that hidden app list bubble view does not attempt to change its
@@ -1684,6 +1617,79 @@ TEST_F(AppListBubbleViewTest, HiddenAppListPageNotSetDuringShutdown) {
   AppListModelProvider::Get()->ClearActiveModel();
   EXPECT_EQ(AppListBubblePage::kNone,
             GetAppListTestHelper()->GetBubbleView()->current_page_for_test());
+}
+
+class AppListBubbleViewWithQsRevampTest
+    : public AppListBubbleViewTest,
+      public testing::WithParamInterface<bool> {
+ public:
+  void SetUp() override {
+    scoped_feature_list_.InitWithFeatureState(features::kQsRevamp,
+                                              IsQsRevampEnabled());
+
+    AshTestBase::SetUp();
+  }
+
+  bool IsNotificationBubbleShown() {
+    return features::IsQsRevampEnabled()
+               ? GetPrimaryShelf()
+                     ->GetStatusAreaWidget()
+                     ->notification_center_tray()
+                     ->IsBubbleShown()
+               : GetPrimaryUnifiedSystemTray()->IsMessageCenterBubbleShown();
+  }
+
+  bool IsQsRevampEnabled() { return GetParam(); }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         AppListBubbleViewWithQsRevampTest,
+                         testing::Bool());
+
+// Regression test for https://crbug.com/1313140
+TEST_P(AppListBubbleViewWithQsRevampTest,
+       CanOpenMessageCenterWithKeyboardShortcut) {
+  // Add a notification so there's something to focus in the message center.
+  auto notification = std::make_unique<message_center::Notification>(
+      message_center::NOTIFICATION_TYPE_SIMPLE, "id", u"Title", u"Message",
+      ui::ImageModel(), /*display_source=*/std::u16string(), GURL(),
+      message_center::NotifierId(), message_center::RichNotificationData(),
+      /*delegate=*/nullptr);
+  message_center::MessageCenter::Get()->AddNotification(
+      std::move(notification));
+
+  // Message center starts closed.
+  ASSERT_FALSE(IsNotificationBubbleShown());
+
+  // Open the launcher and do a search.
+  AddAppItems(1);
+  ShowAppList();
+  PressAndReleaseKey(ui::VKEY_A);
+
+  // Search box has focus.
+  views::Textfield* search_box_input = GetSearchBoxView()->search_box();
+  ASSERT_TRUE(search_box_input->HasFocus());
+
+  // Enable animations.
+  ui::ScopedAnimationDurationScaleMode duration(
+      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
+
+  // Move focus to the message center notification area with Alt-Shift-N. The
+  // message center will open and the app list will dismiss.
+  PressAndReleaseKey(ui::VKEY_N, ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN);
+
+  // Wait for the app list hide animation to finish.
+  AppListBubbleView* view = GetBubblePresenter()->bubble_view_for_test();
+  ui::LayerAnimationStoppedWaiter().Wait(view->layer());
+
+  // Search box did not steal focus.
+  EXPECT_FALSE(search_box_input->HasFocus());
+
+  // Message center is still open.
+  EXPECT_TRUE(IsNotificationBubbleShown());
 }
 
 }  // namespace

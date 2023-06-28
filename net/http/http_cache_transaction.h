@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/memory/scoped_refptr.h"
@@ -104,10 +105,19 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // to the cache entry.
   LoadState GetWriterLoadState() const;
 
-  const CompletionRepeatingCallback& io_callback() { return io_callback_; }
-
   void SetIOCallBackForTest(CompletionRepeatingCallback cb) {
     io_callback_ = cb;
+  }
+
+  // Returns the IO callback specific to HTTPCache callbacks. This is done
+  // indirectly so the callbacks can be replaced when testing.
+  // TODO(https://crbug.com/1454228/): Find a cleaner way to do this so the
+  // callback can be called directly.
+  const CompletionRepeatingCallback& cache_io_callback() {
+    return cache_io_callback_;
+  }
+  void SetCacheIOCallBackForTest(CompletionRepeatingCallback cb) {
+    cache_io_callback_ = cb;
   }
 
   const NetLogWithSource& net_log() const;
@@ -160,6 +170,11 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   void SetResponseHeadersCallback(ResponseHeadersCallback callback) override;
   void SetEarlyResponseHeadersCallback(
       ResponseHeadersCallback callback) override;
+  void SetModifyRequestHeadersCallback(
+      base::RepeatingCallback<void(net::HttpRequestHeaders*)> callback)
+      override;
+  void SetIsSharedDictionaryReadAllowedCallback(
+      base::RepeatingCallback<bool()> callback) override;
   int ResumeNetworkStart() override;
   ConnectionAttempts GetConnectionAttempts() const override;
   void CloseConnectionOnDestruction() override;
@@ -575,6 +590,11 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // continue its processing.
   void OnIOComplete(int result);
 
+  // Called to signal completion of an asynchronous HTTPCache operation. It
+  // uses a separate callback from OnIoComplete so that cache transaction
+  // operations and network IO can be run in parallel.
+  void OnCacheIOComplete(int result);
+
   // When in a DoLoop, use this to set the next state as it verifies that the
   // state isn't set twice.
   void TransitionToState(State state);
@@ -611,6 +631,14 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
 
   State next_state_{STATE_NONE};
 
+  // Set when a HTTPCache transaction is pending in parallel with other IO.
+  bool waiting_for_cache_io_ = false;
+
+  // If a pending async HTTPCache transaction takes longer than the parallel
+  // Network IO, this will store the result of the Network IO operation until
+  // the cache transaction completes (or times out).
+  absl::optional<int> pending_io_result_ = absl::nullopt;
+
   // Used for tracing.
   const uint64_t trace_id_;
 
@@ -632,7 +660,7 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // |external_validation_| contains the value of those headers.
   ValidationHeaders external_validation_;
   base::WeakPtr<HttpCache> cache_;
-  raw_ptr<HttpCache::ActiveEntry, DanglingUntriaged> entry_ = nullptr;
+  raw_ptr<HttpCache::ActiveEntry, DanglingAcrossTasks> entry_ = nullptr;
   // This field is not a raw_ptr<> because it was filtered by the rewriter for:
   // #addr-of
   RAW_PTR_EXCLUSION HttpCache::ActiveEntry* new_entry_ = nullptr;
@@ -689,6 +717,8 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   int effective_load_flags_ = 0;
   std::unique_ptr<PartialData> partial_;  // We are dealing with range requests.
   CompletionRepeatingCallback io_callback_;
+  CompletionRepeatingCallback cache_io_callback_;  // cache-specific IO callback
+  base::RepeatingCallback<bool()> is_shared_dictionary_read_allowed_callback_;
 
   // Error code to be returned from a subsequent Read call if shared writing
   // failed in a separate transaction.

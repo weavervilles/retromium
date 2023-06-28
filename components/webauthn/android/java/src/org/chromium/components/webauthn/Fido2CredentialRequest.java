@@ -6,6 +6,7 @@ package org.chromium.components.webauthn;
 
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -25,8 +26,9 @@ import androidx.core.os.BuildCompat;
 import com.google.android.gms.tasks.Task;
 
 import org.chromium.base.Callback;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
+import org.chromium.base.PackageUtils;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 import org.chromium.blink.mojom.AuthenticatorStatus;
 import org.chromium.blink.mojom.AuthenticatorTransport;
@@ -38,19 +40,19 @@ import org.chromium.blink.mojom.PublicKeyCredentialDescriptor;
 import org.chromium.blink.mojom.PublicKeyCredentialRequestOptions;
 import org.chromium.blink.mojom.PublicKeyCredentialType;
 import org.chromium.blink.mojom.ResidentKeyRequirement;
-import org.chromium.components.externalauth.ExternalAuthUtils;
-import org.chromium.components.externalauth.UserRecoverableErrorHandler;
 import org.chromium.components.payments.PaymentFeatureList;
+import org.chromium.components.version_info.VersionInfo;
+import org.chromium.components.webauthn.CredManMetricsHelper.CredManGetRequestEnum;
+import org.chromium.components.webauthn.CredManMetricsHelper.CredManPrepareRequestEnum;
 import org.chromium.content_public.browser.ClientDataJson;
 import org.chromium.content_public.browser.ClientDataRequestType;
-import org.chromium.content_public.browser.ContentFeatureList;
+import org.chromium.content_public.browser.ContentFeatureMap;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.RenderFrameHost.WebAuthSecurityChecksResults;
 import org.chromium.content_public.browser.WebAuthenticationDelegate;
-import org.chromium.content_public.browser.WebContents;
-import org.chromium.content_public.browser.WebContentsStatics;
 import org.chromium.content_public.common.ContentFeatures;
 import org.chromium.device.DeviceFeatureList;
+import org.chromium.device.DeviceFeatureMap;
 import org.chromium.net.GURLUtils;
 import org.chromium.url.Origin;
 
@@ -61,14 +63,21 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Uses the Google Play Services Fido2 APIs.
  * Holds the logic of each request.
  */
+@JNINamespace("webauthn")
 public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
     private static final String TAG = "Fido2Request";
     private static final String CRED_MAN_PREFIX = "androidx.credentials.";
+    private static final ComponentName GPM_COMPONENT_NAME =
+            ComponentName.createRelative("com.google.android.gms",
+                    ".auth.api.credentials.credman.service.PasswordAndPasskeyService");
+    private static final String CHANNEL_KEY = "com.android.chrome.CHANNEL";
+    private static final String TYPE_PASSKEY = CRED_MAN_PREFIX + "TYPE_PUBLIC_KEY_CREDENTIAL";
     static final String NON_EMPTY_ALLOWLIST_ERROR_MSG =
             "Authentication request must have non-empty allowList";
     static final String NON_VALID_ALLOWED_CREDENTIALS_ERROR_MSG =
@@ -77,23 +86,36 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
     static final String CREDENTIAL_EXISTS_ERROR_MSG =
             "One of the excluded credentials exists on the local device";
     static final String LOW_LEVEL_ERROR_MSG = "Low level error 0x6a80";
+    static final String CRED_MAN_EXCEPTION_CREATE_CREDENTIAL_TYPE_USER_CANCEL =
+            "android.credentials.CreateCredentialException.TYPE_USER_CANCELED";
+    static final String CRED_MAN_EXCEPTION_GET_CREDENTIAL_TYPE_USER_CANCEL =
+            "android.credentials.GetCredentialException.TYPE_USER_CANCELED";
+    public static final int GMSCORE_MIN_VERSION_HYBRID_API = 231206000;
 
     private static Boolean sIsCredManEnabled;
 
     private final WebAuthenticationDelegate.IntentSender mIntentSender;
-    private final @WebAuthenticationDelegate.Support int mSupportLevel;
+    private CredManMetricsHelper mMetricsHelper;
+    private Context mContext;
     private GetAssertionResponseCallback mGetAssertionCallback;
     private MakeCredentialResponseCallback mMakeCredentialCallback;
     private FidoErrorResponseCallback mErrorCallback;
-    private WebContents mWebContents;
+    // mFrameHost is null in makeCredential requests. For getAssertion requests
+    // it's non-null for conditional requests and may be non-null in other
+    // requests.
     private RenderFrameHost mFrameHost;
     private boolean mAppIdExtensionUsed;
     private boolean mEchoCredProps;
     private WebAuthnBrowserBridge mBrowserBridge;
+    private Object mCredentialManagerServiceForTesting;
+    private Class mCredManCreateRequestBuilderClassForTesting;
+    private Class mCredManGetRequestBuilderClassForTesting;
+    private Class mCredManCredentialOptionBuilderClassForTesting;
     private boolean mAttestationAcceptable;
     private boolean mIsCrossOrigin;
+    private boolean mOverrideVersionCheckForTesting;
 
-    private enum ConditionalUiState {
+    public enum ConditionalUiState {
         NONE,
         WAITING_FOR_CREDENTIAL_LIST,
         WAITING_FOR_SELECTION,
@@ -106,7 +128,7 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
     // Not null when the GMSCore-created ClientDataJson needs to be overridden or when using the
     // CredMan API.
     @Nullable
-    private String mClientDataJson;
+    private byte[] mClientDataJson;
 
     /**
      * Constructs the object.
@@ -115,12 +137,9 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
      * @param supportLevel Whether this code should use the privileged or non-privileged Play
      *         Services API. (Note that a value of `NONE` is not allowed.)
      */
-    public Fido2CredentialRequest(WebAuthenticationDelegate.IntentSender intentSender,
-            @WebAuthenticationDelegate.Support int supportLevel) {
-        assert supportLevel != WebAuthenticationDelegate.Support.NONE;
-
+    public Fido2CredentialRequest(WebAuthenticationDelegate.IntentSender intentSender) {
         mIntentSender = intentSender;
-        mSupportLevel = supportLevel;
+        mMetricsHelper = new CredManMetricsHelper();
     }
 
     private void returnErrorAndResetCallback(int error) {
@@ -132,31 +151,46 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         mMakeCredentialCallback = null;
     }
 
+    @OptIn(markerClass = androidx.core.os.BuildCompat.PrereleaseSdkCheck.class)
     private boolean isCredManEnabled() {
         if (sIsCredManEnabled == null) {
             sIsCredManEnabled =
-                    DeviceFeatureList.isEnabled(DeviceFeatureList.WEBAUTHN_ANDROID_CRED_MAN);
+                    DeviceFeatureMap.isEnabled(DeviceFeatureList.WEBAUTHN_ANDROID_CRED_MAN)
+                    && (BuildCompat.isAtLeastU() || mOverrideVersionCheckForTesting);
         }
         return sIsCredManEnabled;
     }
 
-    @OptIn(markerClass = BuildCompat.PrereleaseSdkCheck.class)
-    public void handleMakeCredentialRequest(PublicKeyCredentialCreationOptions options,
-            RenderFrameHost frameHost, Origin origin, MakeCredentialResponseCallback callback,
+    /**
+     * Process a WebAuthn create() request.
+     *
+     * @param context The context used for both Play Services and CredMan calls.
+     * @param options The arguments to create()
+     * @param frameHost The source RenderFrameHost, or null. If null, `maybeClientDataHash` must be
+     *         non-null and no security checks will be performed.
+     * @param maybeClientDataHash The SHA-256 of the ClientDataJSON. Non-null iff frameHost is null.
+     * @param origin The origin that made the WebAuthn call.
+     * @param callback Success callback.
+     * @param errorCallback Failure callback.
+     */
+    @SuppressWarnings("NewApi")
+    public void handleMakeCredentialRequest(Context context,
+            PublicKeyCredentialCreationOptions options, RenderFrameHost frameHost,
+            byte[] maybeClientDataHash, Origin origin, MakeCredentialResponseCallback callback,
             FidoErrorResponseCallback errorCallback) {
+        assert (frameHost != null) ^ (maybeClientDataHash != null);
         assert mMakeCredentialCallback == null && mErrorCallback == null;
+        mContext = context;
         mMakeCredentialCallback = callback;
         mErrorCallback = errorCallback;
-        if (mWebContents == null) {
-            mWebContents = WebContentsStatics.fromRenderFrameHost(frameHost);
-        }
-        mFrameHost = frameHost;
 
-        int securityCheck = frameHost.performMakeCredentialWebAuthSecurityChecks(
-                options.relyingParty.id, origin, options.isPaymentCredentialCreation);
-        if (securityCheck != AuthenticatorStatus.SUCCESS) {
-            returnErrorAndResetCallback(securityCheck);
-            return;
+        if (frameHost != null) {
+            int securityCheck = frameHost.performMakeCredentialWebAuthSecurityChecks(
+                    options.relyingParty.id, origin, options.isPaymentCredentialCreation);
+            if (securityCheck != AuthenticatorStatus.SUCCESS) {
+                returnErrorAndResetCallback(securityCheck);
+                return;
+            }
         }
 
         // Attestation is only for non-discoverable credentials in the Android
@@ -164,12 +198,23 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         // on security keys. There was a bug where discoverable credentials
         // accidentally included attestation, which was confusing, so that's
         // filtered here.
-        mAttestationAcceptable = options.authenticatorSelection == null
+        final boolean rkDiscouraged = options.authenticatorSelection == null
                 || options.authenticatorSelection.residentKey == ResidentKeyRequirement.DISCOURAGED;
+        mAttestationAcceptable = rkDiscouraged;
         mEchoCredProps = options.credProps;
 
-        if (isCredManEnabled() && BuildCompat.isAtLeastU()) {
-            makeCredentialViaCredMan(options, origin);
+        // residentKey=discouraged requests are often for the traditional,
+        // non-syncing platform authenticator on Android. A number of sites use
+        // this and, so as not to disrupt them with Android 14, these requests
+        // continue to be sent directly to Play Services.
+        //
+        // Otherwise these requests are for security keys, and Play Services is
+        // currently the best answer for those requests too.
+        //
+        // Payments requests are also routed to Play Services since we haven't defined how SPC works
+        // in CredMan yet.
+        if (!rkDiscouraged && !options.isPaymentCredentialCreation && isCredManEnabled()) {
+            makeCredentialViaCredMan(options, origin, maybeClientDataHash);
             return;
         }
 
@@ -179,28 +224,14 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             return;
         }
 
-        Fido2ApiCall call = new Fido2ApiCall(ContextUtils.getApplicationContext(), mSupportLevel);
-        Parcel args = call.start();
-        Fido2ApiCall.PendingIntentResult result = new Fido2ApiCall.PendingIntentResult(call);
-        args.writeStrongBinder(result);
-        args.writeInt(1); // This indicates that the following options are present.
-
         try {
-            if (mSupportLevel == WebAuthenticationDelegate.Support.BROWSER) {
-                Fido2Api.appendBrowserMakeCredentialOptionsToParcel(options,
-                        Uri.parse(convertOriginToString(origin)), /* clientDataHash= */ null, args);
-            } else {
-                Fido2Api.appendMakeCredentialOptionsToParcel(options, args);
-            }
+            Fido2ApiCallHelper.getInstance().invokeFido2MakeCredential(options,
+                    Uri.parse(convertOriginToString(origin)), maybeClientDataHash,
+                    this::onGotPendingIntent, this::onBinderCallException);
         } catch (NoSuchAlgorithmException e) {
             returnErrorAndResetCallback(AuthenticatorStatus.ALGORITHM_UNSUPPORTED);
             return;
         }
-
-        Task<PendingIntent> task = call.run(Fido2ApiCall.METHOD_BROWSER_REGISTER,
-                Fido2ApiCall.TRANSACTION_REGISTER, args, result);
-        task.addOnSuccessListener(this::onGotPendingIntent);
-        task.addOnFailureListener(this::onBinderCallException);
     }
 
     private void onBinderCallException(Exception e) {
@@ -208,81 +239,106 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         returnErrorAndResetCallback(AuthenticatorStatus.NOT_ALLOWED_ERROR);
     }
 
-    @OptIn(markerClass = BuildCompat.PrereleaseSdkCheck.class)
-    public void handleGetAssertionRequest(PublicKeyCredentialRequestOptions options,
-            RenderFrameHost frameHost, Origin callerOrigin, PaymentOptions payment,
+    /**
+     * Process a WebAuthn get() request.
+     *
+     * @param context The context used for both Play Services and CredMan calls.
+     * @param options The arguments to get(). If `isConditional` is true then `frameHost` must be
+     *         non-null.
+     * @param frameHost The source RenderFrameHost, or null. If null, `maybeClientDataHash` must be
+     *         non-null and no security checks will be performed.
+     * @param maybeClientDataHash The SHA-256 of the ClientDataJSON. Non-null iff frameHost is null.
+     * @param origin The origin that made the WebAuthn call.
+     * @param topOrigin The origin of the main frame.
+     * @param payment Options for Secure Payment Confirmation. May only be non-null if `frameHost`
+     *         is non-null.
+     * @param callback Success callback.
+     * @param errorCallback Failure callback.
+     */
+    @SuppressWarnings("NewApi")
+    public void handleGetAssertionRequest(Context context,
+            PublicKeyCredentialRequestOptions options, RenderFrameHost frameHost,
+            byte[] maybeClientDataHash, Origin origin, Origin topOrigin, PaymentOptions payment,
             GetAssertionResponseCallback callback, FidoErrorResponseCallback errorCallback) {
+        assert (frameHost != null) ^ (maybeClientDataHash != null);
+        assert payment == null || frameHost != null;
+        assert !options.isConditional || frameHost != null;
         assert mGetAssertionCallback == null && mErrorCallback == null;
+        mContext = context;
         mGetAssertionCallback = callback;
         mErrorCallback = errorCallback;
-        if (mWebContents == null) {
-            mWebContents = WebContentsStatics.fromRenderFrameHost(frameHost);
-        }
         mFrameHost = frameHost;
+        final boolean playServicesAvailable = apiAvailable();
 
-        WebAuthSecurityChecksResults webAuthSecurityChecksResults =
-                frameHost.performGetAssertionWebAuthSecurityChecks(
-                        options.relyingPartyId, callerOrigin, payment != null);
-        if (webAuthSecurityChecksResults.securityCheckResult != AuthenticatorStatus.SUCCESS) {
-            returnErrorAndResetCallback(webAuthSecurityChecksResults.securityCheckResult);
-            return;
+        if (frameHost != null) {
+            WebAuthSecurityChecksResults webAuthSecurityChecksResults =
+                    frameHost.performGetAssertionWebAuthSecurityChecks(
+                            options.relyingPartyId, origin, payment != null);
+            if (webAuthSecurityChecksResults.securityCheckResult != AuthenticatorStatus.SUCCESS) {
+                returnErrorAndResetCallback(webAuthSecurityChecksResults.securityCheckResult);
+                return;
+            }
+            mIsCrossOrigin = webAuthSecurityChecksResults.isCrossOrigin;
         }
-        mIsCrossOrigin = webAuthSecurityChecksResults.isCrossOrigin;
 
         boolean hasAllowCredentials =
                 options.allowCredentials != null && options.allowCredentials.length != 0;
 
         if (!hasAllowCredentials) {
             // No UVM support for discoverable credentials.
-            options.userVerificationMethods = false;
+            options.extensions.userVerificationMethods = false;
         }
 
-        if (options.appid != null) {
+        if (options.extensions.appid != null) {
             mAppIdExtensionUsed = true;
         }
 
-        String callerOriginString = convertOriginToString(callerOrigin);
-        byte[] clientDataHash = null;
-
         // Payments should still go through Google Play Services.
-        if (payment == null && isCredManEnabled() && BuildCompat.isAtLeastU()) {
+        if (payment == null && isCredManEnabled()) {
             if (options.isConditional) {
-                mConditionalUiState = ConditionalUiState.WAITING_FOR_CREDENTIAL_LIST;
-                prefetchCredentialsViaCredMan(
-                        options, callerOrigin, callerOriginString, clientDataHash);
+                prefetchCredentialsViaCredMan(options, origin, /*maybeClientDataHash=*/null);
+            } else if (hasAllowCredentials && playServicesAvailable) {
+                // If the allowlist contains non-discoverable credentials then
+                // the request needs to be routed directly to Play Services.
+                checkForNonDiscoverableMatch(options, origin, maybeClientDataHash);
             } else {
-                getCredentialViaCredMan(options, callerOrigin);
+                getCredentialViaCredMan(
+                        options, origin, maybeClientDataHash, /*requestPasswords=*/false);
             }
             return;
         }
 
-        if (!apiAvailable()) {
+        if (!playServicesAvailable) {
             Log.e(TAG, "Google Play Services' Fido2PrivilegedApi is not available.");
             returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
             return;
         }
 
+        final String callerOriginString = convertOriginToString(origin);
+        byte[] clientDataHash = maybeClientDataHash;
         if (payment != null
                 && PaymentFeatureList.isEnabled(PaymentFeatureList.SECURE_PAYMENT_CONFIRMATION)) {
             assert options.challenge != null;
+            assert clientDataHash == null;
             clientDataHash = buildClientDataJsonAndComputeHash(ClientDataRequestType.PAYMENT_GET,
                     callerOriginString, options.challenge, mIsCrossOrigin, payment,
-                    options.relyingPartyId, mWebContents.getMainFrame().getLastCommittedOrigin());
+                    options.relyingPartyId, topOrigin);
             if (clientDataHash == null) {
                 returnErrorAndResetCallback(AuthenticatorStatus.NOT_ALLOWED_ERROR);
                 return;
             }
         }
 
-        if (options.isConditional
-                || (ContentFeatureList.isEnabled(
-                            ContentFeatures.WEB_AUTHN_TOUCH_TO_FILL_CREDENTIAL_SELECTION)
-                        && !hasAllowCredentials)) {
-            // For use in the lambda expression.
+        if (mFrameHost != null
+                && (options.isConditional
+                        || (ContentFeatureMap.isEnabled(
+                                    ContentFeatures.WEB_AUTHN_TOUCH_TO_FILL_CREDENTIAL_SELECTION)
+                                && !hasAllowCredentials))) {
+            // Enumerate credentials from Play Services so that we can show the
+            // picker in Chrome UI.
             final byte[] finalClientDataHash = clientDataHash;
             mConditionalUiState = ConditionalUiState.WAITING_FOR_CREDENTIAL_LIST;
             Fido2ApiCallHelper.getInstance().invokeFido2GetCredentials(options.relyingPartyId,
-                    mSupportLevel,
                     (credentials)
                             -> onWebAuthnCredentialDetailsListReceived(
                                     options, callerOriginString, finalClientDataHash, credentials),
@@ -316,15 +372,12 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
     }
 
     public void handleIsUserVerifyingPlatformAuthenticatorAvailableRequest(
-            RenderFrameHost frameHost, IsUvpaaResponseCallback callback) {
+            Context context, IsUvpaaResponseCallback callback) {
         if (isCredManEnabled()) {
             callback.onIsUserVerifyingPlatformAuthenticatorAvailableResponse(true);
             return;
         }
 
-        if (mWebContents == null) {
-            mWebContents = WebContentsStatics.fromRenderFrameHost(frameHost);
-        }
         if (!apiAvailable()) {
             Log.e(TAG, "Google Play Services' Fido2PrivilegedApi is not available.");
             // Note that |IsUserVerifyingPlatformAuthenticatorAvailable| only returns
@@ -334,7 +387,7 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             return;
         }
 
-        Fido2ApiCall call = new Fido2ApiCall(ContextUtils.getApplicationContext(), mSupportLevel);
+        Fido2ApiCall call = new Fido2ApiCall(context);
         Fido2ApiCall.BooleanResult result = new Fido2ApiCall.BooleanResult();
         Parcel args = call.start();
         args.writeStrongBinder(result);
@@ -356,9 +409,6 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             FidoErrorResponseCallback errorCallback) {
         assert mErrorCallback == null;
         mErrorCallback = errorCallback;
-        if (mWebContents == null) {
-            mWebContents = WebContentsStatics.fromRenderFrameHost(frameHost);
-        }
 
         if (!apiAvailable()) {
             Log.e(TAG, "Google Play Services' Fido2PrivilegedApi is not available.");
@@ -366,7 +416,7 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             return;
         }
 
-        Fido2ApiCallHelper.getInstance().invokeFido2GetCredentials(relyingPartyId, mSupportLevel,
+        Fido2ApiCallHelper.getInstance().invokeFido2GetCredentials(relyingPartyId,
                 (credentials)
                         -> onGetMatchingCredentialIdsListReceived(credentials, allowCredentialIds,
                                 requireThirdPartyPayment, callback),
@@ -396,9 +446,24 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         mBrowserBridge = bridge;
     }
 
+    @VisibleForTesting
+    public void setOverrideVersionCheckForTesting(boolean override) {
+        mOverrideVersionCheckForTesting = override;
+    }
+
+    @VisibleForTesting
+    public void setCredManClassesForTesting(Object credentialManager, Class createRequestBuilder,
+            Class getRequestBuilder, Class credentialOptionBuilder,
+            CredManMetricsHelper metricsHelper) {
+        mCredentialManagerServiceForTesting = credentialManager;
+        mCredManCreateRequestBuilderClassForTesting = createRequestBuilder;
+        mCredManGetRequestBuilderClassForTesting = getRequestBuilder;
+        mCredManCredentialOptionBuilderClassForTesting = credentialOptionBuilder;
+        mMetricsHelper = metricsHelper;
+    }
+
     private boolean apiAvailable() {
-        return ExternalAuthUtils.getInstance().canUseGooglePlayServices(
-                new UserRecoverableErrorHandler.Silent());
+        return Fido2ApiCallHelper.getInstance().arePlayServicesAvailable();
     }
 
     private void onWebAuthnCredentialDetailsListReceived(PublicKeyCredentialRequestOptions options,
@@ -439,9 +504,8 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         if (!isConditionalRequest && discoverableCredentials.isEmpty()) {
             mConditionalUiState = ConditionalUiState.NONE;
             // When no passkeys are present for a non-conditional request, pass the request
-            // through to GMSCore. It will show an error message to the user. If at some point in
-            // the future GMSCore supports passkeys from other devices, this will also allow it to
-            // initiate a cross-device flow.
+            // through to GMSCore. It will show an error message to the user, but can offer the
+            // user alternatives to use external passkeys.
             maybeDispatchGetAssertionRequest(options, callerOriginString, clientDataHash, null);
             return;
         }
@@ -450,12 +514,85 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             mBrowserBridge = new WebAuthnBrowserBridge();
         }
 
+        Runnable hybridCallback = null;
+        if (isHybridClientApiAvailable()) {
+            hybridCallback = ()
+                    -> dispatchHybridGetAssertionRequest(
+                            options, callerOriginString, clientDataHash);
+        }
+
         mConditionalUiState = ConditionalUiState.WAITING_FOR_SELECTION;
         mBrowserBridge.onCredentialsDetailsListReceived(mFrameHost, discoverableCredentials,
                 isConditionalRequest,
                 (selectedCredentialId)
                         -> maybeDispatchGetAssertionRequest(
-                                options, callerOriginString, clientDataHash, selectedCredentialId));
+                                options, callerOriginString, clientDataHash, selectedCredentialId),
+                hybridCallback);
+    }
+
+    /**
+     * Check whether a get() request needs routing to Play Services for a non-discoverable cred.
+     *
+     * This function is called if a non-payments, non-conditional get() call
+     * with an allowlist is received. In this case, if any of the elements of
+     * the allowlist are non-discoverable credentials in the local platform
+     * authenticator then the request should be sent directly to Play Services.
+     */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private void checkForNonDiscoverableMatch(PublicKeyCredentialRequestOptions options,
+            Origin callerOrigin, byte[] maybeClientDataHash) {
+        assert options.allowCredentials != null;
+        assert options.allowCredentials.length > 0;
+        assert !options.isConditional;
+        assert apiAvailable();
+        assert sIsCredManEnabled;
+
+        Fido2ApiCallHelper.getInstance().invokeFido2GetCredentials(options.relyingPartyId,
+                (credentials)
+                        -> checkForNonDiscoverableMatchCredentialsReceived(
+                                options, callerOrigin, maybeClientDataHash, credentials),
+                (e) -> {
+                    Log.e(TAG,
+                            "FIDO2 call to enumerate non-discoverable credentials failed."
+                                    + "Dispatching to CredMan.",
+                            e);
+                    getCredentialViaCredMan(
+                            options, callerOrigin, maybeClientDataHash, /*requestPasswords=*/false);
+                });
+    }
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private void checkForNonDiscoverableMatchCredentialsReceived(
+            PublicKeyCredentialRequestOptions options, Origin callerOrigin,
+            byte[] maybeClientDataHash, List<WebAuthnCredentialDetails> retrievedCredentials) {
+        assert options.allowCredentials != null;
+        assert options.allowCredentials.length > 0;
+        assert !options.isConditional;
+        assert apiAvailable();
+        assert sIsCredManEnabled;
+
+        for (WebAuthnCredentialDetails credential : retrievedCredentials) {
+            if (credential.mIsDiscoverable) continue;
+
+            for (PublicKeyCredentialDescriptor allowedId : options.allowCredentials) {
+                if (allowedId.type != PublicKeyCredentialType.PUBLIC_KEY) {
+                    continue;
+                }
+
+                if (Arrays.equals(allowedId.id, credential.mCredentialId)) {
+                    // This get() request can be satisfied by Play Services with
+                    // a non-discoverable credential so route it there.
+                    maybeDispatchGetAssertionRequest(options, convertOriginToString(callerOrigin),
+                            maybeClientDataHash, /*credentialId=*/null);
+                    return;
+                }
+            }
+        }
+
+        // No elements of the allowlist are local, non-discoverable credentials
+        // so route to CredMan.
+        getCredentialViaCredMan(
+                options, callerOrigin, maybeClientDataHash, /*requestPasswords=*/false);
     }
 
     private void maybeDispatchGetAssertionRequest(PublicKeyCredentialRequestOptions options,
@@ -498,21 +635,32 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             mConditionalUiState = ConditionalUiState.REQUEST_SENT_TO_PLATFORM;
         }
 
-        Fido2ApiCall call = new Fido2ApiCall(ContextUtils.getApplicationContext(), mSupportLevel);
+        Fido2ApiCallHelper.getInstance().invokeFido2GetAssertion(options,
+                Uri.parse(callerOriginString), clientDataHash, this::onGotPendingIntent,
+                this::onBinderCallException);
+    }
+
+    private void dispatchHybridGetAssertionRequest(PublicKeyCredentialRequestOptions options,
+            String callerOriginString, byte[] clientDataHash) {
+        assert mConditionalUiState == ConditionalUiState.NONE
+                || mConditionalUiState == ConditionalUiState.REQUEST_SENT_TO_PLATFORM
+                || mConditionalUiState == ConditionalUiState.WAITING_FOR_SELECTION;
+
+        if (mConditionalUiState == ConditionalUiState.REQUEST_SENT_TO_PLATFORM) {
+            Log.e(TAG, "Received a second credential selection while the first still in progress.");
+            return;
+        }
+        mConditionalUiState = ConditionalUiState.REQUEST_SENT_TO_PLATFORM;
+
+        Fido2ApiCall call = new Fido2ApiCall(mContext);
         Parcel args = call.start();
-        Fido2ApiCall.PendingIntentResult result = new Fido2ApiCall.PendingIntentResult(call);
+        Fido2ApiCall.PendingIntentResult result = new Fido2ApiCall.PendingIntentResult();
         args.writeStrongBinder(result);
         args.writeInt(1); // This indicates that the following options are present.
-
-        if (mSupportLevel == WebAuthenticationDelegate.Support.BROWSER) {
-            Fido2Api.appendBrowserGetAssertionOptionsToParcel(options,
-                    Uri.parse(callerOriginString), clientDataHash, /*tunnelId=*/null, args);
-        } else {
-            Fido2Api.appendGetAssertionOptionsToParcel(options, /*tunnelId=*/null, args);
-        }
-
-        Task<PendingIntent> task = call.run(
-                Fido2ApiCall.METHOD_BROWSER_SIGN, Fido2ApiCall.TRANSACTION_SIGN, args, result);
+        Fido2Api.appendBrowserGetAssertionOptionsToParcel(
+                options, Uri.parse(callerOriginString), clientDataHash, /*tunnelId=*/null, args);
+        Task<PendingIntent> task = call.run(Fido2ApiCall.METHOD_BROWSER_HYBRID_SIGN,
+                Fido2ApiCall.TRANSACTION_HYBRID_SIGN, args, result);
         task.addOnSuccessListener(this::onGotPendingIntent);
         task.addOnFailureListener(this::onBinderCallException);
     }
@@ -617,7 +765,7 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             if (response instanceof GetAssertionAuthenticatorResponse) {
                 GetAssertionAuthenticatorResponse r = (GetAssertionAuthenticatorResponse) response;
                 if (mClientDataJson != null) {
-                    r.info.clientDataJson = mClientDataJson.getBytes();
+                    r.info.clientDataJson = mClientDataJson;
                 }
                 r.echoAppidExtension = mAppIdExtensionUsed;
                 mGetAssertionCallback.onSignResponse(AuthenticatorStatus.SUCCESS, r);
@@ -687,15 +835,10 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
     }
 
     @VisibleForTesting
-    public String convertOriginToString(Origin origin) {
+    public static String convertOriginToString(Origin origin) {
         // Wrapping with GURLUtils.getOrigin() in order to trim default ports.
         return GURLUtils.getOrigin(
                 origin.getScheme() + "://" + origin.getHost() + ":" + origin.getPort());
-    }
-
-    @VisibleForTesting
-    public void setWebContentsForTesting(WebContents webContents) {
-        mWebContents = webContents;
     }
 
     private String getCredManExceptionType(Throwable exception) {
@@ -707,20 +850,49 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         }
     }
 
+    @SuppressWarnings("WrongConstant")
+    Object credentialManagerService(Context context) {
+        if (mCredentialManagerServiceForTesting != null) {
+            return mCredentialManagerServiceForTesting;
+        }
+        // TODO: switch "credential" to `Context.CREDENTIAL_SERVICE` and remove the
+        // `@SuppressWarnings` when the Android U SDK is available.
+        return context.getSystemService("credential");
+    }
+
+    Class credManCreateRequestBuilderClass() throws ClassNotFoundException {
+        if (mCredManCreateRequestBuilderClassForTesting != null) {
+            return mCredManCreateRequestBuilderClassForTesting;
+        }
+        return Class.forName("android.credentials.CreateCredentialRequest$Builder");
+    }
+
+    Class credManGetRequestBuilderClass() throws ClassNotFoundException {
+        if (mCredManGetRequestBuilderClassForTesting != null) {
+            return mCredManGetRequestBuilderClassForTesting;
+        }
+        return Class.forName("android.credentials.GetCredentialRequest$Builder");
+    }
+
+    Class credManCredentialOptionBuilderClass() throws ClassNotFoundException {
+        if (mCredManCredentialOptionBuilderClassForTesting != null) {
+            return mCredManCredentialOptionBuilderClassForTesting;
+        }
+        return Class.forName("android.credentials.CredentialOption$Builder");
+    }
+
     /**
      * Create a credential using the Android 14 CredMan API.
      * TODO: update the version code to U when Chromium builds with Android 14 SDK.
      */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    @SuppressWarnings("WrongConstant")
     private void makeCredentialViaCredMan(
-            PublicKeyCredentialCreationOptions options, Origin origin) {
+            PublicKeyCredentialCreationOptions options, Origin origin, byte[] maybeClientDataHash) {
         final String requestAsJson =
                 Fido2CredentialRequestJni.get().createOptionsToJson(options.serialize());
-        final Context context = ContextUtils.getApplicationContext();
-
-        final byte[] clientDataHash =
-                buildClientDataJsonAndComputeHash(ClientDataRequestType.WEB_AUTHN_CREATE,
+        final byte[] clientDataHash = maybeClientDataHash != null
+                ? maybeClientDataHash
+                : buildClientDataJsonAndComputeHash(ClientDataRequestType.WEB_AUTHN_CREATE,
                         convertOriginToString(origin), options.challenge,
                         /*isCrossOrigin=*/false, /*paymentOptions=*/null, options.relyingParty.id,
                         /*topOrigin=*/null);
@@ -733,11 +905,20 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         requestBundle.putString(CRED_MAN_PREFIX + "BUNDLE_KEY_SUBTYPE",
                 CRED_MAN_PREFIX + "BUNDLE_VALUE_SUBTYPE_CREATE_PUBLIC_KEY_CREDENTIAL_REQUEST");
         requestBundle.putString(CRED_MAN_PREFIX + "BUNDLE_KEY_REQUEST_JSON", requestAsJson);
-        requestBundle.putString(CRED_MAN_PREFIX + "BUNDLE_KEY_CLIENT_DATA_HASH",
-                Base64.encodeToString(
-                        clientDataHash, Base64.NO_PADDING | Base64.NO_WRAP | Base64.URL_SAFE));
+        requestBundle.putByteArray(CRED_MAN_PREFIX + "BUNDLE_KEY_CLIENT_DATA_HASH", clientDataHash);
         requestBundle.putBoolean(
                 CRED_MAN_PREFIX + "BUNDLE_KEY_PREFER_IMMEDIATELY_AVAILABLE_CREDENTIALS", false);
+
+        final Bundle displayInfoBundle = new Bundle();
+        displayInfoBundle.putCharSequence(CRED_MAN_PREFIX + "BUNDLE_KEY_USER_ID",
+                Base64.encodeToString(
+                        options.user.id, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP));
+        displayInfoBundle.putString(CRED_MAN_PREFIX + "BUNDLE_KEY_DEFAULT_PROVIDER",
+                GPM_COMPONENT_NAME.flattenToString());
+
+        requestBundle.putBundle(
+                CRED_MAN_PREFIX + "BUNDLE_KEY_REQUEST_DISPLAY_INFO", displayInfoBundle);
+        requestBundle.putString(CHANNEL_KEY, getChannel());
 
         // The Android 14 APIs have to be called via reflection until Chromium
         // builds with the Android 14 SDK by default.
@@ -747,8 +928,7 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
                 String errorType = getCredManExceptionType(e);
                 Log.e(TAG, "CredMan CreateCredential call failed: %s",
                         errorType + " (" + e.getMessage() + ")");
-                if (errorType.equals(
-                            "android.credentials.CreateCredentialException.TYPE_USER_CANCELED")) {
+                if (errorType.equals(CRED_MAN_EXCEPTION_CREATE_CREDENTIAL_TYPE_USER_CANCEL)) {
                     returnErrorAndResetCallback(AuthenticatorStatus.NOT_ALLOWED_ERROR);
                 } else {
                     // Includes:
@@ -776,7 +956,7 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
                 byte[] responseSerialized =
                         Fido2CredentialRequestJni.get().makeCredentialResponseFromJson(json);
                 if (responseSerialized == null) {
-                    Log.e(TAG, "Failed to convert response from CredMan to Mojo object");
+                    Log.e(TAG, "Failed to convert response from CredMan to Mojo object: %s", json);
                     returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
                     return;
                 }
@@ -788,7 +968,7 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
                     returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
                     return;
                 }
-                response.info.clientDataJson = mClientDataJson.getBytes();
+                response.info.clientDataJson = mClientDataJson;
                 if (mEchoCredProps) {
                     response.echoCredProps = true;
                 }
@@ -798,47 +978,22 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
         };
 
         try {
-            final Class createCredentialRequestBuilder =
-                    Class.forName("android.credentials.CreateCredentialRequest$Builder");
-            final Object builder =
-                    createCredentialRequestBuilder
-                            .getConstructor(String.class, Bundle.class, Bundle.class)
-                            .newInstance(CRED_MAN_PREFIX + "TYPE_PUBLIC_KEY_CREDENTIAL",
-                                    requestBundle, requestBundle);
+            final Class createCredentialRequestBuilder = credManCreateRequestBuilderClass();
+            final Object builder = createCredentialRequestBuilder
+                                           .getConstructor(String.class, Bundle.class, Bundle.class)
+                                           .newInstance(TYPE_PASSKEY, requestBundle, requestBundle);
             final Class builderClass = builder.getClass();
             builderClass.getMethod("setAlwaysSendAppInfoToProvider", boolean.class)
                     .invoke(builder, true);
             builderClass.getMethod("setOrigin", String.class)
                     .invoke(builder, convertOriginToString(origin));
             final Object request = builderClass.getMethod("build").invoke(builder);
-            // TODO: switch "credential" to `Context.CREDENTIAL_SERVICE` and remove the
-            // `@SuppressWarnings` when the Android U SDK is available.
-            final Object manager = context.getSystemService("credential");
-            try {
-                manager.getClass()
-                        .getMethod("createCredential", Context.class, request.getClass(),
-                                android.os.CancellationSignal.class,
-                                java.util.concurrent.Executor.class, OutcomeReceiver.class)
-                        .invoke(manager, context, request, null, context.getMainExecutor(),
-                                receiver);
-            } catch (NoSuchMethodException e) {
-                // In order to be compatible with Android 14 Beta 1, the older
-                // form of the call is also tried.
-                final Activity activity = WebContentsStatics.fromRenderFrameHost(mFrameHost)
-                                                  .getTopLevelNativeWindow()
-                                                  .getActivity()
-                                                  .get();
-                if (activity == null) {
-                    returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
-                    return;
-                }
-                manager.getClass()
-                        .getMethod("createCredential", request.getClass(), Activity.class,
-                                android.os.CancellationSignal.class,
-                                java.util.concurrent.Executor.class, OutcomeReceiver.class)
-                        .invoke(manager, request, activity, null, context.getMainExecutor(),
-                                receiver);
-            }
+            final Object manager = credentialManagerService(mContext);
+            manager.getClass()
+                    .getMethod("createCredential", Context.class, request.getClass(),
+                            android.os.CancellationSignal.class,
+                            java.util.concurrent.Executor.class, OutcomeReceiver.class)
+                    .invoke(manager, mContext, request, null, mContext.getMainExecutor(), receiver);
         } catch (ReflectiveOperationException e) {
             Log.e(TAG, "Reflection failed; are you running on Android 14?", e);
             returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
@@ -851,10 +1006,8 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
      * TODO: update the version code to U when Chromium builds with Android 14 SDK.
      */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    @SuppressWarnings("WrongConstant")
-    private void getCredentialViaCredMan(PublicKeyCredentialRequestOptions options, Origin origin) {
-        final Context context = ContextUtils.getApplicationContext();
-
+    private void getCredentialViaCredMan(PublicKeyCredentialRequestOptions options, Origin origin,
+            byte[] maybeClientDataHash, boolean requestPasswords) {
         // The Android 14 APIs have to be called via reflection until Chromium
         // builds with the Android 14 SDK by default.
         OutcomeReceiver<Object, Throwable> receiver = new OutcomeReceiver<>() {
@@ -863,30 +1016,70 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
                 String errorType = getCredManExceptionType(getCredentialException);
                 Log.e(TAG, "CredMan getCredential call failed: %s",
                         errorType + " (" + getCredentialException.getMessage() + ")");
-                if (errorType.equals(
-                            "android.credentials.GetCredentialException.TYPE_USER_CANCELED")) {
-                    returnErrorAndResetCallback(AuthenticatorStatus.NOT_ALLOWED_ERROR);
+                notifyBrowserOnCredManClosed(false);
+                if (mConditionalUiState == ConditionalUiState.CANCEL_PENDING) {
+                    mConditionalUiState = ConditionalUiState.NONE;
+                    mBrowserBridge.cleanupRequest(mFrameHost);
+                    returnErrorAndResetCallback(AuthenticatorStatus.ABORT_ERROR);
+                    return;
+                }
+                if (errorType.equals(CRED_MAN_EXCEPTION_GET_CREDENTIAL_TYPE_USER_CANCEL)) {
+                    if (mConditionalUiState == ConditionalUiState.NONE) {
+                        returnErrorAndResetCallback(AuthenticatorStatus.NOT_ALLOWED_ERROR);
+                    }
+
+                    mMetricsHelper.reportGetCredentialMetrics(
+                            CredManGetRequestEnum.CANCELLED, mConditionalUiState);
                 } else {
                     // Includes:
                     //  * GetCredentialException.TYPE_UNKNOWN
                     //  * GetCredentialException.TYPE_NO_CREATE_OPTIONS
                     //  * GetCredentialException.TYPE_INTERRUPTED
                     returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
+                    mMetricsHelper.reportGetCredentialMetrics(
+                            CredManGetRequestEnum.FAILURE, mConditionalUiState);
                 }
+                mConditionalUiState = options.isConditional
+                        ? ConditionalUiState.WAITING_FOR_SELECTION
+                        : ConditionalUiState.NONE;
             }
 
             @Override
             public void onResult(Object getCredentialResponse) {
+                if (mConditionalUiState == ConditionalUiState.CANCEL_PENDING) {
+                    notifyBrowserOnCredManClosed(false);
+                    mConditionalUiState = ConditionalUiState.NONE;
+                    mBrowserBridge.cleanupRequest(mFrameHost);
+                    returnErrorAndResetCallback(AuthenticatorStatus.ABORT_ERROR);
+                    return;
+                }
                 Bundle data;
+                String type;
                 try {
                     Object credential = getCredentialResponse.getClass()
                                                 .getMethod("getCredential")
                                                 .invoke(getCredentialResponse);
                     data = (Bundle) credential.getClass().getMethod("getData").invoke(credential);
+                    type = (String) credential.getClass().getMethod("getType").invoke(credential);
 
                 } catch (ReflectiveOperationException e) {
                     Log.e(TAG, "Reflection failed; are you running on Android 14?", e);
+                    mMetricsHelper.reportGetCredentialMetrics(
+                            CredManGetRequestEnum.FAILURE, mConditionalUiState);
+                    mConditionalUiState = options.isConditional
+                            ? ConditionalUiState.WAITING_FOR_SELECTION
+                            : ConditionalUiState.NONE;
+                    notifyBrowserOnCredManClosed(false);
                     returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
+                    return;
+                }
+
+                if (!TYPE_PASSKEY.equals(type)) {
+                    mBrowserBridge.onPasswordCredentialReceived(mFrameHost,
+                            data.getString(CRED_MAN_PREFIX + "BUNDLE_KEY_ID"),
+                            data.getString(CRED_MAN_PREFIX + "BUNDLE_KEY_PASSWORD"));
+                    mMetricsHelper.reportGetCredentialMetrics(
+                            CredManGetRequestEnum.SUCCESS_PASSWORD, mConditionalUiState);
                     return;
                 }
 
@@ -895,7 +1088,13 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
                 byte[] responseSerialized =
                         Fido2CredentialRequestJni.get().getCredentialResponseFromJson(json);
                 if (responseSerialized == null) {
-                    Log.e(TAG, "Failed to convert response from CredMan to Mojo object");
+                    Log.e(TAG, "Failed to convert response from CredMan to Mojo object: %s", json);
+                    mMetricsHelper.reportGetCredentialMetrics(
+                            CredManGetRequestEnum.FAILURE, mConditionalUiState);
+                    mConditionalUiState = options.isConditional
+                            ? ConditionalUiState.WAITING_FOR_SELECTION
+                            : ConditionalUiState.NONE;
+                    notifyBrowserOnCredManClosed(false);
                     returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
                     return;
                 }
@@ -905,55 +1104,65 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
                                 ByteBuffer.wrap(responseSerialized));
                 if (response == null) {
                     Log.e(TAG, "Failed to parse Mojo object");
+                    mMetricsHelper.reportGetCredentialMetrics(
+                            CredManGetRequestEnum.FAILURE, mConditionalUiState);
+                    mConditionalUiState = options.isConditional
+                            ? ConditionalUiState.WAITING_FOR_SELECTION
+                            : ConditionalUiState.NONE;
+                    notifyBrowserOnCredManClosed(false);
                     returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
                     return;
                 }
-                response.info.clientDataJson = mClientDataJson.getBytes();
+                response.info.clientDataJson = mClientDataJson;
                 if (mAppIdExtensionUsed) {
                     response.echoAppidExtension = mAppIdExtensionUsed;
                 }
+                mConditionalUiState = options.isConditional
+                        ? ConditionalUiState.WAITING_FOR_SELECTION
+                        : ConditionalUiState.NONE;
+                notifyBrowserOnCredManClosed(true);
+                mMetricsHelper.reportGetCredentialMetrics(
+                        CredManGetRequestEnum.SUCCESS_PASSKEY, mConditionalUiState);
                 mGetAssertionCallback.onSignResponse(AuthenticatorStatus.SUCCESS, response);
                 mGetAssertionCallback = null;
             }
         };
 
+        if (mConditionalUiState == ConditionalUiState.REQUEST_SENT_TO_PLATFORM) {
+            Log.e(TAG, "Received a second credential selection while the first still in progress.");
+            mMetricsHelper.reportGetCredentialMetrics(
+                    CredManGetRequestEnum.COULD_NOT_SEND_REQUEST, mConditionalUiState);
+            return;
+        }
+        mConditionalUiState = options.isConditional ? ConditionalUiState.REQUEST_SENT_TO_PLATFORM
+                                                    : ConditionalUiState.NONE;
         try {
-            final Object getCredentialRequest = buildGetCredentialRequest(options, origin);
+            final Object getCredentialRequest = buildGetCredentialRequest(
+                    options, origin, maybeClientDataHash, requestPasswords);
             if (getCredentialRequest == null) {
+                mMetricsHelper.reportGetCredentialMetrics(
+                        CredManGetRequestEnum.COULD_NOT_SEND_REQUEST, mConditionalUiState);
+                mConditionalUiState = options.isConditional
+                        ? ConditionalUiState.WAITING_FOR_SELECTION
+                        : ConditionalUiState.NONE;
                 returnErrorAndResetCallback(AuthenticatorStatus.NOT_ALLOWED_ERROR);
                 return;
             }
-
-            // TODO: switch "credential" to `Context.CREDENTIAL_SERVICE` and remove the
-            // `@SuppressWarnings` when the Android U SDK is available.
-            final Object manager = context.getSystemService("credential");
-            try {
-                manager.getClass()
-                        .getMethod("getCredential", Context.class, getCredentialRequest.getClass(),
-                                android.os.CancellationSignal.class,
-                                java.util.concurrent.Executor.class, OutcomeReceiver.class)
-                        .invoke(manager, context, getCredentialRequest, null,
-                                context.getMainExecutor(), receiver);
-            } catch (NoSuchMethodException e) {
-                // In order to be compatible with Android 14 Beta 1, the older
-                // form of the call is also tried.
-                final Activity activity = WebContentsStatics.fromRenderFrameHost(mFrameHost)
-                                                  .getTopLevelNativeWindow()
-                                                  .getActivity()
-                                                  .get();
-                if (activity == null) {
-                    returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
-                    return;
-                }
-                manager.getClass()
-                        .getMethod("getCredential", getCredentialRequest.getClass(), Activity.class,
-                                android.os.CancellationSignal.class,
-                                java.util.concurrent.Executor.class, OutcomeReceiver.class)
-                        .invoke(manager, getCredentialRequest, activity, null,
-                                context.getMainExecutor(), receiver);
-            }
+            final Object manager = credentialManagerService(mContext);
+            manager.getClass()
+                    .getMethod("getCredential", Context.class, getCredentialRequest.getClass(),
+                            android.os.CancellationSignal.class,
+                            java.util.concurrent.Executor.class, OutcomeReceiver.class)
+                    .invoke(manager, mContext, getCredentialRequest, null,
+                            mContext.getMainExecutor(), receiver);
+            mMetricsHelper.reportGetCredentialMetrics(
+                    CredManGetRequestEnum.SENT_REQUEST, mConditionalUiState);
         } catch (ReflectiveOperationException e) {
             Log.e(TAG, "Reflection failed; are you running on Android 14?", e);
+            mMetricsHelper.reportGetCredentialMetrics(
+                    CredManGetRequestEnum.COULD_NOT_SEND_REQUEST, mConditionalUiState);
+            mConditionalUiState = options.isConditional ? ConditionalUiState.WAITING_FOR_SELECTION
+                                                        : ConditionalUiState.NONE;
             returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
             return;
         }
@@ -964,106 +1173,105 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
      * TODO: update the version code to U when Chromium builds with Android 14 SDK.
      */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-    @SuppressWarnings("WrongConstant")
-    private void prefetchCredentialsViaCredMan(PublicKeyCredentialRequestOptions options,
-            Origin origin, String callerOriginString, byte[] clientDataHash) {
-        final Context context = ContextUtils.getApplicationContext();
-
+    private void prefetchCredentialsViaCredMan(
+            PublicKeyCredentialRequestOptions options, Origin origin, byte[] maybeClientDataHash) {
         // The Android 14 APIs have to be called via reflection until Chromium
         // builds with the Android 14 SDK by default.
         OutcomeReceiver<Object, Throwable> receiver = new OutcomeReceiver<>() {
             @Override
             public void onError(Throwable e) {
+                assert mConditionalUiState == ConditionalUiState.NONE
+                        || mConditionalUiState == ConditionalUiState.WAITING_FOR_CREDENTIAL_LIST
+                        || mConditionalUiState == ConditionalUiState.CANCEL_PENDING;
                 // prepareGetCredential uses getCredentialException, but it cannot be user
                 // cancelled so all errors map to UNKNOWN_ERROR.
                 Log.e(TAG, "CredMan prepareGetCredential call failed: %s",
                         getCredManExceptionType(e) + " (" + e.getMessage() + ")");
+                mConditionalUiState = ConditionalUiState.NONE;
                 returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
+                mMetricsHelper.recordCredmanPrepareRequestHistogram(
+                        CredManPrepareRequestEnum.FAILURE);
             }
 
             @Override
             public void onResult(Object prepareGetCredentialResponse) {
                 if (mConditionalUiState == ConditionalUiState.CANCEL_PENDING) {
                     // The request was completed synchronously when the cancellation was received.
+                    mConditionalUiState = ConditionalUiState.NONE;
+                    mBrowserBridge.cleanupRequest(mFrameHost);
                     return;
                 }
+                assert mConditionalUiState == ConditionalUiState.WAITING_FOR_CREDENTIAL_LIST;
                 boolean hasPublicKeyCredentials;
-                boolean hasPasswordCredentials;
-                boolean hasRemoteResults;
-                Object pendingGetCredentialHandle;
                 try {
                     Method hasCredentialResultsMethod =
                             prepareGetCredentialResponse.getClass().getMethod(
                                     "hasCredentialResults", String.class);
                     hasPublicKeyCredentials = (Boolean) hasCredentialResultsMethod.invoke(
-                            prepareGetCredentialResponse,
-                            "androidx.credentials.TYPE_PUBLIC_KEY_CREDENTIAL");
-                    hasPasswordCredentials = (Boolean) hasCredentialResultsMethod.invoke(
-                            prepareGetCredentialResponse,
-                            "android.credentials.TYPE_PASSWORD_CREDENTIAL");
-                    hasRemoteResults = (Boolean) prepareGetCredentialResponse.getClass()
-                                               .getMethod("hasRemoteResults")
-                                               .invoke(prepareGetCredentialResponse);
-                    pendingGetCredentialHandle = prepareGetCredentialResponse.getClass()
-                                                         .getMethod("getPendingGetCredentialHandle")
-                                                         .invoke(prepareGetCredentialResponse);
-
+                            prepareGetCredentialResponse, TYPE_PASSKEY);
                 } catch (ReflectiveOperationException e) {
                     Log.e(TAG, "Reflection failed; are you running on Android 14?", e);
+                    mConditionalUiState = ConditionalUiState.NONE;
                     returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
-                    return;
-                }
-                if (pendingGetCredentialHandle == null) {
-                    Log.e(TAG, "prepareGetCredentialResponse is unusable.");
-                    returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
+                    mMetricsHelper.recordCredmanPrepareRequestHistogram(
+                            CredManPrepareRequestEnum.FAILURE);
                     return;
                 }
 
                 if (mBrowserBridge == null) {
                     mBrowserBridge = new WebAuthnBrowserBridge();
-                }
+                };
                 mConditionalUiState = ConditionalUiState.WAITING_FOR_SELECTION;
-                // TODO: Wire `hasPublicKeyCredentials`, `hasPublicKeyCredentials`,
-                // `hasRemoteResults` and `pendingGetCredentialHandle` instead of
-                // calling `onCredentialsDetailsListReceived`.
-                mBrowserBridge.onCredentialsDetailsListReceived(mFrameHost,
-                        new ArrayList<WebAuthnCredentialDetails>(), options.isConditional,
-                        (selectedCredentialId)
-                                -> maybeDispatchGetAssertionRequest(options, callerOriginString,
-                                        clientDataHash, selectedCredentialId));
+                mBrowserBridge.onCredManConditionalRequestPending(mFrameHost,
+                        hasPublicKeyCredentials,
+                        (requestPasswords)
+                                -> getCredentialViaCredMan(
+                                        options, origin, maybeClientDataHash, requestPasswords));
+                mMetricsHelper.recordCredmanPrepareRequestHistogram(hasPublicKeyCredentials
+                                ? CredManPrepareRequestEnum.SUCCESS_HAS_RESULTS
+                                : CredManPrepareRequestEnum.SUCCESS_NO_RESULTS);
             }
         };
 
         try {
-            final Object getCredentialRequest = buildGetCredentialRequest(options, origin);
+            mConditionalUiState = ConditionalUiState.WAITING_FOR_CREDENTIAL_LIST;
+            final Object getCredentialRequest = buildGetCredentialRequest(
+                    options, origin, maybeClientDataHash, /*requestPasswords=*/false);
             if (getCredentialRequest == null) {
+                mConditionalUiState = ConditionalUiState.NONE;
                 returnErrorAndResetCallback(AuthenticatorStatus.NOT_ALLOWED_ERROR);
+                mMetricsHelper.recordCredmanPrepareRequestHistogram(
+                        CredManPrepareRequestEnum.COULD_NOT_SEND_REQUEST);
                 return;
             }
 
-            // TODO: switch "credential" to `Context.CREDENTIAL_SERVICE` and remove the
-            // `@SuppressWarnings` when the Android U SDK is available.
-            final Object manager = context.getSystemService("credential");
+            final Object manager = credentialManagerService(mContext);
             manager.getClass()
                     .getMethod("prepareGetCredential", getCredentialRequest.getClass(),
                             android.os.CancellationSignal.class,
                             java.util.concurrent.Executor.class, OutcomeReceiver.class)
-                    .invoke(manager, getCredentialRequest, null, context.getMainExecutor(),
+                    .invoke(manager, getCredentialRequest, null, mContext.getMainExecutor(),
                             receiver);
+            mMetricsHelper.recordCredmanPrepareRequestHistogram(
+                    CredManPrepareRequestEnum.SENT_REQUEST);
         } catch (ReflectiveOperationException e) {
             Log.e(TAG, "Reflection failed; are you running on Android 14?", e);
+            mConditionalUiState = ConditionalUiState.NONE;
             returnErrorAndResetCallback(AuthenticatorStatus.UNKNOWN_ERROR);
+            mMetricsHelper.recordCredmanPrepareRequestHistogram(
+                    CredManPrepareRequestEnum.COULD_NOT_SEND_REQUEST);
             return;
         }
     }
 
     private Object buildGetCredentialRequest(PublicKeyCredentialRequestOptions options,
-            Origin origin) throws ReflectiveOperationException {
+            Origin origin, byte[] maybeClientDataHash, boolean requestPasswords)
+            throws ReflectiveOperationException {
         final String requestAsJson =
                 Fido2CredentialRequestJni.get().getOptionsToJson(options.serialize());
-
-        final byte[] clientDataHash =
-                buildClientDataJsonAndComputeHash(ClientDataRequestType.WEB_AUTHN_GET,
+        final byte[] clientDataHash = maybeClientDataHash != null
+                ? maybeClientDataHash
+                : buildClientDataJsonAndComputeHash(ClientDataRequestType.WEB_AUTHN_GET,
                         convertOriginToString(origin), options.challenge, mIsCrossOrigin,
                         /*paymentOptions=*/null, options.relyingPartyId, /*topOrigin=*/null);
         if (clientDataHash == null) {
@@ -1071,43 +1279,40 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             return null;
         }
 
-        Bundle publicKeyCredentialOptionBundle = buildPublicKeyCredentialOptionBundle(requestAsJson,
-                Base64.encodeToString(
-                        clientDataHash, Base64.NO_PADDING | Base64.NO_WRAP | Base64.URL_SAFE));
+        Bundle publicKeyCredentialOptionBundle =
+                buildPublicKeyCredentialOptionBundle(requestAsJson, clientDataHash);
 
-        // Build the CredentialOption:
+        // Build the CredentialOption for passkeys:
         Object credentialOption;
-        try {
-            final Class<?> credentialOptionBuilderClass =
-                    Class.forName("android.credentials.CredentialOption$Builder");
-            final Object credentialOptionBuilder =
-                    credentialOptionBuilderClass
-                            .getConstructor(String.class, Bundle.class, Bundle.class)
-                            .newInstance(CRED_MAN_PREFIX + "TYPE_PUBLIC_KEY_CREDENTIAL",
-                                    publicKeyCredentialOptionBundle,
-                                    publicKeyCredentialOptionBundle);
-            credentialOption =
-                    credentialOptionBuilderClass.getMethod("build").invoke(credentialOptionBuilder);
-        } catch (ClassNotFoundException e) {
-            // In order to be compatible with Android 14 Beta 1, the older
-            // form of the call is also tried.
-            credentialOption =
-                    Class.forName("android.credentials.CredentialOption")
-                            .getConstructor(String.class, Bundle.class, Bundle.class, Boolean.TYPE)
-                            .newInstance(CRED_MAN_PREFIX + "TYPE_PUBLIC_KEY_CREDENTIAL",
-                                    publicKeyCredentialOptionBundle,
-                                    publicKeyCredentialOptionBundle, false);
-        }
+        final Class<?> credentialOptionBuilderClass = credManCredentialOptionBuilderClass();
+        final Object credentialOptionBuilder =
+                credentialOptionBuilderClass
+                        .getConstructor(String.class, Bundle.class, Bundle.class)
+                        .newInstance(TYPE_PASSKEY, publicKeyCredentialOptionBundle,
+                                publicKeyCredentialOptionBundle);
+        credentialOption =
+                credentialOptionBuilderClass.getMethod("build").invoke(credentialOptionBuilder);
 
         // Build the GetCredentialRequest:
-        final Class<?> getCredentialRequestBuilderClass =
-                Class.forName("android.credentials.GetCredentialRequest$Builder");
+        final Class<?> getCredentialRequestBuilderClass = credManGetRequestBuilderClass();
+        Bundle getCredentialRequestBundle = new Bundle();
+        getCredentialRequestBundle.putParcelable(
+                CRED_MAN_PREFIX + "BUNDLE_KEY_PREFER_UI_BRANDING_COMPONENT_NAME",
+                GPM_COMPONENT_NAME);
         final Object getCredentialRequestBuilderObject =
                 getCredentialRequestBuilderClass.getConstructor(Bundle.class)
-                        .newInstance(new Bundle());
+                        .newInstance(getCredentialRequestBundle);
         getCredentialRequestBuilderClass
                 .getMethod("addCredentialOption", credentialOption.getClass())
                 .invoke(getCredentialRequestBuilderObject, credentialOption);
+        if (requestPasswords) {
+            Object passwordCredentialOption = buildPasswordOption();
+            if (passwordCredentialOption != null) {
+                getCredentialRequestBuilderClass
+                        .getMethod("addCredentialOption", passwordCredentialOption.getClass())
+                        .invoke(getCredentialRequestBuilderObject, passwordCredentialOption);
+            }
+        }
         getCredentialRequestBuilderClass.getMethod("setOrigin", String.class)
                 .invoke(getCredentialRequestBuilderObject, convertOriginToString(origin));
         return getCredentialRequestBuilderClass.getMethod("build").invoke(
@@ -1115,16 +1320,17 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
     }
 
     private Bundle buildPublicKeyCredentialOptionBundle(
-            String requestAsJson, String encodedClientDataHash) {
+            String requestAsJson, byte[] clientDataHash) {
         final Bundle publicKeyCredentialOptionBundle = new Bundle();
         publicKeyCredentialOptionBundle.putString(CRED_MAN_PREFIX + "BUNDLE_KEY_SUBTYPE",
                 CRED_MAN_PREFIX + "BUNDLE_VALUE_SUBTYPE_GET_PUBLIC_KEY_CREDENTIAL_OPTION");
         publicKeyCredentialOptionBundle.putString(
                 CRED_MAN_PREFIX + "BUNDLE_KEY_REQUEST_JSON", requestAsJson);
-        publicKeyCredentialOptionBundle.putString(
-                CRED_MAN_PREFIX + "BUNDLE_KEY_CLIENT_DATA_HASH", encodedClientDataHash);
+        publicKeyCredentialOptionBundle.putByteArray(
+                CRED_MAN_PREFIX + "BUNDLE_KEY_CLIENT_DATA_HASH", clientDataHash);
         publicKeyCredentialOptionBundle.putBoolean(
                 CRED_MAN_PREFIX + "BUNDLE_KEY_PREFER_IMMEDIATELY_AVAILABLE_CREDENTIALS", false);
+        publicKeyCredentialOptionBundle.putString(CHANNEL_KEY, getChannel());
         return publicKeyCredentialOptionBundle;
     }
 
@@ -1132,23 +1338,75 @@ public class Fido2CredentialRequest implements Callback<Pair<Integer, Intent>> {
             @ClientDataRequestType int clientDataRequestType, String callerOrigin, byte[] challenge,
             boolean isCrossOrigin, PaymentOptions paymentOptions, String relyingPartyId,
             Origin topOrigin) {
-        mClientDataJson = ClientDataJson.buildClientDataJson(clientDataRequestType, callerOrigin,
-                challenge, isCrossOrigin, paymentOptions, relyingPartyId, topOrigin);
-        if (mClientDataJson == null) {
+        String clientDataJson = ClientDataJson.buildClientDataJson(clientDataRequestType,
+                callerOrigin, challenge, isCrossOrigin, paymentOptions, relyingPartyId, topOrigin);
+        if (clientDataJson == null) {
             return null;
         }
+        mClientDataJson = clientDataJson.getBytes();
         MessageDigest messageDigest;
         try {
             messageDigest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             return null;
         }
-        messageDigest.update(mClientDataJson.getBytes());
+        messageDigest.update(mClientDataJson);
         return messageDigest.digest();
     }
 
+    private void notifyBrowserOnCredManClosed(boolean success) {
+        if (mConditionalUiState == ConditionalUiState.NONE) return;
+        mBrowserBridge.onCredManUiClosed(mFrameHost, success);
+    }
+
+    private boolean isHybridClientApiAvailable() {
+        return PackageUtils.getPackageVersion("com.google.android.gms")
+                >= GMSCORE_MIN_VERSION_HYBRID_API
+                && DeviceFeatureMap.isEnabled(DeviceFeatureList.WEBAUTHN_ANDROID_HYBRID_CLIENT_UI);
+    }
+
+    private static final String getChannel() {
+        if (VersionInfo.isCanaryBuild()) {
+            return "canary";
+        }
+        if (VersionInfo.isDevBuild()) {
+            return "dev";
+        }
+        if (VersionInfo.isBetaBuild()) {
+            return "beta";
+        }
+        if (VersionInfo.isStableBuild()) {
+            return "stable";
+        }
+        if (VersionInfo.isLocalBuild()) {
+            return "built_locally";
+        }
+        assert false : "Channel must be canary, dev, beta, stable or chrome must be built locally.";
+        return null;
+    }
+
+    private Object buildPasswordOption() throws ReflectiveOperationException {
+        Object passwordCredentialOption;
+        Bundle passwordOptionBundle = new Bundle();
+        passwordOptionBundle.putString(CHANNEL_KEY, getChannel());
+
+        final Class<?> credentialOptionBuilderClass = credManCredentialOptionBuilderClass();
+        final Object credentialOptionBuilder =
+                credentialOptionBuilderClass
+                        .getConstructor(String.class, Bundle.class, Bundle.class)
+                        .newInstance("android.credentials.TYPE_PASSWORD_CREDENTIAL",
+                                passwordOptionBundle, passwordOptionBundle);
+        credentialOptionBuilderClass.getMethod("setAllowedProviders", Set.class)
+                .invoke(credentialOptionBuilder, Set.of(GPM_COMPONENT_NAME));
+        passwordCredentialOption =
+                credentialOptionBuilderClass.getMethod("build").invoke(credentialOptionBuilder);
+
+        return passwordCredentialOption;
+    }
+
+    @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
     @NativeMethods
-    interface Natives {
+    public interface Natives {
         String createOptionsToJson(ByteBuffer serializedOptions);
         byte[] makeCredentialResponseFromJson(String json);
         String getOptionsToJson(ByteBuffer serializedOptions);

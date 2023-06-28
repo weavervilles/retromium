@@ -35,9 +35,6 @@
 #include "third_party/abseil-cpp/absl/utility/utility.h"
 #include "third_party/blink/public/common/font_unique_name_lookup/font_unique_name_table.pb.h"
 #include "third_party/blink/public/common/font_unique_name_lookup/icu_fold_case_util.h"
-#include "third_party/skia/include/core/SkFontMgr.h"
-#include "third_party/skia/include/core/SkTypeface.h"
-#include "third_party/skia/include/ports/SkTypeface_win.h"
 #include "ui/gfx/win/direct_write.h"
 #include "ui/gfx/win/text_analysis_source.h"
 
@@ -579,6 +576,7 @@ void DWriteFontProxyImpl::MatchUniqueFont(
   std::move(callback).Run(std::move(font_file), ttc_index);
 }
 
+<<<<<<< HEAD
 void DWriteFontProxyImpl::GetUniqueFontLookupMode(
     GetUniqueFontLookupModeCallback callback) {
   InitializeDirectWrite();
@@ -642,6 +640,8 @@ void DWriteFontProxyImpl::FallbackFamilyAndStyleForCodepoint(
   std::move(callback).Run(std::move(result_fallback_and_style));
 }
 
+=======
+>>>>>>> 4abd918b29516f4a97125e618c490f82492b935b
 void DWriteFontProxyImpl::InitializeDirectWrite() {
   HRESULT hr;
   if (direct_write_initialized_)

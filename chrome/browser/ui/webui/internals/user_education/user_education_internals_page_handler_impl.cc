@@ -66,8 +66,9 @@ std::vector<std::string> GetSupportedPlatforms(
 std::vector<std::string> GetPromoInstructions(
     const user_education::FeaturePromoSpecification& spec) {
   std::vector<std::string> instructions;
-  if (!spec.bubble_title_text().empty()) {
-    instructions.emplace_back(base::UTF16ToUTF8(spec.bubble_title_text()));
+  if (spec.bubble_title_string_id()) {
+    instructions.emplace_back(
+        l10n_util::GetStringUTF8(spec.bubble_title_string_id()));
   }
   instructions.emplace_back(
       l10n_util::GetStringUTF8(spec.bubble_body_string_id()));
@@ -83,8 +84,8 @@ std::vector<std::string> GetTutorialInstructions(
     const user_education::TutorialDescription& desc) {
   std::vector<std::string> instructions;
   for (const auto& step : desc.steps) {
-    if (step.body_text_id) {
-      instructions.emplace_back(l10n_util::GetStringUTF8(step.body_text_id));
+    if (step.body_text_id()) {
+      instructions.emplace_back(l10n_util::GetStringUTF8(step.body_text_id()));
     }
   }
   return instructions;

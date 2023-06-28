@@ -57,22 +57,14 @@ struct VIEWS_EXPORT MenuConfig {
   // submenu and parent menu.
   int submenu_horizontal_inset = 3;
 
-  // Margins between the top of the item and the label.
-  int item_top_margin = 4;
-
-  // Margins between the bottom of the item and the label.
-  int item_bottom_margin = 3;
-
-  // Margins used if the menu doesn't have icons.
-  int item_no_icon_top_margin = 4;
-  int item_no_icon_bottom_margin = 4;
+  // Margins between the item top/bottom and its contents.
+  int item_vertical_margin = 4;
 
   // Minimum dimensions used for entire items. If these are nonzero, they
   // override the vertical margin constants given above - the item's text and
   // icon are vertically centered within these heights.
   int minimum_text_item_height = 0;
   int minimum_container_item_height = 0;
-  int minimum_menu_width = 0;
 
   // TODO(ftirelo): Paddings should come from the layout provider, once Harmony
   // is the default behavior.
@@ -86,20 +78,13 @@ struct VIEWS_EXPORT MenuConfig {
   // Horizontal border padding in a menu item
   int item_horizontal_border_padding = 0;
 
-  // Padding between the label and submenu arrow.
-  int label_to_arrow_padding = 8;
-
   // Padding between the arrow and the edge.
-  int arrow_to_edge_padding = 5;
+  int arrow_to_edge_padding = 8;
 
   // The space reserved for the check. The actual size of the image may be
   // different.
   int check_width = kMenuCheckSize;
   int check_height = kMenuCheckSize;
-
-  // The horizontal space reserved for submenu arrow. The actual width of the
-  // image may be different.
-  int arrow_width = kSubmenuArrowSize;
 
   // Height of a normal separator (ui::NORMAL_SEPARATOR).
   int separator_height = 11;
@@ -121,10 +106,6 @@ struct VIEWS_EXPORT MenuConfig {
 
   // Thickness of the drawn separator line in pixels for double separator.
   int double_separator_thickness = 2;
-
-  // Left & right separator padding
-  int separator_left_margin = 0;
-  int separator_right_margin = 0;
 
   // Are mnemonics shown?
   bool show_mnemonics = false;
@@ -153,11 +134,9 @@ struct VIEWS_EXPORT MenuConfig {
   // Whether the keyboard accelerators are visible.
   bool show_accelerators = true;
 
-  // True if icon to label padding is always added with or without icon.
-  bool always_use_icon_to_label_padding = false;
-
-  // True if submenu arrow and shortcut right edge should be aligned.
-  bool align_arrow_and_shortcut = false;
+  // True if submenu arrows should get their own column, separate from minor
+  // text.
+  bool reserve_dedicated_arrow_column = true;
 
   // True if the context menu's should be offset from the cursor position.
   bool offset_context_menus = false;
@@ -209,9 +188,8 @@ struct VIEWS_EXPORT MenuConfig {
   // Vertical padding for touchable menus.
   int vertical_touchable_menu_item_padding = 8;
 
-  // Left & right margin of padded separator (ui::PADDED_SEPARATOR).
-  int padded_separator_left_margin = 64;
-  int padded_separator_right_margin = 0;
+  // Padding at the start of a padded separator (ui::PADDED_SEPARATOR).
+  int padded_separator_start_padding = 64;
 
   // Whether arrow keys should wrap around the end of the menu when selecting.
   bool arrow_key_selection_wraps = true;

@@ -12,7 +12,6 @@ import android.view.Window;
 import androidx.annotation.ColorInt;
 import androidx.annotation.Nullable;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CallbackController;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.chrome.R;
@@ -44,6 +43,8 @@ import org.chromium.ui.util.ColorUtils;
 
 /**
  * Maintains the status bar color for a {@link Window}.
+ *
+ * TODO(crbug.com/1450945): Prevent initialization of StatusBarColorController for automotive.
  */
 public class StatusBarColorController
         implements DestroyObserver, TopToolbarCoordinator.UrlExpansionObserver,
@@ -204,7 +205,7 @@ public class StatusBarColorController
                 mLayoutStateProvider = layoutManager;
                 mLayoutStateObserver = new LayoutStateObserver() {
                     @Override
-                    public void onStartedShowing(int layoutType, boolean showToolbar) {
+                    public void onStartedShowing(int layoutType) {
                         if (layoutType != LayoutType.TAB_SWITCHER
                                 && layoutType != LayoutType.START_SURFACE) {
                             return;
@@ -429,8 +430,8 @@ public class StatusBarColorController
 
         final View root = window.getDecorView().getRootView();
         boolean needsDarkStatusBarIcons = !ColorUtils.shouldUseLightForegroundOnBackground(color);
-        ApiCompatibilityUtils.setStatusBarIconColor(root, needsDarkStatusBarIcons);
-        ApiCompatibilityUtils.setStatusBarColor(window, color);
+        UiUtils.setStatusBarIconColor(root, needsDarkStatusBarIcons);
+        UiUtils.setStatusBarColor(window, color);
     }
 
     /**

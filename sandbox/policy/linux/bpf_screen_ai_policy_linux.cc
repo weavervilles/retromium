@@ -45,6 +45,9 @@ ResultExpr ScreenAIProcessPolicy::EvaluateSyscall(
           .Default(Error(ENOSYS));
     }
 
+    case __NR_getcpu:
+      return Allow();
+
     case __NR_get_mempolicy: {
       const Arg<unsigned long> which(4);
       return If(which == 0, Allow()).Else(Error(EPERM));
@@ -58,7 +61,9 @@ ResultExpr ScreenAIProcessPolicy::EvaluateSyscall(
 
     default:
       if (SyscallSets::IsGoogle3Threading(system_call_number)) {
-        return RestrictGoogle3Threading(system_call_number);
+        return RestrictGoogle3Threading(
+            system_call_number,
+            BPFBasePolicy::EvaluateSyscall(system_call_number));
       }
 
       return BPFBasePolicy::EvaluateSyscall(system_call_number);

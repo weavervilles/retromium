@@ -11,12 +11,12 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "components/global_media_controls/media_notification_view_ash_impl.h"
 #include "components/global_media_controls/public/constants.h"
 #include "components/global_media_controls/public/media_item_ui.h"
 #include "components/global_media_controls/public/views/media_item_ui_device_selector.h"
 #include "components/global_media_controls/public/views/media_item_ui_footer.h"
 #include "components/media_message_center/media_notification_container.h"
-#include "components/media_message_center/media_notification_view_ash_impl.h"
 #include "components/media_message_center/media_notification_view_impl.h"
 #include "media/base/media_switches.h"
 #include "ui/base/metadata/metadata_header_macros.h"
@@ -63,8 +63,7 @@ class COMPONENT_EXPORT(GLOBAL_MEDIA_CONTROLS) MediaItemUIView
           notification_theme = absl::nullopt,
       absl::optional<media_message_center::MediaColorTheme> media_color_theme =
           absl::nullopt,
-      absl::optional<media_message_center::MediaDisplayPage>
-          media_display_page = absl::nullopt);
+      absl::optional<MediaDisplayPage> media_display_page = absl::nullopt);
   MediaItemUIView(const MediaItemUIView&) = delete;
   MediaItemUIView& operator=(const MediaItemUIView&) = delete;
   ~MediaItemUIView() override;
@@ -159,7 +158,7 @@ class COMPONENT_EXPORT(GLOBAL_MEDIA_CONTROLS) MediaItemUIView
   std::u16string title_;
 
   // The scroll view that is currently holding this item.
-  raw_ptr<views::ScrollView> scroll_view_ = nullptr;
+  raw_ptr<views::ScrollView, DanglingUntriaged> scroll_view_ = nullptr;
 
   // Always "visible" so that it reserves space in the header so that the
   // dismiss button can appear without forcing things to shift.
@@ -173,8 +172,9 @@ class COMPONENT_EXPORT(GLOBAL_MEDIA_CONTROLS) MediaItemUIView
   raw_ptr<DismissButton> dismiss_button_ = nullptr;
   raw_ptr<media_message_center::MediaNotificationView> view_ = nullptr;
 
-  raw_ptr<MediaItemUIFooter> footer_view_ = nullptr;
-  raw_ptr<MediaItemUIDeviceSelector> device_selector_view_ = nullptr;
+  raw_ptr<MediaItemUIFooter, DanglingUntriaged> footer_view_ = nullptr;
+  raw_ptr<MediaItemUIDeviceSelector, DanglingUntriaged> device_selector_view_ =
+      nullptr;
 
   SkColor foreground_color_ = kDefaultForegroundColor;
   SkColor foreground_disabled_color_ = kDefaultForegroundColor;

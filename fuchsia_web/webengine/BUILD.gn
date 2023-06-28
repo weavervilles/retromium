@@ -117,6 +117,11 @@ _disallowed_deps =
       # Ensure WebEngine is not communicating with the Finch service until it
       # is explicitly supported. See crbug.com/1155712.
       "//components/variations/service",
+
+      # WebEngine should use Perfetto instead of libtrace. Vulkan depends on
+      # trace-engine, but there should be no dependencies on trace-provider.
+      "//third_party/fuchsia-sdk/sdk/pkg/trace",
+      "//third_party/fuchsia-sdk/sdk/pkg/trace-provider-so",
     ]
 
 source_set("web_engine_export_from_implementation") {
@@ -467,11 +472,14 @@ fuchsia_component("web_instance_with_svc_directory_component") {
 }
 
 # Component definition for the legacy fuchsia.web.ContextProvider service.
-# TODO(crbug.com/1010222): Remove once all callers have migrated to launching
+# TODO(crbug.com/1443560): Remove once all callers have migrated to launching
 # instances directly as Components.
 fuchsia_component("context_provider_component") {
   manifest = "context_provider.cml"
   data_deps = [ ":web_engine_exe" ]
+
+  # Context Provider launches Web Instances from the same package.
+  deps = [ ":web_instance_with_svc_directory_component" ]
 }
 
 fuchsia_package("web_engine") {
@@ -479,7 +487,6 @@ fuchsia_package("web_engine") {
   deps = [
     ":context_provider_component",
     ":web_instance_component",
-    ":web_instance_with_svc_directory_component",
   ]
   excluded_files = _web_engine_excluded_files
   excluded_dirs = FUCHSIA_PACKAGED_CONTENT_EMBEDDER_EXCLUDED_DIRS
@@ -611,10 +618,9 @@ test("web_engine_browsertests") {
     "//ui/ozone",
   ]
 
-  test_runner_shard =
-      "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
   additional_manifest_fragments = [
     "//build/config/fuchsia/test/fonts.shard.test-cml",
+    "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
     "//build/config/fuchsia/test/network.shard.test-cml",
     "//build/config/fuchsia/test/gfx_test_ui_stack.shard.test-cml",
     "//third_party/fuchsia-sdk/sdk/pkg/vulkan/client.shard.cml",
@@ -720,6 +726,7 @@ test("web_engine_integration_tests") {
     "//build/config/fuchsia/test/archivist.shard.test-cml",
     "//build/config/fuchsia/test/audio_output.shard.test-cml",
     "//build/config/fuchsia/test/fonts.shard.test-cml",
+    "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
     "//build/config/fuchsia/test/network.shard.test-cml",
     "//fuchsia_web/webengine/web_engine_integration_tests.shard.test-cml",
     "//third_party/fuchsia-sdk/sdk/pkg/sys/component/realm_builder_absolute.shard.cml",

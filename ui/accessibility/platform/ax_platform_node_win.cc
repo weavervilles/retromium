@@ -35,7 +35,6 @@
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/iaccessible2/ia2_api_all.h"
 #include "ui/accessibility/accessibility_features.h"
-#include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_action_handler_registry.h"
 #include "ui/accessibility/ax_active_popup.h"
@@ -715,7 +714,7 @@ void AXPlatformNodeWin::FireUiaTextEditTextChangedEvent(
     const gfx::Range& range,
     const std::wstring& active_composition_text,
     bool is_composition_committed) {
-  if (!::switches::IsExperimentalAccessibilityPlatformUIAEnabled()) {
+  if (!::features::IsUiaProviderEnabled()) {
     return;
   }
 
@@ -6762,7 +6761,7 @@ int32_t AXPlatformNodeWin::ComputeIA2Role() {
       ia2_role = IA2_ROLE_LANDMARK;
       break;
     case ax::mojom::Role::kBlockquote:
-      ia2_role = IA2_ROLE_SECTION;
+      ia2_role = IA2_ROLE_BLOCK_QUOTE;
       break;
     case ax::mojom::Role::kCanvas:
       if (GetBoolAttribute(ax::mojom::BoolAttribute::kCanvasHasFallback)) {
@@ -7685,8 +7684,9 @@ absl::optional<DWORD> AXPlatformNodeWin::MojoEventToMSAAEvent(
 // static
 absl::optional<EVENTID> AXPlatformNodeWin::MojoEventToUIAEvent(
     ax::mojom::Event event) {
-  if (!::switches::IsExperimentalAccessibilityPlatformUIAEnabled())
+  if (!::features::IsUiaProviderEnabled()) {
     return absl::nullopt;
+  }
 
   switch (event) {
     case ax::mojom::Event::kAlert:
@@ -7715,8 +7715,9 @@ absl::optional<EVENTID> AXPlatformNodeWin::MojoEventToUIAEvent(
 // static
 absl::optional<PROPERTYID> AXPlatformNodeWin::MojoEventToUIAProperty(
     ax::mojom::Event event) {
-  if (!::switches::IsExperimentalAccessibilityPlatformUIAEnabled())
+  if (!::features::IsUiaProviderEnabled()) {
     return absl::nullopt;
+  }
 
   switch (event) {
     case ax::mojom::Event::kControlsChanged:
@@ -7917,13 +7918,6 @@ bool AXPlatformNodeWin::IsHyperlink() {
   if (hyperlink_index >= 0)
     return true;
   return false;
-}
-
-void AXPlatformNodeWin::ComputeHypertextRemovedAndInserted(size_t* start,
-                                                           size_t* old_len,
-                                                           size_t* new_len) {
-  AXPlatformNodeBase::ComputeHypertextRemovedAndInserted(old_hypertext_, start,
-                                                         old_len, new_len);
 }
 
 double AXPlatformNodeWin::GetHorizontalScrollPercent() {

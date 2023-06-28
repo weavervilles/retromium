@@ -13,6 +13,7 @@
 #include "ash/public/cpp/connectivity_services.h"
 #include "ash/public/cpp/esim_manager.h"
 #include "ash/public/cpp/network_config_service.h"
+#include "ash/webui/common/trusted_types_util.h"
 #include "ash/webui/network_ui/network_diagnostics_resource_provider.h"
 #include "ash/webui/network_ui/network_health_resource_provider.h"
 #include "ash/webui/network_ui/traffic_counters_resource_provider.h"
@@ -450,7 +451,20 @@ class NetworkConfigMessageHandler : public content::WebUIMessageHandler {
 
   void ResetApnMigrator(const base::Value::List& arg_list) {
     NET_LOG(EVENT) << "Executing reset ApnMigrator";
-    g_browser_process->local_state()->ClearPref(prefs::kApnMigratedIccids);
+    PrefService* local_state = g_browser_process->local_state();
+
+    // Clear set of migrated ICCIDs.
+    local_state->ClearPref(prefs::kApnMigratedIccids);
+
+    // Clear all revamp APN lists in all network.
+    const std::string network_metadata_pref = "network_metadata";
+    base::Value::Dict device_dict =
+        local_state->GetDict(network_metadata_pref).Clone();
+    for (auto const [guid, val] : device_dict) {
+      base::Value::Dict* network_dict = device_dict.FindDict(guid.c_str());
+      network_dict->Remove("custom_apn_list_v2");
+    }
+    local_state->SetDict(network_metadata_pref, std::move(device_dict));
   }
 
   void OnEuiccReset(bool success) {
@@ -986,8 +1000,6 @@ NetworkUI::NetworkUI(content::WebUI* web_ui)
       web_ui->GetWebContents()->GetBrowserContext(),
       chrome::kChromeUINetworkHost);
 
-  webui::EnableTrustedTypesCSP(html);
-
   html->AddLocalizedStrings(localized_strings);
   html->AddBoolean("isGuestModeActive", IsGuestModeActive());
   html->AddBoolean("isHotspotEnabled", features::IsHotspotEnabled());
@@ -1004,6 +1016,10 @@ NetworkUI::NetworkUI(content::WebUI* web_ui)
   webui::SetupWebUIDataSource(
       html, base::make_span(kNetworkUiResources, kNetworkUiResourcesSize),
       IDR_NETWORK_UI_NETWORK_HTML);
+  // Enabling trusted types via trusted_types_util must be done after
+  // webui::SetupWebUIDataSource to override the trusted type CSP with correct
+  // policies for JS WebUIs.
+  ash::EnableTrustedTypesCSP(html);
 }
 
 NetworkUI::~NetworkUI() = default;

@@ -129,6 +129,12 @@ static void CheckLayoutClean(const Document* document) {
 }
 #endif
 
+WebAXObject::WebAXObject() = default;
+
+WebAXObject::WebAXObject(const WebAXObject& o) {
+  Assign(o);
+}
+
 void WebAXObject::Reset() {
   private_.Reset();
 }
@@ -539,15 +545,6 @@ void WebAXObject::Selection(bool& is_selection_backward,
   }
 }
 
-bool WebAXObject::SetSelected(bool selected) const {
-  if (IsDetached())
-    return false;
-
-  ScopedActionAnnotator annotater(private_.Get(),
-                                  ax::mojom::blink::Action::kSetSelection);
-  return private_->RequestSetSelectedAction(selected);
-}
-
 bool WebAXObject::SetSelection(const WebAXObject& anchor_object,
                                int anchor_offset,
                                const WebAXObject& focus_object,
@@ -935,7 +932,9 @@ bool WebAXObject::ScrollToMakeVisible() const {
 
   ScopedActionAnnotator annotater(
       private_.Get(), ax::mojom::blink::Action::kScrollToMakeVisible);
-  return private_->RequestScrollToMakeVisibleAction();
+  ui::AXActionData action_data;
+  action_data.action = ax::mojom::blink::Action::kScrollToMakeVisible;
+  return private_->PerformAction(action_data);
 }
 
 bool WebAXObject::ScrollToMakeVisibleWithSubFocus(
@@ -966,6 +965,7 @@ bool WebAXObject::ScrollToMakeVisibleWithSubFocus(
       visible_horizontal_behavior, horizontal_behavior, horizontal_behavior};
   blink::mojom::blink::ScrollAlignment blink_vertical_scroll_alignment = {
       visible_vertical_behavior, vertical_behavior, vertical_behavior};
+
   return private_->RequestScrollToMakeVisibleWithSubFocusAction(
       subfocus, blink_horizontal_scroll_alignment,
       blink_vertical_scroll_alignment);

@@ -938,13 +938,13 @@ class ExtensionPrefs : public KeyedService {
 
   // The pref service specific to this set of extension prefs. Owned by the
   // BrowserContext.
-  raw_ptr<PrefService> prefs_;
+  raw_ptr<PrefService, DanglingUntriaged> prefs_;
 
   // Base extensions install directory.
   base::FilePath install_directory_;
 
   // Weak pointer, owned by BrowserContext.
-  raw_ptr<ExtensionPrefValueMap, DanglingUntriaged> extension_pref_value_map_;
+  raw_ptr<ExtensionPrefValueMap, DanglingAcrossTasks> extension_pref_value_map_;
 
   raw_ptr<base::Clock> clock_;
 

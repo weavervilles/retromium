@@ -138,8 +138,6 @@ class WebAppInstallFinalizer {
                                webapps::WebappUninstallSource uninstall_surface,
                                UninstallWebAppCallback callback);
 
-  virtual bool CanUserUninstallWebApp(const AppId& app_id) const;
-
   virtual bool CanReparentTab(const AppId& app_id, bool shortcut_created) const;
   virtual void ReparentTab(const AppId& app_id,
                            bool shortcut_created,
@@ -160,9 +158,6 @@ class WebAppInstallFinalizer {
       WebAppCommandManager* command_manager,
       WebAppOriginAssociationManager* origin_association_manager);
 
-  virtual void SetRemoveManagementTypeCallbackForTesting(
-      base::RepeatingCallback<void(const AppId&)>);
-
   Profile* profile() { return profile_; }
 
   const WebAppRegistrar& GetWebAppRegistrar() const;
@@ -173,7 +168,7 @@ class WebAppInstallFinalizer {
       WebAppManagement::Type source,
       bool is_placeholder,
       GURL install_url,
-      const std::vector<std::string>& additional_policy_ids);
+      std::vector<std::string> additional_policy_ids);
 
   // Used to schedule a WebAppUninstallCommand. The |external_install_source|
   // field is only required for external app uninstalls to verify OS
@@ -248,25 +243,22 @@ class WebAppInstallFinalizer {
       const AppId& app_id,
       const WebAppInstallInfo& new_web_app_info);
 
-  raw_ptr<WebAppInstallManager, DanglingUntriaged> install_manager_ = nullptr;
+  raw_ptr<WebAppInstallManager, DanglingAcrossTasks> install_manager_ = nullptr;
   raw_ptr<WebAppRegistrar, DanglingUntriaged> registrar_ = nullptr;
   raw_ptr<WebAppSyncBridge, DanglingUntriaged> sync_bridge_ = nullptr;
-  raw_ptr<WebAppUiManager, DanglingUntriaged> ui_manager_ = nullptr;
-  raw_ptr<OsIntegrationManager, DanglingUntriaged> os_integration_manager_ =
+  raw_ptr<WebAppUiManager, DanglingAcrossTasks> ui_manager_ = nullptr;
+  raw_ptr<OsIntegrationManager, DanglingAcrossTasks> os_integration_manager_ =
       nullptr;
   raw_ptr<WebAppIconManager, DanglingUntriaged> icon_manager_ = nullptr;
-  raw_ptr<WebAppPolicyManager, DanglingUntriaged> policy_manager_ = nullptr;
+  raw_ptr<WebAppPolicyManager, DanglingAcrossTasks> policy_manager_ = nullptr;
   raw_ptr<WebAppTranslationManager, DanglingUntriaged> translation_manager_ =
       nullptr;
-  raw_ptr<WebAppCommandManager, DanglingUntriaged> command_manager_ = nullptr;
-  raw_ptr<WebAppOriginAssociationManager, DanglingUntriaged>
+  raw_ptr<WebAppCommandManager, DanglingAcrossTasks> command_manager_ = nullptr;
+  raw_ptr<WebAppOriginAssociationManager, DanglingAcrossTasks>
       origin_association_manager_ = nullptr;
 
   const raw_ptr<Profile> profile_;
   bool started_ = false;
-
-  base::RepeatingCallback<void(const AppId& app_id)>
-      management_type_removed_callback_for_testing_;
 
   base::WeakPtrFactory<WebAppInstallFinalizer> weak_ptr_factory_{this};
 };

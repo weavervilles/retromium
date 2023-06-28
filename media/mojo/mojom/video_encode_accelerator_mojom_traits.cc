@@ -28,10 +28,11 @@ EnumTraits<media::mojom::VideoEncodeAcceleratorSupportedRateControlMode,
     case media::VideoEncodeAccelerator::kVariableMode:
       return media::mojom::VideoEncodeAcceleratorSupportedRateControlMode::
           kVariableMode;
+    case media::VideoEncodeAccelerator::kExternalMode:
+      return media::mojom::VideoEncodeAcceleratorSupportedRateControlMode::
+          kExternalMode;
   }
-  NOTREACHED();
-  return media::mojom::VideoEncodeAcceleratorSupportedRateControlMode::
-      kConstantMode;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -51,9 +52,12 @@ bool EnumTraits<media::mojom::VideoEncodeAcceleratorSupportedRateControlMode,
         kVariableMode:
       *out = media::VideoEncodeAccelerator::kVariableMode;
       return true;
+    case media::mojom::VideoEncodeAcceleratorSupportedRateControlMode::
+        kExternalMode:
+      *out = media::VideoEncodeAccelerator::kExternalMode;
+      return true;
   }
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -162,6 +166,22 @@ bool StructTraits<media::mojom::VideoBitrateAllocationDataView,
 }
 
 // static
+bool StructTraits<media::mojom::VideoEncodeOptionsDataView,
+                  media::VideoEncoder::EncodeOptions>::
+    Read(media::mojom::VideoEncodeOptionsDataView data,
+         media::VideoEncoder::EncodeOptions* out_options) {
+  out_options->key_frame = data.force_keyframe();
+  int32_t quantizer = data.quantizer();
+  if (quantizer < 0) {
+    out_options->quantizer.reset();
+  } else {
+    out_options->quantizer = data.quantizer();
+  }
+
+  return true;
+}
+
+// static
 bool UnionTraits<media::mojom::CodecMetadataDataView,
                  media::BitstreamBufferMetadata>::
     Read(media::mojom::CodecMetadataDataView data,
@@ -183,8 +203,7 @@ bool UnionTraits<media::mojom::CodecMetadataDataView,
       return data.ReadH265(&out->h265);
     }
   }
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -273,8 +292,7 @@ EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_StorageType,
     case media::VideoEncodeAccelerator::Config::StorageType::kShmem:
       return media::mojom::VideoEncodeAcceleratorConfig_StorageType::kShmem;
   }
-  NOTREACHED();
-  return media::mojom::VideoEncodeAcceleratorConfig_StorageType::kShmem;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -292,8 +310,7 @@ bool EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_StorageType,
           media::VideoEncodeAccelerator::Config::StorageType::kGpuMemoryBuffer;
       return true;
   }
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -310,8 +327,7 @@ EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_EncoderType,
       return media::mojom::VideoEncodeAcceleratorConfig_EncoderType::
           kNoPreference;
   }
-  NOTREACHED();
-  return media::mojom::VideoEncodeAcceleratorConfig_EncoderType::kHardware;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -331,8 +347,7 @@ bool EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_EncoderType,
           media::VideoEncodeAccelerator::Config::EncoderType::kNoPreference;
       return true;
   }
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -346,8 +361,7 @@ EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_ContentType,
     case media::VideoEncodeAccelerator::Config::ContentType::kCamera:
       return media::mojom::VideoEncodeAcceleratorConfig_ContentType::kCamera;
   }
-  NOTREACHED();
-  return media::mojom::VideoEncodeAcceleratorConfig_ContentType::kCamera;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -363,8 +377,7 @@ bool EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_ContentType,
       *output = media::VideoEncodeAccelerator::Config::ContentType::kDisplay;
       return true;
   }
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -382,8 +395,7 @@ EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_InterLayerPredMode,
       return media::mojom::VideoEncodeAcceleratorConfig_InterLayerPredMode::
           kOnKeyPic;
   }
-  NOTREACHED();
-  return media::mojom::VideoEncodeAcceleratorConfig_InterLayerPredMode::kOff;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -405,8 +417,7 @@ bool EnumTraits<media::mojom::VideoEncodeAcceleratorConfig_InterLayerPredMode,
           media::VideoEncodeAccelerator::Config::InterLayerPredMode::kOnKeyPic;
       return true;
   }
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -464,8 +475,7 @@ UnionTraits<media::mojom::BitrateDataView, media::Bitrate>::GetTag(
     case media::Bitrate::Mode::kExternal:
       return media::mojom::BitrateDataView::Tag::kExternal;
   }
-  NOTREACHED();
-  return media::mojom::BitrateDataView::Tag::kConstant;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -481,8 +491,7 @@ bool UnionTraits<media::mojom::BitrateDataView, media::Bitrate>::Read(
       return input.ReadExternal(output);
   }
 
-  NOTREACHED();
-  return false;
+  NOTREACHED_NORETURN();
 }
 
 // static
@@ -505,8 +514,6 @@ bool StructTraits<media::mojom::VideoEncodeAcceleratorConfigDataView,
   media::Bitrate bitrate;
   if (!input.ReadBitrate(&bitrate))
     return false;
-  DCHECK((bitrate.mode() == media::Bitrate::Mode::kConstant) ==
-         (bitrate.peak_bps() == 0u));
 
   absl::optional<uint32_t> initial_framerate;
   if (input.has_initial_framerate())

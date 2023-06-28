@@ -20,6 +20,7 @@
 #include "chrome/browser/download/bubble/download_display_controller.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_item_model.h"
+#include "chrome/browser/download/download_item_web_app_data.h"
 #include "chrome/browser/download/download_ui_model.h"
 #include "chrome/browser/download/offline_item_model_manager.h"
 #include "chrome/browser/download/offline_item_model_manager_factory.h"
@@ -30,6 +31,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "components/download/content/public/all_download_item_notifier.h"
 #include "components/download/public/common/download_item.h"
 #include "components/offline_items_collection/core/offline_content_provider.h"
@@ -164,6 +166,13 @@ void UpdateInfoForModel(const DownloadUIModel& model,
   }
 }
 
+bool BrowserMatchesWebAppData(const Browser* browser,
+                              const DownloadItemWebAppData* data) {
+  return data != nullptr
+             ? web_app::AppBrowserController::IsForWebApp(browser, data->id())
+             : !web_app::AppBrowserController::IsWebApp(browser);
+}
+
 }  // namespace
 
 bool DownloadBubbleUpdateService::ItemSortKey::operator<(
@@ -256,15 +265,41 @@ bool DownloadBubbleUpdateService::CacheManager::IsOfflineItemCacheAtMax()
 }
 
 DownloadBubbleUpdateService::CacheManager&
+DownloadBubbleUpdateService::GetCacheForWebApp(const web_app::AppId& app_id) {
+  auto it = web_app_caches_.find(app_id);
+  if (it == web_app_caches_.end()) {
+    // Create a new CacheManager for this |app_id|.
+    it = web_app_caches_.emplace(app_id, this).first;
+  }
+  return it->second;
+}
+
+const DownloadBubbleUpdateService::CacheManager*
+DownloadBubbleUpdateService::GetExistingCacheForWebApp(
+    const web_app::AppId& app_id) const {
+  if (auto it = web_app_caches_.find(app_id); it != web_app_caches_.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
+DownloadBubbleUpdateService::CacheManager&
 DownloadBubbleUpdateService::GetCacheForItem(download::DownloadItem* item) {
-  // TODO(crbug.com/1420454): Pick the right cache for web apps.
-  return main_cache_;
+  auto* web_app_data = DownloadItemWebAppData::Get(item);
+  if (web_app_data == nullptr) {
+    return main_cache_;
+  }
+  return GetCacheForWebApp(web_app_data->id());
 }
 
 std::vector<DownloadBubbleUpdateService::CacheManager*>
 DownloadBubbleUpdateService::GetAllCacheManagers() {
-  // TODO(crbug.com/1420454): Add caches for web apps.
-  return {&main_cache_};
+  std::vector<CacheManager*> cache_managers;
+  cache_managers.push_back(&main_cache_);
+  for (auto& [web_app_id, cache_manager] : web_app_caches_) {
+    cache_managers.push_back(&cache_manager);
+  }
+  return cache_managers;
 }
 
 void DownloadBubbleUpdateService::Initialize(
@@ -337,7 +372,7 @@ bool DownloadBubbleUpdateService::CacheManager::GetAllModelsToDisplay(
     std::vector<DownloadUIModelPtr>& models,
     bool force_backfill_download_items) {
 #if DCHECK_IS_ON()
-  DCHECK(ConsistencyCheckCaches());
+  ConsistencyCheckCaches();
 #endif  // DCHECK_IS_ON()
 
   base::Time cutoff_time = GetCutoffTime();
@@ -419,7 +454,7 @@ bool DownloadBubbleUpdateService::CacheManager::GetAllModelsToDisplay(
   }
 
 #if DCHECK_IS_ON()
-  DCHECK(ConsistencyCheckCaches());
+  ConsistencyCheckCaches();
 #endif  // DCHECK_IS_ON()
   return models.size() == GetMaxNumItemsToShow() ||
          !(download_items_need_backfill || offline_items_need_backfill);
@@ -427,25 +462,36 @@ bool DownloadBubbleUpdateService::CacheManager::GetAllModelsToDisplay(
 
 bool DownloadBubbleUpdateService::GetAllModelsToDisplay(
     std::vector<DownloadUIModelPtr>& models,
+    const web_app::AppId* web_app_id,
     bool force_backfill_download_items) {
-  // TODO(crbug.com/1420454): Use cache for the web app, if applicable.
-  return main_cache_.GetAllModelsToDisplay(models,
-                                           force_backfill_download_items);
+  if (web_app_id == nullptr) {
+    return main_cache_.GetAllModelsToDisplay(models,
+                                             force_backfill_download_items);
+  }
+  return GetCacheForWebApp(*web_app_id)
+      .GetAllModelsToDisplay(models, force_backfill_download_items);
 }
 
 const AllDownloadUIModelsInfo&
-DownloadBubbleUpdateService::CacheManager::GetAllModelsInfo() {
+DownloadBubbleUpdateService::CacheManager::GetAllModelsInfo() const {
   return all_models_info_;
 }
 
-const AllDownloadUIModelsInfo& DownloadBubbleUpdateService::GetAllModelsInfo() {
-  // TODO(crbug.com/1420454): Use cache for the web app, if applicable.
-  return main_cache_.GetAllModelsInfo();
+const AllDownloadUIModelsInfo& DownloadBubbleUpdateService::GetAllModelsInfo(
+    const web_app::AppId* web_app_id) {
+  if (web_app_id == nullptr) {
+    return main_cache_.GetAllModelsInfo();
+  }
+  if (const CacheManager* cache = GetExistingCacheForWebApp(*web_app_id);
+      cache != nullptr) {
+    return cache->GetAllModelsInfo();
+  }
+  return AllDownloadUIModelsInfo::EmptyInfo();
 }
 
 void DownloadBubbleUpdateService::CacheManager::UpdateAllModelsInfo() {
 #if DCHECK_IS_ON()
-  DCHECK(ConsistencyCheckCaches());
+  ConsistencyCheckCaches();
 #endif  // DCHECK_IS_ON()
 
   AllDownloadUIModelsInfo info;
@@ -486,7 +532,7 @@ void DownloadBubbleUpdateService::CacheManager::UpdateAllModelsInfo() {
 ProgressInfo DownloadBubbleUpdateService::CacheManager::GetProgressInfo()
     const {
 #if DCHECK_IS_ON()
-  DCHECK(ConsistencyCheckCaches());
+  ConsistencyCheckCaches();
 #endif  // DCHECK_IS_ON()
 
   ProgressInfo info;
@@ -530,9 +576,16 @@ ProgressInfo DownloadBubbleUpdateService::CacheManager::GetProgressInfo()
   return info;
 }
 
-ProgressInfo DownloadBubbleUpdateService::GetProgressInfo() const {
-  // TODO(crbug.com/1420454): Use cache for the web app, if applicable.
-  return main_cache_.GetProgressInfo();
+ProgressInfo DownloadBubbleUpdateService::GetProgressInfo(
+    const web_app::AppId* web_app_id) const {
+  if (web_app_id == nullptr) {
+    return main_cache_.GetProgressInfo();
+  }
+  if (const CacheManager* cache = GetExistingCacheForWebApp(*web_app_id);
+      cache != nullptr) {
+    return cache->GetProgressInfo();
+  }
+  return ProgressInfo{};
 }
 
 void DownloadBubbleUpdateService::OnDownloadCreated(
@@ -559,6 +612,8 @@ void DownloadBubbleUpdateService::OnDownloadCreated(
     return;
   }
   GetCacheForItem(item).MaybeAddDownloadItemToCache(item, /*is_new=*/true);
+  // NotifyWindowsOfDownloadItemAdded() is called from
+  // DownloadBubbleUIControllerDelegate for new non-crx downloads.
 }
 
 void DownloadBubbleUpdateService::OnDelayedCrxDownloadCreated(
@@ -576,19 +631,25 @@ void DownloadBubbleUpdateService::OnDelayedCrxDownloadCreated(
       download_item_notifier_->GetManager()->GetDownloadByGuid(guid);
   if (item && !item->IsDone()) {
     GetCacheForItem(item).MaybeAddDownloadItemToCache(item, /*is_new=*/true);
-
-    Browser* browser_to_show_animation =
-        FindBrowserToShowAnimation(item, profile_);
-    for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
-      if (browser->window() &&
-          browser->window()->GetDownloadBubbleUIController()) {
-        browser->window()->GetDownloadBubbleUIController()->OnDownloadItemAdded(
-            item, /*may_show_animation=*/browser == browser_to_show_animation);
-      }
-    }
+    NotifyWindowsOfDownloadItemAdded(item);
   }
   size_t erased = delayed_crx_guids_.erase(guid);
   CHECK_EQ(erased, 1u);
+}
+
+void DownloadBubbleUpdateService::NotifyWindowsOfDownloadItemAdded(
+    download::DownloadItem* item) {
+  Browser* browser_to_show_animation =
+      FindBrowserToShowAnimation(item, profile_);
+  auto* web_app_data = DownloadItemWebAppData::Get(item);
+  for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
+    if (browser->window() &&
+        browser->window()->GetDownloadBubbleUIController() &&
+        BrowserMatchesWebAppData(browser, web_app_data)) {
+      browser->window()->GetDownloadBubbleUIController()->OnDownloadItemAdded(
+          item, /*may_show_animation=*/browser == browser_to_show_animation);
+    }
+  }
 }
 
 void DownloadBubbleUpdateService::OnDownloadUpdated(
@@ -607,11 +668,24 @@ void DownloadBubbleUpdateService::OnDownloadUpdated(
     return;
   }
   CacheManager& cache = GetCacheForItem(item);
+  // When persisted web app download items are restored from the history
+  // database, we first get a OnDownloadCreated() notification about the item
+  // without its DownloadItemWebAppData, causing the item to go into the main
+  // cache, followed by an OnDownloadUpdated() notification after the
+  // DownloadItemWebAppData is added. In order to keep the item in the
+  // appropriate cache for the web app, and NOT in the main cache, we must
+  // remove it from the main cache explicitly here. Note this assumes that an
+  // item's associated web app id never changes once it is tagged.
+  if (!IsMainCache(cache)) {
+    main_cache_.OnDownloadItemRemoved(item);
+  }
   cache.OnDownloadItemUpdated(item);
 
+  auto* web_app_data = DownloadItemWebAppData::Get(item);
   for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
     if (browser->window() &&
-        browser->window()->GetDownloadBubbleUIController()) {
+        browser->window()->GetDownloadBubbleUIController() &&
+        BrowserMatchesWebAppData(browser, web_app_data)) {
       browser->window()->GetDownloadBubbleUIController()->OnDownloadItemUpdated(
           item);
     }
@@ -641,12 +715,13 @@ void DownloadBubbleUpdateService::OnDownloadRemoved(
   if (!download_item_notifier_) {
     return;
   }
-  CacheManager& cache = GetCacheForItem(item);
-  cache.OnDownloadItemRemoved(item);
+  GetCacheForItem(item).OnDownloadItemRemoved(item);
 
+  auto* web_app_data = DownloadItemWebAppData::Get(item);
   for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
     if (browser->window() &&
-        browser->window()->GetDownloadBubbleUIController()) {
+        browser->window()->GetDownloadBubbleUIController() &&
+        BrowserMatchesWebAppData(browser, web_app_data)) {
       browser->window()->GetDownloadBubbleUIController()->OnDownloadItemRemoved(
           item);
     }
@@ -696,7 +771,8 @@ void DownloadBubbleUpdateService::OnItemsAdded(
 
   for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
     if (browser->window() &&
-        browser->window()->GetDownloadBubbleUIController()) {
+        browser->window()->GetDownloadBubbleUIController() &&
+        !web_app::AppBrowserController::IsWebApp(browser)) {
       browser->window()->GetDownloadBubbleUIController()->OnOfflineItemsAdded(
           items);
     }
@@ -717,7 +793,8 @@ void DownloadBubbleUpdateService::OnItemRemoved(const ContentId& id) {
 
   for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
     if (browser->window() &&
-        browser->window()->GetDownloadBubbleUIController()) {
+        browser->window()->GetDownloadBubbleUIController() &&
+        !web_app::AppBrowserController::IsWebApp(browser)) {
       browser->window()->GetDownloadBubbleUIController()->OnOfflineItemRemoved(
           id);
     }
@@ -750,7 +827,8 @@ void DownloadBubbleUpdateService::OnItemUpdated(
 
   for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
     if (browser->window() &&
-        browser->window()->GetDownloadBubbleUIController()) {
+        browser->window()->GetDownloadBubbleUIController() &&
+        !web_app::AppBrowserController::IsWebApp(browser)) {
       browser->window()->GetDownloadBubbleUIController()->OnOfflineItemUpdated(
           item);
     }
@@ -790,6 +868,7 @@ bool DownloadBubbleUpdateService::CacheManager::MaybeAddDownloadItemToCache(
 bool DownloadBubbleUpdateService::CacheManager::MaybeAddOfflineItemToCache(
     const OfflineItem& item,
     bool is_new) {
+  CHECK(update_service_->IsMainCache(*this));
   if (update_service_->IsProfileOtr() != item.is_off_the_record) {
     return false;
   }
@@ -864,6 +943,7 @@ bool DownloadBubbleUpdateService::CacheManager::RemoveDownloadItemFromCache(
 
 bool DownloadBubbleUpdateService::CacheManager::RemoveOfflineItemFromCache(
     const ContentId& id) {
+  CHECK(update_service_->IsMainCache(*this));
   return RemoveItemFromCacheImpl(id, offline_items_, offline_items_iter_map_);
 }
 
@@ -968,6 +1048,7 @@ void DownloadBubbleUpdateService::InitializeDownloadItemsCache() {
 }
 
 void DownloadBubbleUpdateService::CacheManager::DropAllOfflineItems() {
+  CHECK(update_service_->IsMainCache(*this));
   offline_items_.clear();
   offline_items_iter_map_.clear();
 }
@@ -1059,44 +1140,76 @@ void DownloadBubbleUpdateService::CacheManager::AppendBackfilledDownloadItems(
   }
 }
 
+bool DownloadBubbleUpdateService::IsMainCache(
+    const DownloadBubbleUpdateService::CacheManager& cache) const {
+  return &cache == &main_cache_;
+}
+
+void DownloadBubbleUpdateService::OnEphemeralWarningExpired(
+    const std::string& guid) {
+  if (IsShutDown()) {
+    return;
+  }
+  CHECK(download_item_notifier_ || original_download_item_notifier_);
+  if (!download_item_notifier_) {
+    return;
+  }
+  content::DownloadManager* download_manager = GetDownloadManager();
+  if (!download_manager) {
+    return;
+  }
+
+  download::DownloadItem* item = download_manager->GetDownloadByGuid(guid);
+  // The item might be from the original profile.
+  if (!item && original_download_item_notifier_ &&
+      original_download_item_notifier_->GetManager()) {
+    item =
+        original_download_item_notifier_->GetManager()->GetDownloadByGuid(guid);
+  }
+  if (!item) {
+    return;
+  }
+
+  GetCacheForItem(item).UpdateAllModelsInfo();
+
+  auto* web_app_data = DownloadItemWebAppData::Get(item);
+  for (Browser* browser : chrome::FindAllBrowsersWithProfile(profile_)) {
+    if (browser->window() &&
+        browser->window()->GetDownloadBubbleUIController() &&
+        BrowserMatchesWebAppData(browser, web_app_data)) {
+      browser->window()->GetDownloadBubbleUIController()->OnDownloadItemRemoved(
+          item);
+    }
+  }
+}
+
 #if DCHECK_IS_ON()
-bool DownloadBubbleUpdateService::CacheManager::ConsistencyCheckCaches() const {
-  return ConsistencyCheckImpl(download_items_, download_items_iter_map_) &&
-         ConsistencyCheckImpl(offline_items_, offline_items_iter_map_);
+void DownloadBubbleUpdateService::CacheManager::ConsistencyCheckCaches() const {
+  ConsistencyCheckImpl(download_items_, download_items_iter_map_);
+  ConsistencyCheckImpl(offline_items_, offline_items_iter_map_);
 }
 
 template <typename Id, typename Item>
-bool DownloadBubbleUpdateService::CacheManager::ConsistencyCheckImpl(
+void DownloadBubbleUpdateService::CacheManager::ConsistencyCheckImpl(
     const SortedItems<Item>& cache,
     const IterMap<Id, Item>& iter_map) const {
-  if (cache.size() != iter_map.size()) {
-    DLOG(ERROR) << "Cache size " << cache.size()
-                << " does not match index size " << iter_map.size() << ".";
-    return false;
-  }
-  if (cache.size() > GetNumItemsToCache()) {
-    DLOG(ERROR) << "Cache size " << cache.size() << " exceeds max size "
-                << GetNumItemsToCache() << ".";
-    return false;
-  }
+  DCHECK_EQ(cache.size(), iter_map.size())
+      << "Cache size " << cache.size() << " does not match index size "
+      << iter_map.size() << ".";
+  DCHECK_LE(cache.size(), GetNumItemsToCache())
+      << "Cache size " << cache.size() << " exceeds max size "
+      << GetNumItemsToCache() << ".";
   for (auto it = cache.begin(); it != cache.end(); ++it) {
     const ItemSortKey& key = it->first;
     const Item& item = it->second;
-    if (key != GetSortKey(item)) {
-      DLOG(ERROR) << "Key does not match item.";
-      return false;
-    }
+    // The state of the stored key and the current state of the item may not
+    // always match, if we haven't received the update notification yet.
+    DCHECK_EQ(key.start_time, GetSortKey(item).start_time)
+        << "Start time in key does not match item.";
     const Id& id = GetItemId(item);
     auto iter_map_it = iter_map.find(id);
-    if (iter_map_it == iter_map.end()) {
-      DLOG(ERROR) << "Item id not in index.";
-      return false;
-    }
-    if (iter_map_it->second != it) {
-      DLOG(ERROR) << "Index inconsistent.";
-      return false;
-    }
+    DCHECK(iter_map_it != iter_map.end()) << "Item id not in index.";
+    DCHECK(iter_map_it->second == it) << "Index inconsistent.";
   }
-  return true;
 }
 #endif  // DCHECK_IS_ON()

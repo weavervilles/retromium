@@ -6,8 +6,10 @@ import 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.js';
 import 'chrome://resources/cr_elements/cr_lottie/cr_lottie.js';
 
+import {loadTimeData} from 'chrome://resources/ash/common/load_time_data.m.js';
 import type {CrCheckboxElement} from 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.js';
-import {OperationType, UserAction} from './cloud_upload.mojom-webui.js';
+import type {CrLottieElement} from 'chrome://resources/cr_elements/cr_lottie/cr_lottie.js';
+import {MetricsRecordedSetupPage, OperationType, UserAction} from './cloud_upload.mojom-webui.js';
 import {CloudUploadBrowserProxy} from './cloud_upload_browser_proxy.js';
 import {getTemplate} from './move_confirmation_page.html.js';
 
@@ -25,6 +27,7 @@ export class MoveConfirmationPageElement extends HTMLElement {
   private proxy: CloudUploadBrowserProxy =
       CloudUploadBrowserProxy.getInstance();
   private cloudProvider: CloudProvider|undefined;
+  private playPauseButton: HTMLElement|undefined;
 
   constructor() {
     super();
@@ -34,9 +37,12 @@ export class MoveConfirmationPageElement extends HTMLElement {
     shadowRoot.innerHTML = getTemplate();
     const actionButton = this.$('.action-button')!;
     const cancelButton = this.$('.cancel-button')!;
+    this.playPauseButton = this.$('#playPauseIcon')!;
 
     actionButton.addEventListener('click', () => this.onActionButtonClick());
     cancelButton.addEventListener('click', () => this.onCancelButtonClick());
+    this.playPauseButton.addEventListener(
+        'click', () => this.onPlayPauseButtonClick());
   }
 
   $<T extends HTMLElement>(query: string): T {
@@ -63,7 +69,7 @@ export class MoveConfirmationPageElement extends HTMLElement {
     const operationTypeText =
         operationType === OperationType.kCopy ? 'Copy' : 'Move';
     const filesText = numFiles > 1 ? 'files' : 'file';
-    const {name, shortName} = this.getProviderText(this.cloudProvider);
+    const name = this.getProviderName(this.cloudProvider);
 
     // Animation.
     this.updateAnimation(
@@ -78,19 +84,20 @@ export class MoveConfirmationPageElement extends HTMLElement {
     titleElement.innerText = `${operationTypeText} ${numFiles.toString()} ${
         filesText} to ${name} to open?`;
 
-    // Body.
+    // Checkbox and Body.
     const bodyText = this.$('#body-text');
     const checkbox = this.$<CrCheckboxElement>('#always-copy-or-move-checkbox');
+    checkbox.innerText = 'Don\'t ask again';
     if (this.cloudProvider === CloudProvider.ONE_DRIVE) {
       bodyText.innerText =
           'Microsoft 365 requires files to be stored in OneDrive. ' +
-          'You can move files to OneDrive at any time.';
+          'Local files will move and files from other locations will copy. ' +
+          'Your files can be found in the Microsoft OneDrive folder in the ' +
+          'Files app.';
 
       // Only show checkbox if the confirmation has been shown before for
       // OneDrive.
       if (officeMoveConfirmationShownForOneDrive) {
-        checkbox.innerText =
-            `${operationTypeText} to ${shortName} without asking each time`;
         checkbox.checked = alwaysMoveToOneDrive;
       } else {
         checkbox!.remove();
@@ -98,13 +105,13 @@ export class MoveConfirmationPageElement extends HTMLElement {
     } else {
       bodyText.innerText =
           'Google Docs, Sheets, and Slides require files to be stored in ' +
-          'Google Drive. You can move files to Google Drive at any time.';
+          'Google Drive. Local files will move and files from other ' +
+          'locations will copy. Your files can be found in the Google Drive ' +
+          'folder in the Files app.';
 
       // Only show checkbox if the confirmation has been shown before for
       // Drive.
       if (officeMoveConfirmationShownForDrive) {
-        checkbox.innerText =
-            `${operationTypeText} to ${name} without asking each time`;
         checkbox.checked = alwaysMoveToDrive;
       } else {
         checkbox!.remove();
@@ -116,16 +123,11 @@ export class MoveConfirmationPageElement extends HTMLElement {
     actionButton.innerText = `${operationTypeText} and open`;
   }
 
-  private getProviderText(cloudProvider: CloudProvider) {
+  private getProviderName(cloudProvider: CloudProvider) {
     if (cloudProvider === CloudProvider.ONE_DRIVE) {
-      return {
-        name: 'Microsoft OneDrive',
-        shortName: 'OneDrive',
-      };
+      return 'Microsoft OneDrive';
     }
-    // TODO(b/260141250): Display Slides or Sheets when appropriate instead or
-    // remove shortName?
-    return {name: 'Google Drive', shortName: 'Drive'};
+    return 'Google Drive';
   }
 
   private updateAnimation(isDarkMode: boolean) {
@@ -153,7 +155,32 @@ export class MoveConfirmationPageElement extends HTMLElement {
   }
 
   private onCancelButtonClick(): void {
+    if (this.cloudProvider === CloudProvider.ONE_DRIVE) {
+      this.proxy.handler.recordCancel(
+          MetricsRecordedSetupPage.kMoveConfirmationOneDrive);
+    } else {
+      this.proxy.handler.recordCancel(
+          MetricsRecordedSetupPage.kMoveConfirmationGoogleDrive);
+    }
     this.proxy.handler.respondWithUserActionAndClose(UserAction.kCancel);
+  }
+
+  private onPlayPauseButtonClick(): void {
+    const animation = this.$<CrLottieElement>('#animation')!;
+    const shouldPlay = this.playPauseButton!.className === 'play';
+    if (shouldPlay) {
+      animation.setPlay(true);
+      // Update button to Pause.
+      this.playPauseButton!.className = 'pause';
+      this.playPauseButton!.ariaLabel =
+          loadTimeData.getString('animationPauseText');
+    } else {
+      animation.setPlay(false);
+      // Update button to Play.
+      this.playPauseButton!.className = 'play';
+      this.playPauseButton!.ariaLabel =
+          loadTimeData.getString('animationPlayText');
+    }
   }
 }
 

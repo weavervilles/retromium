@@ -244,13 +244,17 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
                                  const GURL& url,
                                  const std::u16string& url_title,
                                  int call_type) override;
-  content::StoragePartitionConfig GetWebViewStoragePartitionConfig(
+  void GetWebViewStoragePartitionConfig(
       content::BrowserContext* browser_context,
       content::SiteInstance* owner_site_instance,
       const std::string& partition_name,
-      bool in_memory) override;
+      bool in_memory,
+      base::OnceCallback<void(absl::optional<content::StoragePartitionConfig>)>
+          callback) override;
   void CreatePasswordReuseDetectionManager(
       content::WebContents* web_contents) const override;
+  media_device_salt::MediaDeviceSaltService* GetMediaDeviceSaltService(
+      content::BrowserContext* context) override;
 
  private:
   friend struct base::LazyInstanceTraitsBase<ChromeExtensionsBrowserClient>;

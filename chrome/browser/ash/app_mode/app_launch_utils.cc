@@ -9,11 +9,11 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/scoped_observation.h"
-#include "chrome/browser/ash/app_mode/app_session_ash.h"
 #include "chrome/browser/ash/app_mode/arc/arc_kiosk_app_manager.h"
 #include "chrome/browser/ash/app_mode/kiosk_app_launch_error.h"
 #include "chrome/browser/ash/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/ash/app_mode/kiosk_app_types.h"
+#include "chrome/browser/ash/app_mode/lacros_launcher.h"
 #include "chrome/browser/ash/app_mode/startup_app_launcher.h"
 #include "chrome/browser/ash/app_mode/web_app/web_kiosk_app_launcher.h"
 #include "chrome/browser/ash/app_mode/web_app/web_kiosk_app_manager.h"
@@ -36,7 +36,7 @@ const char* const kPrefsToReset[] = {"settings.accessibility",  // ChromeVox
                                      "settings.a11y", "ash.docked_magnifier",
                                      "settings.tts"};
 
-// This vector is used in tests when they want to replace |kPrefsToReset| with
+// This vector is used in tests when they want to replace `kPrefsToReset` with
 // their own list.
 std::vector<std::string>* test_prefs_to_reset = nullptr;
 
@@ -50,10 +50,10 @@ class AppLaunchManager : public KioskAppLauncher::NetworkDelegate,
  public:
   AppLaunchManager(Profile* profile,
                    const KioskAppId& kiosk_app_id,
-                   bool should_start_app_session_ash)
+                   bool should_start_kiosk_system_session)
       : kiosk_app_id_(kiosk_app_id),
         profile_(profile),
-        should_start_app_session_ash_(should_start_app_session_ash) {
+        should_start_kiosk_system_session_(should_start_kiosk_system_session) {
     CHECK(kiosk_app_id.type != KioskAppType::kArcApp);
 
     if (kiosk_app_id.type == KioskAppType::kChromeApp) {
@@ -74,7 +74,14 @@ class AppLaunchManager : public KioskAppLauncher::NetworkDelegate,
   AppLaunchManager(const AppLaunchManager&) = delete;
   AppLaunchManager& operator=(const AppLaunchManager&) = delete;
 
-  void Start() { app_launcher_->Initialize(); }
+  void Start() {
+    lacros_launcher_ = std::make_unique<app_mode::LacrosLauncher>();
+    lacros_launcher_->Start(
+        base::BindOnce(&AppLaunchManager::OnLacrosLaunchComplete,
+                       weak_ptr_factory_.GetWeakPtr()));
+  }
+
+  void OnLacrosLaunchComplete() { app_launcher_->Initialize(); }
 
  private:
   ~AppLaunchManager() override = default;
@@ -90,7 +97,6 @@ class AppLaunchManager : public KioskAppLauncher::NetworkDelegate,
     // See comments above. Network is assumed to be online here.
     return true;
   }
-  bool IsShowingNetworkConfigScreen() const override { return false; }
 
   // KioskAppLauncher::Observer:
   void OnAppInstalling() override {}
@@ -98,10 +104,10 @@ class AppLaunchManager : public KioskAppLauncher::NetworkDelegate,
   void OnAppLaunched() override {}
   void OnAppWindowCreated(
       const absl::optional<std::string>& app_name) override {
-    if (should_start_app_session_ash_) {
-      // Only create a new `AppSessionAsh` if this is an Ash recovery flow. Do
-      // not create it during a Lacros recovery flow.
-      CreateAppSession(kiosk_app_id_, profile_, app_name);
+    if (should_start_kiosk_system_session_) {
+      // Only create a new `KioskSystemSession` if this is an Ash recovery flow.
+      // Do not create it during a Lacros recovery flow.
+      CreateKioskSystemSession(kiosk_app_id_, profile_, app_name);
     }
     Cleanup();
   }
@@ -112,19 +118,22 @@ class AppLaunchManager : public KioskAppLauncher::NetworkDelegate,
   }
 
   const KioskAppId kiosk_app_id_;
-  const raw_ptr<Profile> profile_;
-  const bool should_start_app_session_ash_;
+  const raw_ptr<Profile, DanglingUntriaged> profile_;
+  const bool should_start_kiosk_system_session_;
 
+  std::unique_ptr<app_mode::LacrosLauncher> lacros_launcher_;
   std::unique_ptr<KioskAppLauncher> app_launcher_;
   base::ScopedObservation<KioskAppLauncher, KioskAppLauncher::Observer>
       observation_{this};
+  base::WeakPtrFactory<AppLaunchManager> weak_ptr_factory_{this};
 };
 
 void LaunchAppOrDie(Profile* profile,
                     const KioskAppId& kiosk_app_id,
-                    bool should_start_app_session_ash) {
+                    bool should_start_kiosk_system_session) {
   // AppLaunchManager manages its own lifetime.
-  (new AppLaunchManager(profile, kiosk_app_id, should_start_app_session_ash))
+  (new AppLaunchManager(profile, kiosk_app_id,
+                        should_start_kiosk_system_session))
       ->Start();
 }
 
@@ -180,18 +189,19 @@ bool ShouldAutoLaunchKioskApp(const base::CommandLine& command_line,
          StartupUtils::IsOobeCompleted();
 }
 
-void CreateAppSession(const KioskAppId& kiosk_app_id,
-                      Profile* profile,
-                      const absl::optional<std::string>& app_name) {
+void CreateKioskSystemSession(const KioskAppId& kiosk_app_id,
+                              Profile* profile,
+                              const absl::optional<std::string>& app_name) {
   switch (kiosk_app_id.type) {
     case KioskAppType::kWebApp:
-      WebKioskAppManager::Get()->InitSession(profile, kiosk_app_id, app_name);
+      WebKioskAppManager::Get()->InitKioskSystemSession(profile, kiosk_app_id,
+                                                        app_name);
       return;
     case KioskAppType::kChromeApp:
-      KioskAppManager::Get()->InitSession(profile, kiosk_app_id);
+      KioskAppManager::Get()->InitKioskSystemSession(profile, kiosk_app_id);
       return;
     case KioskAppType::kArcApp:
-      // Do not create an `AppSession` for ARC kiosk
+      // Do not create a `KioskBrowserSession` for ARC kiosk
       return;
   }
 }

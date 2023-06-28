@@ -19,7 +19,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/overloaded.h"
 #include "base/json/json_reader.h"
-#include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/ranges/algorithm.h"
@@ -70,8 +70,6 @@ struct AttributionReportJsonConverter {
   base::Value::Dict ToJson(const AttributionReport& report,
                            bool is_debug_report) const {
     base::Value::Dict report_body = report.ReportBody();
-    // Report IDs are a source of nondeterminism, so remove them.
-    report_body.Remove("report_id");
 
     absl::visit(
         base::Overloaded{
@@ -103,10 +101,9 @@ struct AttributionReportJsonConverter {
                               std::move(*attribution_destination));
 
               report_body.Remove("aggregation_service_payloads");
-              report_body.Remove("source_registration_time");
 
               // The aggregation coordinator may be platform specific.
-              report_body.Remove("aggregation_coordinator_identifier");
+              report_body.Remove("aggregation_coordinator_origin");
 
               base::Value::List list;
               for (const auto& contribution : aggregatable_data.contributions) {
@@ -121,6 +118,9 @@ struct AttributionReportJsonConverter {
               report_body.Set("histograms", std::move(list));
             },
             [&](const AttributionReport::EventLevelData&) {
+              // Report IDs are a source of nondeterminism, so remove them.
+              report_body.Remove("report_id");
+
               bool ok = AdjustScheduledReportTime(report_body,
                                                   report.initial_report_time());
               DCHECK(ok);
@@ -161,7 +161,7 @@ struct AttributionReportJsonConverter {
 
     base::Value::Dict value;
     value.Set("payload", std::move(report_body));
-    value.Set("report_url", report.report_url().spec());
+    value.Set("report_url", report.ReportUrl().spec());
     value.Set("report_time", FormatTime(time));
     return value;
   }
@@ -249,10 +249,10 @@ class AttributionEventHandler : public AttributionObserver {
                           FakeCookieChecker* fake_cookie_checker,
                           AttributionReportJsonConverter json_converter)
       : manager_(std::move(manager)),
-        fake_cookie_checker_(fake_cookie_checker),
+        fake_cookie_checker_(
+            raw_ref<FakeCookieChecker>::from_ptr(fake_cookie_checker)),
         json_converter_(json_converter) {
     DCHECK(manager_);
-    DCHECK(fake_cookie_checker_);
 
     manager_->AddObserver(this);
   }
@@ -353,7 +353,7 @@ class AttributionEventHandler : public AttributionObserver {
   }
 
   const std::unique_ptr<AttributionManagerImpl> manager_;
-  const raw_ptr<FakeCookieChecker> fake_cookie_checker_;
+  const raw_ref<FakeCookieChecker> fake_cookie_checker_;
 
   const AttributionReportJsonConverter json_converter_;
 

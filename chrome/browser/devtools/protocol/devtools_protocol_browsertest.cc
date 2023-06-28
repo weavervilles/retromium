@@ -33,13 +33,18 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/cookie_settings.h"
+#include "components/content_settings/core/common/pref_names.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_delegate.h"
+#include "components/privacy_sandbox/privacy_sandbox_attestations/privacy_sandbox_attestations.h"
+#include "components/privacy_sandbox/privacy_sandbox_attestations/scoped_privacy_sandbox_attestations.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/prerender_test_util.h"
@@ -221,9 +226,24 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest,
   EXPECT_EQ(nullptr, DevToolsWindow::FindDevToolsWindow(agent_host_.get()));
 }
 
-IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CheckReportedPreloadingState) {
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest,
+                       PreloadEnabledStateUpdatedDefault) {
   Attach();
-  SendCommandSync("Runtime.enable");
+
+  SendCommandAsync("Preload.enable");
+  const base::Value::Dict result =
+      WaitForNotification("Preload.preloadEnabledStateUpdated", true);
+
+  EXPECT_THAT(result.FindBool("disabledByPreference"), false);
+  EXPECT_THAT(result.FindBool("disabledByHoldbackPrefetchSpeculationRules"),
+              false);
+  EXPECT_THAT(result.FindBool("disabledByHoldbackPrerenderSpeculationRules"),
+              false);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest,
+                       PreloadEnabledStateUpdatedDisabledByPreference) {
+  Attach();
 
   prefetch::SetPreloadPagesState(browser()->profile()->GetPrefs(),
                                  prefetch::PreloadPagesState::kNoPreloading);
@@ -232,7 +252,48 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CheckReportedPreloadingState) {
   const base::Value::Dict result =
       WaitForNotification("Preload.preloadEnabledStateUpdated", true);
 
-  EXPECT_THAT(*result.FindString("state"), "DisabledByPreference");
+  EXPECT_THAT(result.FindBool("disabledByPreference"), true);
+}
+
+class DevToolsProtocolTest_PreloadEnabledStateUpdatedDisabledByHoldback
+    : public DevToolsProtocolTest {
+ protected:
+  void SetUp() override {
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        features::kPreloadingConfig, {{"preloading_config", R"(
+      [{
+        "preloading_type": "Prefetch",
+        "preloading_predictor": "SpeculationRules",
+        "sampling_likelihood": 0.0,
+        "holdback": true
+      }, {
+        "preloading_type": "Prerender",
+        "preloading_predictor": "SpeculationRules",
+        "sampling_likelihood": 0.0,
+        "holdback": true
+      }]
+    )"}});
+
+    DevToolsProtocolTest::SetUp();
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(
+    DevToolsProtocolTest_PreloadEnabledStateUpdatedDisabledByHoldback,
+    PreloadEnabledStateUpdatedDisabledByHoldback) {
+  Attach();
+
+  SendCommandAsync("Preload.enable");
+  const base::Value::Dict result =
+      WaitForNotification("Preload.preloadEnabledStateUpdated", true);
+
+  EXPECT_THAT(result.FindBool("disabledByHoldbackPrefetchSpeculationRules"),
+              true);
+  EXPECT_THAT(result.FindBool("disabledByHoldbackPrerenderSpeculationRules"),
+              true);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -346,12 +407,21 @@ class DevToolsProtocolTest_BounceTrackingMitigations
     DevToolsProtocolTest::SetUp();
   }
 
+  void SetBlockThirdPartyCookies(bool value) {
+    browser()->profile()->GetPrefs()->SetInteger(
+        prefs::kCookieControlsMode,
+        static_cast<int>(
+            value ? content_settings::CookieControlsMode::kBlockThirdParty
+                  : content_settings::CookieControlsMode::kOff));
+  }
+
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest_BounceTrackingMitigations,
                        RunBounceTrackingMitigations) {
+  SetBlockThirdPartyCookies(true);
   ASSERT_TRUE(embedded_test_server()->Start());
   const GURL url(embedded_test_server()->GetURL("/empty.html"));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
@@ -383,6 +453,63 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest_BounceTrackingMitigations,
 
   EXPECT_THAT(deleted_sites, testing::ElementsAre("example.test"));
 }
+
+class DIPSStatusDevToolsProtocolTest
+    : public DevToolsProtocolTest,
+      public testing::WithParamInterface<std::tuple<bool, bool, std::string>> {
+  // The fields of `GetParam()` indicate/control the following:
+  //   `std::get<0>(GetParam())` => `dips::kFeature`
+  //   `std::get<1>(GetParam())` => `dips::kDeletionEnabled`
+  //   `std::get<2>(GetParam())` => `dips::kTriggeringAction`
+  //
+  // In order for Bounce Tracking Mitigations to take effect, `kFeature` must
+  // be true/enabled, `kDeletionEnabled` must be true, and `kTriggeringAction`
+  // must NOT be `none`.
+  //
+  // Note: Bounce Tracking Mitigations issues only report sites that would
+  // be affected when `kTriggeringAction` is set to 'stateful_bounce'.
+
+ protected:
+  void SetUp() override {
+    if (std::get<0>(GetParam())) {
+      scoped_feature_list_.InitAndEnableFeatureWithParameters(
+          dips::kFeature,
+          {{"delete", (std::get<1>(GetParam()) ? "true" : "false")},
+           {"triggering_action", std::get<2>(GetParam())}});
+    } else {
+      scoped_feature_list_.InitAndDisableFeature(dips::kFeature);
+    }
+
+    DevToolsProtocolTest::SetUp();
+  }
+
+  bool ShouldBeEnabled() {
+    return (std::get<0>(GetParam()) && std::get<1>(GetParam()) &&
+            (std::get<2>(GetParam()) != "none"));
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_P(DIPSStatusDevToolsProtocolTest,
+                       TrueWhenEnabledAndDeleting) {
+  AttachToBrowserTarget();
+
+  base::Value::Dict paramsDIPS;
+  paramsDIPS.Set("featureState", "DIPS");
+
+  SendCommand("SystemInfo.getFeatureState", std::move(paramsDIPS));
+  EXPECT_EQ(result()->FindBool("featureEnabled"), ShouldBeEnabled());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    DIPSStatusDevToolsProtocolTest,
+    ::testing::Combine(
+        ::testing::Bool(),
+        ::testing::Bool(),
+        ::testing::Values("none", "storage", "bounce", "stateful_bounce")));
 
 using DevToolsProtocolTest_AppId = DevToolsProtocolTest;
 
@@ -855,10 +982,53 @@ IN_PROC_BROWSER_TEST_F(PrerenderDataSaverProtocolTest,
   const base::Value::Dict result =
       WaitForNotification("Preload.preloadEnabledStateUpdated", true);
 
-  EXPECT_THAT(*result.FindString("state"), "DisabledByDataSaver");
+  EXPECT_THAT(result.FindBool("disabledByDataSaver"), true);
   histogram_tester.ExpectUniqueSample(
       "Prerender.Experimental.PrerenderHostFinalStatus.SpeculationRule",
       /*PrerenderFinalStatus::kDataSaverEnabled=*/38, 1);
+}
+
+class PrivacySandboxAttestationsOverrideTest : public DevToolsProtocolTest {
+ public:
+  PrivacySandboxAttestationsOverrideTest()
+      : scoped_attestations_(
+            privacy_sandbox::PrivacySandboxAttestations::CreateForTesting()) {}
+
+ private:
+  privacy_sandbox::ScopedPrivacySandboxAttestations scoped_attestations_;
+};
+
+IN_PROC_BROWSER_TEST_F(PrivacySandboxAttestationsOverrideTest,
+                       PrivacySandboxEnrollmentOverride) {
+  Attach();
+
+  base::Value::Dict paramsDIPS;
+  const std::string attestation_url = "https://google.com";
+  paramsDIPS.Set("url", attestation_url);
+
+  SendCommand("Browser.addPrivacySandboxEnrollmentOverride",
+              std::move(paramsDIPS));
+
+  EXPECT_TRUE(
+      privacy_sandbox::PrivacySandboxAttestations::GetInstance()->IsOverridden(
+          net::SchemefulSite(GURL(attestation_url))));
+}
+
+IN_PROC_BROWSER_TEST_F(PrivacySandboxAttestationsOverrideTest,
+                       PrivacySandboxEnrollmentOverrideInvalidUrl) {
+  Attach();
+
+  base::Value::Dict paramsDIPS;
+  const std::string attestation_url = "this is a bad url";
+  paramsDIPS.Set("url", attestation_url);
+
+  SendCommand("Browser.addPrivacySandboxEnrollmentOverride",
+              std::move(paramsDIPS));
+
+  EXPECT_TRUE(error());
+  EXPECT_FALSE(
+      privacy_sandbox::PrivacySandboxAttestations::GetInstance()->IsOverridden(
+          net::SchemefulSite(GURL(attestation_url))));
 }
 
 }  // namespace

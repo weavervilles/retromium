@@ -39,6 +39,7 @@ class Clock;
 namespace sql {
 class Database;
 class MetaTable;
+class Statement;
 }  // namespace sql
 
 namespace storage {
@@ -212,27 +213,30 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   bool IsBootstrapped();
   QuotaError SetIsBootstrapped(bool bootstrap_flag);
 
-  // Razes and re-opens the database. Will try to open a database again if
-  // one doesn't exist.
-  QuotaError RazeAndReopen();
+  // If the database has failed to open, this will attempt to reopen it.
+  // Otherwise, it will attempt to recover the database. If recovery is
+  // attempted but fails, the database will be razed. In all cases, this will
+  // attempt to reopen the database and return true on success.
+  bool RecoverOrRaze(int error_code);
 
   // Flushes previously scheduled commits.
   void CommitNow();
 
-  // The given callback will be invoked whenever the database encounters a full
-  // disk error.
-  void SetOnFullDiskErrorCallback(const base::RepeatingClosure& callback);
+  // The given callback will be invoked whenever the database encounters an
+  // error.
+  void SetDbErrorCallback(
+      const base::RepeatingCallback<void(int)>& db_error_callback);
 
   // Testing support for database corruption handling.
   //
   // Runs `corrupter` on the same sequence used to do database I/O,
   // guaranteeing that no other database operation is performed at the same
-  // time. `corrupter` receives the path to the underlying SQLite database as an
-  // argument. The underlying SQLite database is closed while `corrupter` runs,
-  // and reopened afterwards.
+  // time. `corrupter` receives the path to the underlying SQLite database
+  // as an argument. The underlying SQLite database is closed while
+  // `corrupter` runs, and reopened afterwards.
 
-  // Returns QuotaError::kNone if the database was successfully reopened after
-  // `corrupter` was run, or QuotaError::kDatabaseError otherwise.
+  // Returns QuotaError::kNone if the database was successfully reopened
+  // after `corrupter` was run, or QuotaError::kDatabaseError otherwise.
   QuotaError CorruptForTesting(
       base::OnceCallback<void(const base::FilePath&)> corrupter);
 
@@ -266,6 +270,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   void ScheduleCommit();
 
   QuotaError EnsureOpened();
+  void OnSqliteError(int sqlite_error_code, sql::Statement* statement);
   bool MoveLegacyDatabase();
   bool OpenDatabase();
   bool EnsureDatabaseVersion();
@@ -313,7 +318,10 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) QuotaDatabase {
   static const IndexSchema kIndexes[];
   static const size_t kIndexCount;
 
-  base::RepeatingClosure full_disk_error_callback_;
+  // A descriptor of the last SQL statement that was executed, used for metrics.
+  absl::optional<std::string> last_operation_;
+
+  base::RepeatingCallback<void(int)> db_error_callback_;
 };
 
 }  // namespace storage

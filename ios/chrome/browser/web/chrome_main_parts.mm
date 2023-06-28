@@ -58,13 +58,14 @@
 #import "ios/chrome/browser/metrics/ios_chrome_metrics_service_accessor.h"
 #import "ios/chrome/browser/metrics/ios_expired_histograms_array.h"
 #import "ios/chrome/browser/open_from_clipboard/create_clipboard_recent_content.h"
-#import "ios/chrome/browser/paths/paths.h"
+#import "ios/chrome/browser/optimization_guide/optimization_guide_service_factory.h"
+#import "ios/chrome/browser/shared/model/paths/paths.h"
 #import "ios/chrome/browser/policy/browser_policy_connector_ios.h"
-#import "ios/chrome/browser/prefs/pref_names.h"
 #import "ios/chrome/browser/promos_manager/promos_manager.h"
 #import "ios/chrome/browser/safe_browsing/safe_browsing_metrics_collector_factory.h"
 #import "ios/chrome/browser/shared/model/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/shared/model/browser_state/chrome_browser_state_manager.h"
+#import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/signin/signin_util.h"
 #import "ios/chrome/browser/translate/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/translate/translate_service_ios.h"
@@ -246,13 +247,17 @@ void IOSChromeMainParts::PreCreateThreads() {
   // On iOS we know that ProfilingClient is the only user of
   // PoissonAllocationSampler, there are no others. Therefore, make
   // memory_system include it dynamically.
+  // We pass an empty string as process type to the dispatcher to keep
+  // consistency with other main delegates where the browser process is denoted
+  // this way.
   memory_system::Initializer()
       .SetProfilingClientParameters(
           channel, metrics::CallStackProfileParams::Process::kBrowser)
       .SetDispatcherParameters(memory_system::DispatcherParameters::
                                    PoissonAllocationSamplerInclusion::kDynamic,
                                memory_system::DispatcherParameters::
-                                   AllocationTraceRecorderInclusion::kIgnore)
+                                   AllocationTraceRecorderInclusion::kIgnore,
+                               "")
       .Initialize(memory_system_);
 
   variations::InitCrashKeys();
@@ -294,6 +299,9 @@ void IOSChromeMainParts::PreMainMessageLoopRun() {
 
   // Ensure ClipboadRecentContentIOS is created.
   ClipboardRecentContent::SetInstance(CreateClipboardRecentContentIOS());
+
+  // Initialize opt guide.
+  OptimizationGuideServiceFactory::InitializePredictionModelStore();
 
   // Ensure that the browser state is initialized.
   EnsureBrowserStateKeyedServiceFactoriesBuilt();

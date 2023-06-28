@@ -69,12 +69,12 @@
 #include "media/capture/capture_switches.h"
 #endif
 
-#if BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 #include "base/task/sequenced_task_runner.h"
 #include "components/viz/host/gpu_client.h"
 #include "media/capture/capture_switches.h"
 #include "services/video_capture/public/mojom/video_capture_service.mojom.h"
-#endif  // BUILDFLAG(IS_LINUX)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 
 namespace content {
 
@@ -129,7 +129,7 @@ UtilityProcessHost::UtilityProcessHost(std::unique_ptr<Client> client)
       started_(false),
       name_(u"utility process"),
       file_data_(std::make_unique<ChildProcessLauncherFileData>()),
-#if BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
       gpu_client_(nullptr, base::OnTaskRunnerDeleter(nullptr)),
 #endif
       client_(std::move(client)) {
@@ -200,6 +200,16 @@ void UtilityProcessHost::SetExtraCommandLineSwitches(
     std::vector<std::string> switches) {
   extra_switches_ = std::move(switches);
 }
+
+#if BUILDFLAG(IS_WIN)
+void UtilityProcessHost::SetPreloadLibraries(
+    const std::vector<base::FilePath>& preloads) {
+  preload_libraries_ = preloads;
+}
+void UtilityProcessHost::SetPinUser32() {
+  pin_user32_ = true;
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC)
 void UtilityProcessHost::AddFileToPreload(
@@ -303,6 +313,7 @@ bool UtilityProcessHost::StartProcess() {
       network::switches::kIgnoreUrlFetcherCertRequests,
       network::switches::kLogNetLog,
       network::switches::kNetLogCaptureMode,
+      network::switches::kTestThirdPartyCookiePhaseout,
       sandbox::policy::switches::kNoSandbox,
 #if BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
       switches::kDisableDevShmUsage,
@@ -435,11 +446,20 @@ bool UtilityProcessHost::StartProcess() {
         std::make_unique<UtilitySandboxedProcessLauncherDelegate>(
             sandbox_type_, env_, *cmd_line);
 
+#if BUILDFLAG(IS_WIN)
+    if (!preload_libraries_.empty()) {
+      delegate->SetPreloadLibraries(preload_libraries_);
+    }
+    if (pin_user32_) {
+      delegate->SetPinUser32();
+    }
+#endif  // BUILDFLAG(IS_WIN)
+
 #if BUILDFLAG(USE_ZYGOTE)
     if (zygote_for_testing_.has_value()) {
       delegate->SetZygote(zygote_for_testing_.value());
     }
-#endif
+#endif  // BUILDFLAG(USE_ZYGOTE)
 
     process_->LaunchWithFileData(std::move(delegate), std::move(cmd_line),
                                  std::move(file_data_), true);

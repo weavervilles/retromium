@@ -218,8 +218,10 @@ int main(int argc, char** argv) {
   } else {
     // Route services dynamically from web_engine_shell's parent down into
     // created web_instances.
-    web_instance_host = std::make_unique<WebInstanceHost>(
-        *base::ComponentContextForProcess()->outgoing());
+    web_instance_host =
+        std::make_unique<WebInstanceHostWithServicesFromThisComponent>(
+            *base::ComponentContextForProcess()->outgoing(),
+            /*is_web_instance_component_in_same_package=*/false);
     if (enable_web_instance_tmp) {
       const zx_status_t status = fdio_open(
           "/tmp",

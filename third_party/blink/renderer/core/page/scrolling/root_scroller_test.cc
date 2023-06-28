@@ -203,7 +203,7 @@ TEST_F(RootScrollerTest, defaultEffectiveRootScrollerIsDocumentNode) {
   HeapVector<Member<V8UnionNodeOrStringOrTrustedScript>> nodes;
   nodes.push_back(
       MakeGarbageCollected<V8UnionNodeOrStringOrTrustedScript>(iframe));
-  document->documentElement()->ReplaceWith(nodes, ASSERT_NO_EXCEPTION);
+  document->documentElement()->replaceWith(nodes, ASSERT_NO_EXCEPTION);
 
   UpdateAllLifecyclePhases(MainFrameView());
 
@@ -2056,7 +2056,7 @@ TEST_F(ImplicitRootScrollerSimTest,
   Compositor().BeginFrame();
   EXPECT_EQ(container,
             GetDocument().GetRootScrollerController().EffectiveRootScroller());
-  EXPECT_EQ(To<LayoutBox>(container->GetLayoutObject())->Size().Height(), 600);
+  EXPECT_EQ(To<LayoutBox>(container->GetLayoutObject())->Size().height, 600);
   WebView().SetZoomLevel(PageZoomFactorToZoomLevel(2.0));
   WebView().GetPage()->GetBrowserControls().SetShownRatio(0, 0);
   WebView().ResizeWithBrowserControls(gfx::Size(800, 650), 50, 50, false);

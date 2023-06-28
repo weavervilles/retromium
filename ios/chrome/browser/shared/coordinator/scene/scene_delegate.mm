@@ -13,7 +13,7 @@
 #import "ios/chrome/app/chrome_overlay_window.h"
 #import "ios/chrome/app/main_application_delegate.h"
 #import "ios/chrome/browser/crash_report/main_thread_freeze_detector.h"
-#import "ios/chrome/browser/paths/paths.h"
+#import "ios/chrome/browser/shared/model/paths/paths.h"
 #import "ios/chrome/browser/ui/appearance/appearance_customization.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -46,6 +46,13 @@ void SyncBreadcrumbsLog() {
 NSString* const kOriginDetectedKey = @"OriginDetectedKey";
 
 @implementation SceneDelegate
+
+@synthesize sceneState = _sceneState;
+@synthesize sceneController = _sceneController;
+
+- (void)dealloc {
+  CHECK(!_sceneState);
+}
 
 - (SceneState*)sceneState {
   if (!_sceneState) {
@@ -89,7 +96,7 @@ NSString* const kOriginDetectedKey = @"OriginDetectedKey";
   return _window;
 }
 
-#pragma mark Connecting and Disconnecting the Scene
+#pragma mark - UISceneDelegate
 
 - (void)scene:(UIScene*)scene
     willConnectToSession:(UISceneSession*)session
@@ -103,6 +110,14 @@ NSString* const kOriginDetectedKey = @"OriginDetectedKey";
     self.sceneState.startupHadExternalIntent = YES;
   }
 }
+
+- (void)sceneDidDisconnect:(UIScene*)scene {
+  CHECK(_sceneState);
+  self.sceneState.activationLevel = SceneActivationLevelUnattached;
+  _sceneState = nil;
+}
+
+#pragma mark - private
 
 - (WindowActivityOrigin)originFromSession:(UISceneSession*)session
                                   options:(UISceneConnectionOptions*)options {
@@ -131,10 +146,6 @@ NSString* const kOriginDetectedKey = @"OriginDetectedKey";
   }
 
   return origin;
-}
-
-- (void)sceneDidDisconnect:(UIScene*)scene {
-  self.sceneState.activationLevel = SceneActivationLevelUnattached;
 }
 
 #pragma mark Transitioning to the Foreground

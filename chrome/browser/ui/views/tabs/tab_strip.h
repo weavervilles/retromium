@@ -291,11 +291,7 @@ class TabStrip : public views::View,
   int GetStrokeThickness() const override;
   bool CanPaintThrobberToLayer() const override;
   bool HasVisibleBackgroundTabShapes() const override;
-  bool ShouldPaintAsActiveFrame() const override;
   SkColor GetTabSeparatorColor() const override;
-  SkColor GetTabBackgroundColor(
-      TabActive active,
-      BrowserFrameActiveState active_state) const override;
   SkColor GetTabForegroundColor(TabActive active) const override;
   std::u16string GetAccessibleTabName(const Tab* tab) const override;
   absl::optional<int> GetCustomBackgroundId(
@@ -425,10 +421,10 @@ class TabStrip : public views::View,
 
   std::unique_ptr<TabHoverCardController> hover_card_controller_;
 
-  raw_ref<TabDragContextImpl, DanglingUntriaged> drag_context_;
+  raw_ref<TabDragContextImpl, DanglingAcrossTasks> drag_context_;
 
   // The View parent for the tabs and the various group views.
-  raw_ref<TabContainer, DanglingUntriaged> tab_container_;
+  raw_ref<TabContainer, DanglingAcrossTasks> tab_container_;
 
   // The background offset used by inactive tabs to match the frame image.
   int background_offset_ = 0;

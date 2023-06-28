@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline.h"
 #include "third_party/blink/renderer/core/animation/timeline_inset.h"
+#include "third_party/blink/renderer/core/animation/timeline_range.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -31,76 +32,41 @@ class CORE_EXPORT ViewTimeline : public ScrollTimeline {
  public:
   static ViewTimeline* Create(Document&, ViewTimelineOptions*, ExceptionState&);
 
-  ViewTimeline(Document*,
-               TimelineAttachment attachment,
-               Element* subject,
-               ScrollAxis axis,
-               TimelineInset);
+  ViewTimeline(Document*, Element* subject, ScrollAxis axis, TimelineInset);
 
   bool IsViewTimeline() const override { return true; }
 
   CSSNumericValue* getCurrentTime(const String& rangeName) override;
 
-  AnimationTimeDelta CalculateIntrinsicIterationDuration(
-      const Animation*,
-      const Timing&) override;
-
-  AnimationTimeDelta CalculateIntrinsicIterationDuration(
-      const absl::optional<TimelineOffset>& rangeStart,
-      const absl::optional<TimelineOffset>& rangeEnd,
-      const Timing&) override;
-
   // IDL API implementation.
   Element* subject() const;
 
-  bool Matches(TimelineAttachment,
-               Element* subject,
-               ScrollAxis,
-               const TimelineInset&) const;
+  bool Matches(Element* subject, ScrollAxis, const TimelineInset&) const;
 
   const TimelineInset& GetInset() const;
-
-  // Converts a delay that is expressed as a (phase,percentage) pair to
-  // a fractional offset.
-  double ToFractionalOffset(const TimelineOffset& timeline_offset) const;
 
   CSSNumericValue* startOffset() const;
   CSSNumericValue* endOffset() const;
 
-  bool ResolveTimelineOffsets() const;
-
-  Animation* Play(AnimationEffect*,
-                  ExceptionState& = ASSERT_NO_EXCEPTION) override;
-
   void Trace(Visitor*) const override;
 
  protected:
-  absl::optional<ScrollOffsets> CalculateOffsets(
-      PaintLayerScrollableArea* scrollable_area,
-      ScrollOrientation physical_orientation) const override;
-
-  // ScrollSnapshotClient:
-  void UpdateSnapshot() override;
-  bool CheckIfNeedsValidation() override;
-
-  bool ValidateTimelineOffsets() override;
-
-  absl::optional<LayoutSize> SubjectSize() const;
-  absl::optional<gfx::PointF> SubjectPosition() const;
-
-  void FlushStyleUpdate() override;
+  void CalculateOffsets(PaintLayerScrollableArea* scrollable_area,
+                        ScrollOrientation physical_orientation,
+                        TimelineState* state) const override;
 
  private:
-  // Cache values to make timeline phase conversions more efficient.
-  mutable double target_offset_;
-  mutable double target_size_;
-  mutable double viewport_size_;
-  mutable double start_side_inset_;
-  mutable double end_side_inset_;
-  // Cache values for post-layout validation check.  If the subject position or
-  // size changes, then the range boundaries are stale.
-  mutable absl::optional<LayoutSize> subject_size_;
-  mutable absl::optional<gfx::PointF> subject_position_;
+  double ToFractionalOffset(const TimelineOffset& timeline_offset) const;
+
+  absl::optional<PhysicalSize> SubjectSize() const;
+  absl::optional<gfx::PointF> SubjectPosition(Node* resolved_source) const;
+  void ApplyStickyAdjustments(ScrollOffsets& scroll_offsets,
+                              ViewOffsets& view_offsets,
+                              double viewport_size,
+                              double target_size,
+                              double target_offset,
+                              ScrollOrientation orientation,
+                              Node* resolved_source) const;
 
   // If either of the following elements are non-null, we need to update
   // |inset_| on a style change.

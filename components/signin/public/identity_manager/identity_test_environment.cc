@@ -350,10 +350,9 @@ IdentityTestEnvironment::FinishBuildIdentityManagerForTests(
           account_tracker_service.get(), token_service.get(), signin_client);
   IdentityManager::InitParameters init_params;
   init_params.primary_account_mutator =
-      std::make_unique<PrimaryAccountMutatorImpl>(
-          account_tracker_service.get(), token_service.get(),
-          primary_account_manager.get(), pref_service, signin_client,
-          account_consistency);
+      std::make_unique<PrimaryAccountMutatorImpl>(account_tracker_service.get(),
+                                                  primary_account_manager.get(),
+                                                  pref_service, signin_client);
 
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   init_params.accounts_mutator = std::make_unique<AccountsMutatorImpl>(
@@ -460,32 +459,32 @@ void IdentityTestEnvironment::ClearPrimaryAccount() {
 }
 
 AccountInfo IdentityTestEnvironment::MakeAccountAvailable(
-    const std::string& email) {
-  return signin::MakeAccountAvailable(identity_manager(), email);
-}
+    base::StringPiece email,
+    SimpleAccountAvailabilityOptions options) {
+  auto builder = CreateAccountAvailabilityOptionsBuilder();
 
-AccountInfo IdentityTestEnvironment::MakeAccountAvailableWithCookies(
-    const std::string& email,
-    const std::string& gaia_id) {
-  return signin::MakeAccountAvailableWithCookies(
-      identity_manager(), test_url_loader_factory(), email, gaia_id);
-}
+  builder.WithCookie(options.set_cookie);
 
-std::vector<AccountInfo>
-IdentityTestEnvironment::MakeAccountsAvailableWithCookies(
-    const std::vector<std::string>& emails) {
-  // Logging out existing accounts is not yet supported.
-  EXPECT_EQ(0u, identity_manager()->GetAccountsWithRefreshTokens().size());
-
-  std::vector<signin::CookieParamsForTest> cookie_accounts;
-  std::vector<AccountInfo> accounts_info;
-  for (auto email : emails) {
-    auto account_info = MakeAccountAvailable(email);
-    accounts_info.push_back(account_info);
-    cookie_accounts.push_back({account_info.email, account_info.gaia});
+  if (!options.gaia_id.empty()) {
+    builder.WithGaiaId(options.gaia_id);
   }
-  SetCookieAccounts(cookie_accounts);
-  return accounts_info;
+  if (options.primary_account_consent_level.has_value()) {
+    builder.AsPrimary(options.primary_account_consent_level.value());
+  }
+
+  return MakeAccountAvailable(builder.Build(email));
+}
+
+AccountInfo IdentityTestEnvironment::MakeAccountAvailable(
+    const AccountAvailabilityOptions& options) {
+  return signin::MakeAccountAvailable(identity_manager(), options);
+}
+
+AccountAvailabilityOptionsBuilder
+IdentityTestEnvironment::CreateAccountAvailabilityOptionsBuilder() {
+  // NOTE: `test_url_loader_factory_` is passed directly here, but will be
+  // CHECKed if we attempt to use a null value.
+  return AccountAvailabilityOptionsBuilder(test_url_loader_factory_);
 }
 
 void IdentityTestEnvironment::SetRefreshTokenForAccount(

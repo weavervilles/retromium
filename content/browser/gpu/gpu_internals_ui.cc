@@ -46,7 +46,6 @@
 #include "gpu/config/gpu_lists_version.h"
 #include "gpu/config/gpu_util.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
-#include "gpu/ipc/host/gpu_memory_buffer_support.h"
 #include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "skia/ext/skia_commit_hash.h"
 #include "third_party/angle/src/common/angle_version_info.h"
@@ -348,8 +347,6 @@ base::Value::List CompositorInfo() {
 base::Value::List GpuMemoryBufferInfo(const gfx::GpuExtraInfo& gpu_extra_info) {
   base::Value::List gpu_memory_buffer_info;
 
-  gpu::GpuMemoryBufferSupport gpu_memory_buffer_support;
-
   gpu::GpuMemoryBufferConfigurationSet native_config;
 #if defined(USE_OZONE_PLATFORM_X11)
   if (ui::OzonePlatform::GetInstance()
@@ -362,7 +359,7 @@ base::Value::List GpuMemoryBufferInfo(const gfx::GpuExtraInfo& gpu_extra_info) {
 #endif
   if (native_config.empty()) {
     native_config =
-        gpu::GetNativeGpuMemoryBufferConfigurations(&gpu_memory_buffer_support);
+        gpu::GpuMemoryBufferSupport::GetNativeGpuMemoryBufferConfigurations();
   }
   for (size_t format = 0;
        format < static_cast<size_t>(gfx::BufferFormat::LAST) + 1; format++) {
@@ -604,6 +601,36 @@ const char* GetProfileName(gpu::VideoCodecProfile profile) {
       return "av1 profile high";
     case gpu::AV1PROFILE_PROFILE_PRO:
       return "av1 profile pro";
+    case gpu::VVCPROFILE_MAIN10:
+      return "vvc profile main10";
+    case gpu::VVCPROFILE_MAIN12:
+      return "vvc profile main12";
+    case gpu::VVCPROFILE_MAIN12_INTRA:
+      return "vvc profile main12 intra";
+    case gpu::VVCPROIFLE_MULTILAYER_MAIN10:
+      return "vvc profile multilayer main10";
+    case gpu::VVCPROFILE_MAIN10_444:
+      return "vvc profile main10 444";
+    case gpu::VVCPROFILE_MAIN12_444:
+      return "vvc profile main12 444";
+    case gpu::VVCPROFILE_MAIN16_444:
+      return "vvc profile main16 444";
+    case gpu::VVCPROFILE_MAIN12_444_INTRA:
+      return "vvc profile main12 444 intra";
+    case gpu::VVCPROFILE_MAIN16_444_INTRA:
+      return "vvc profile main16 444 intra";
+    case gpu::VVCPROFILE_MULTILAYER_MAIN10_444:
+      return "vvc profile multilayer main10 444";
+    case gpu::VVCPROFILE_MAIN10_STILL_PICTURE:
+      return "vvc profile main10 stillpicture";
+    case gpu::VVCPROFILE_MAIN12_STILL_PICTURE:
+      return "vvc profile main12 stillpicture";
+    case gpu::VVCPROFILE_MAIN10_444_STILL_PICTURE:
+      return "vvc profile main10 444 stillpicture";
+    case gpu::VVCPROFILE_MAIN12_444_STILL_PICTURE:
+      return "vvc profile main12 444 stillpicture";
+    case gpu::VVCPROFILE_MAIN16_444_STILL_PICTURE:
+      return "vvc profile main16 444 stillpicture";
   }
   NOTREACHED();
   return "";

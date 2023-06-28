@@ -215,6 +215,40 @@ mojom("mojom_network_isolation_key") {
   ]
 }
 
+mojom("mojom_shared_dictionary_isolation_key") {
+  generate_java = true
+  sources = [ "shared_dictionary_isolation_key.mojom" ]
+
+  public_deps = [
+    ":mojom_schemeful_site",
+    "//mojo/public/mojom/base",
+    "//url/mojom:url_mojom_origin",
+  ]
+
+  if (!is_ios) {
+    export_class_attribute_blink = "BLINK_PLATFORM_EXPORT"
+    export_define_blink = "BLINK_PLATFORM_IMPLEMENTATION=1"
+    export_header_blink = "third_party/blink/public/platform/web_common.h"
+  }
+
+  cpp_typemaps = [
+    {
+      types = [
+        {
+          mojom = "network.mojom.SharedDictionaryIsolationKey"
+          cpp = "::net::SharedDictionaryIsolationKey"
+        },
+      ]
+      traits_headers = [ "//services/network/public/cpp/shared_dictionary_isolation_key_mojom_traits.h" ]
+      traits_sources = [ "//services/network/public/cpp/shared_dictionary_isolation_key_mojom_traits.cc" ]
+      traits_public_deps = [
+        "//net:shared_dictionary",
+        "//services/network/public/cpp:schemeful_site_mojom_support",
+      ]
+    },
+  ]
+}
+
 # As with mojom_ip_address, this is a separate target to avoid a circular
 # dependency, which comes from the fact that proxy_resolver service will use
 # this interface, and the network service uses the proxy_resolver service.
@@ -378,11 +412,15 @@ mojom("mojom_attribution") {
           cpp = "::network::TriggerVerification"
           move_only = true
         },
+        {
+          mojom = "network.mojom.AttributionReportingRuntimeFeatures"
+          cpp = "::network::AttributionReportingRuntimeFeatures"
+          copyable_pass_by_value = true
+        },
       ]
       traits_headers =
           [ "//services/network/public/cpp/attribution_mojom_traits.h" ]
-      traits_deps =
-          [ "//services/network/public/cpp:trigger_verification_traits" ]
+      traits_deps = [ "//services/network/public/cpp:attribution_traits" ]
     },
   ]
 
@@ -421,6 +459,7 @@ mojom("url_loader_base") {
     "network_interface_change_listener.mojom",
     "network_types.mojom",
     "no_vary_search.mojom",
+    "optional_bool.mojom",
     "parsed_headers.mojom",
     "referrer_policy.mojom",
     "request_priority.mojom",
@@ -449,6 +488,7 @@ mojom("url_loader_base") {
     ":mojom_network_param",
     ":mojom_proxy_config",
     ":mojom_schemeful_site",
+    ":mojom_shared_dictionary_isolation_key",
     "//mojo/public/mojom/base",
     "//services/proxy_resolver/public/mojom",
     "//url/mojom:url_mojom_gurl",
@@ -531,10 +571,6 @@ mojom("url_loader_base") {
         {
           mojom = "network.mojom.WebBundleTokenParams"
           cpp = "::network::ResourceRequest::WebBundleTokenParams"
-        },
-        {
-          mojom = "network.mojom.NetLogSource"
-          cpp = "::net::NetLogSource"
         },
         {
           mojom = "network.mojom.URLRequest"
@@ -841,6 +877,10 @@ mojom("mojom_network_param") {
           mojom = "network.mojom.HostPortPair"
           cpp = "::net::HostPortPair"
         },
+        {
+          mojom = "network.mojom.NetLogSource"
+          cpp = "::net::NetLogSource"
+        },
       ]
       traits_headers =
           [ "//services/network/public/cpp/network_param_mojom_traits.h" ]
@@ -859,10 +899,6 @@ mojom("mojom_network_param") {
         {
           mojom = "network.mojom.CertVerifyResult"
           cpp = "::net::CertVerifyResult"
-        },
-        {
-          mojom = "network.mojom.CTVerifyResult"
-          cpp = "::net::ct::CTVerifyResult"
         },
         {
           mojom = "network.mojom.HttpResponseHeaders"
@@ -1038,6 +1074,11 @@ mojom("mojom_structured_headers") {
         {
           mojom = "network.mojom.StructuredHeadersParameterizedItem"
           cpp = "::net::structured_headers::ParameterizedItem"
+          move_only = true
+        },
+        {
+          mojom = "network.mojom.StructuredHeadersParameterizedMember"
+          cpp = "::net::structured_headers::ParameterizedMember"
           move_only = true
         },
       ]
@@ -1306,7 +1347,6 @@ mojom("mojom") {
     "network_service.mojom",
     "network_service_test.mojom",
     "oblivious_http_request.mojom",
-    "optional_bool.mojom",
     "proxy_lookup_client.mojom",
     "proxy_resolving_socket.mojom",
     "reporting_service.mojom",

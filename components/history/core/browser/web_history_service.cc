@@ -186,7 +186,7 @@ class RequestImpl : public WebHistoryService::Request {
       signin::ScopeSet oauth_scopes;
       oauth_scopes.insert(kHistoryOAuthScope);
       identity_manager_->RemoveAccessTokenFromCache(
-          identity_manager_->GetPrimaryAccountId(signin::ConsentLevel::kSync),
+          identity_manager_->GetPrimaryAccountId(signin::ConsentLevel::kSignin),
           oauth_scopes, access_token_);
 
       access_token_.clear();
@@ -559,9 +559,8 @@ void WebHistoryService::QueryHistoryCompletionCallback(
     WebHistoryService::QueryWebHistoryCallback callback,
     WebHistoryService::Request* request,
     bool success) {
-  absl::optional<base::Value::Dict> response =
-      success ? ReadResponse(request) : absl::nullopt;
-  std::move(callback).Run(request, response);
+  std::move(callback).Run(request,
+                          success ? ReadResponse(request) : absl::nullopt);
 }
 
 void WebHistoryService::ExpireHistoryCompletionCallback(

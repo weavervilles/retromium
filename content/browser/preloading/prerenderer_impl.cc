@@ -139,7 +139,7 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
     // For now, start the first candidate for a URL only if there are no
     // matching prerenders. We could be cleverer in the future.
     if (matching_prerenders.empty()) {
-      DCHECK_GT(matching_candidates.size(), 0u);
+      CHECK_GT(matching_candidates.size(), 0u);
       candidates_to_start.push_back(std::move(matching_candidates[0]));
     }
 
@@ -179,7 +179,11 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
 
 bool PrerendererImpl::MaybePrerender(
     const blink::mojom::SpeculationCandidatePtr& candidate) {
-  DCHECK_EQ(candidate->action, blink::mojom::SpeculationAction::kPrerender);
+  CHECK_EQ(candidate->action, blink::mojom::SpeculationAction::kPrerender);
+
+  // Prerendering frames should not trigger any prerender request.
+  CHECK(!render_frame_host_->IsInLifecycleState(
+      RenderFrameHost::LifecycleState::kPrerendering));
 
   if (!registry_)
     return false;
@@ -218,8 +222,7 @@ bool PrerendererImpl::MaybePrerender(
         blink::mojom::ConsoleMessageLevel::kWarning,
         base::StringPrintf(
             "The SpeculationRules API does not support cross-site prerender "
-            "yet (kSameSiteCrossOriginForSpeculationRulesPrerender2 is "
-            "enabled). (initiator origin: %s, prerender origin: %s). "
+            "yet (initiator origin: %s, prerender origin: %s). "
             "https://crbug.com/1176054 tracks cross-site support.",
             rfhi.GetLastCommittedOrigin().Serialize().c_str(),
             url::Origin::Create(candidate->url).Serialize().c_str()));

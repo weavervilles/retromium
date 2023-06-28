@@ -23,8 +23,8 @@
 #include "build/branding_buildflags.h"
 #include "chrome/updater/test/integration_tests_impl.h"
 #include "chrome/updater/test_scope.h"
-#include "chrome/updater/util/unittest_util.h"
-#include "chrome/updater/util/unittest_util_win.h"
+#include "chrome/updater/util/unit_test_util.h"
+#include "chrome/updater/util/unit_test_util_win.h"
 #include "chrome/updater/util/util.h"
 #include "chrome/updater/util/win_util.h"
 #include "chrome/updater/win/setup/setup_util.h"
@@ -38,7 +38,7 @@ namespace {
 
 constexpr wchar_t kAppId1[] = L"{3B1A3CCA-0525-4418-93E6-A0DB3398EC9B}";
 
-constexpr wchar_t kBadCmdLine[] = L"\"c:\\Program Files\\cmd.exe\"";
+constexpr wchar_t kBadCmdLine[] = L"\"c:\\Program Files (x86)\\cmd.exe\"";
 constexpr wchar_t kCmdLineValid[] =
     L"\"C:\\Program Files\\Windows Media Player\\wmpnscfg.exe\" /Close";
 

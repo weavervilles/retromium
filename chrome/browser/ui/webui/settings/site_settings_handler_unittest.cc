@@ -45,8 +45,6 @@
 #include "chrome/browser/hid/hid_chooser_context.h"
 #include "chrome/browser/hid/hid_chooser_context_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/permissions/notification_permission_review_service_factory.h"
-#include "chrome/browser/permissions/notifications_engagement_service_factory.h"
 #include "chrome/browser/permissions/permission_decision_auto_blocker_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/privacy_sandbox/mock_privacy_sandbox_service.h"
@@ -150,6 +148,8 @@ using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::UnorderedElementsAre;
 
+using GroupingKey = settings::SiteSettingsHandler::GroupingKey;
+
 constexpr char kCallbackId[] = "test-callback-id";
 constexpr char kSetting[] = "setting";
 constexpr char kSource[] = "source";
@@ -177,6 +177,15 @@ const struct PatternContentTypeTestCase {
     {{"http://127.0.0.1", "location"}, {true, ""}},  // Localhost is secure.
     {{"http://[::1]", "location"}, {true, ""}}};
 
+// Matchers to make verifying GroupingKey contents easier.
+MATCHER_P(IsEtldPlus1, etld_plus1, "") {
+  return arg == std::string("etld:") + etld_plus1;
+}
+
+MATCHER_P(IsOrigin, origin, "") {
+  return arg == std::string("origin:") + origin.spec();
+}
+
 // Converts |etld_plus1| into an HTTPS SchemefulSite.
 net::SchemefulSite ConvertEtldToSchemefulSite(const std::string etld_plus1) {
   return net::SchemefulSite(GURL(std::string(url::kHttpsScheme) +
@@ -191,7 +200,12 @@ void ValidateSitesWithFps(
     base::flat_map<net::SchemefulSite, net::SchemefulSite>& first_party_sets) {
   for (const base::Value& site_group_value : storage_and_cookie_list) {
     const base::Value::Dict& site_group = site_group_value.GetDict();
-    std::string etld_plus1 = *site_group.FindString("etldPlus1");
+    GroupingKey grouping_key = GroupingKey::Deserialize(
+        CHECK_DEREF(site_group.FindString("groupingKey")));
+    if (!grouping_key.GetEtldPlusOne().has_value()) {
+      return;
+    }
+    std::string etld_plus1 = *grouping_key.GetEtldPlusOne();
     auto schemeful_site = ConvertEtldToSchemefulSite(etld_plus1);
 
     if (first_party_sets.count(schemeful_site)) {
@@ -359,20 +373,6 @@ class SiteSettingsHandlerBaseTest : public testing::Test {
     fake_user_manager_ptr->LoginUser(account_id);
   }
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
-
-  void RecordNotification(permissions::NotificationsEngagementService* service,
-                          GURL url,
-                          int daily_average_count) {
-    // This many notifications were recorded during the past week in total.
-    int total_count = daily_average_count * 7;
-    service->RecordNotificationDisplayed(url, total_count);
-  }
-
-  base::Time GetReferenceTime() {
-    base::Time time;
-    EXPECT_TRUE(base::Time::FromString("Sat, 1 Sep 2018 11:00:00 GMT", &time));
-    return time;
-  }
 
   TestingProfile* profile() { return profile_.get(); }
   Profile* incognito_profile() { return incognito_profile_; }
@@ -590,7 +590,7 @@ class SiteSettingsHandlerBaseTest : public testing::Test {
     ASSERT_EQ(expected_string, data.arg2()->GetString());
   }
 
-  void ValidateUsageInfo(const std::string& expected_usage_host,
+  void ValidateUsageInfo(const std::string& expected_usage_origin,
                          const std::string& expected_usage_string,
                          const std::string& expected_cookie_string,
                          const std::string& expected_fps_member_count_string,
@@ -602,7 +602,7 @@ class SiteSettingsHandlerBaseTest : public testing::Test {
     EXPECT_EQ("usage-total-changed", data.arg_nth(0)->GetString());
 
     ASSERT_TRUE(data.arg_nth(1)->is_string());
-    EXPECT_EQ(expected_usage_host, data.arg_nth(1)->GetString());
+    EXPECT_EQ(expected_usage_origin, data.arg_nth(1)->GetString());
 
     ASSERT_TRUE(data.arg_nth(2)->is_string());
     EXPECT_EQ(expected_usage_string, data.arg_nth(2)->GetString());
@@ -615,17 +615,6 @@ class SiteSettingsHandlerBaseTest : public testing::Test {
 
     ASSERT_TRUE(data.arg_nth(5)->is_bool());
     EXPECT_EQ(expected_fps_policy, data.arg_nth(5)->GetBool());
-  }
-
-  void ValidateNotificationPermissionUpdate() {
-    const content::TestWebUI::CallData& data = *web_ui()->call_data().back();
-    EXPECT_EQ("cr.webUIListenerCallback", data.function_name());
-
-    ASSERT_TRUE(data.arg1()->is_string());
-    EXPECT_EQ("notification-permission-review-list-maybe-changed",
-              data.arg1()->GetString());
-
-    ASSERT_TRUE(data.arg2()->is_list());
   }
 
   void CreateIncognitoProfile() {
@@ -793,14 +782,6 @@ class SiteSettingsHandlerBaseTest : public testing::Test {
     return first_party_sets;
   }
 
-  base::Value::List GetOriginList(int size) {
-    base::Value::List origins;
-    for (int i = 0; i < size; i++) {
-      origins.Append("https://example" + base::NumberToString(i) + ".org:443");
-    }
-    return origins;
-  }
-
   scoped_refptr<const extensions::Extension> LoadExtension(
       const std::string& extension_name) {
     auto extension = extensions::ExtensionBuilder()
@@ -854,7 +835,7 @@ class SiteSettingsHandlerBaseTest : public testing::Test {
   content::BrowserTaskEnvironment task_environment_;
   std::unique_ptr<TestingProfileManager> testing_profile_manager_;
   raw_ptr<TestingProfile> profile_ = nullptr;
-  raw_ptr<Profile> incognito_profile_ = nullptr;
+  raw_ptr<Profile, DanglingUntriaged> incognito_profile_ = nullptr;
   content::TestWebUI web_ui_;
   std::unique_ptr<SiteSettingsHandler> handler_;
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -937,11 +918,10 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
     EXPECT_EQ(1UL, site_groups.size());
     for (const base::Value& site_group_val : site_groups) {
       const base::Value::Dict& site_group = site_group_val.GetDict();
-      const std::string& etld_plus1_string =
-          CHECK_DEREF(site_group.FindString("etldPlus1"));
       const base::Value::List& origin_list =
           CHECK_DEREF(site_group.FindList("origins"));
-      EXPECT_EQ("example.com", etld_plus1_string);
+      EXPECT_THAT(CHECK_DEREF(site_group.FindString("groupingKey")),
+                  IsEtldPlus1("example.com"));
       EXPECT_EQ(2UL, origin_list.size());
       const base::Value::Dict& first_origin = origin_list[0].GetDict();
       const base::Value::Dict& second_origin = origin_list[1].GetDict();
@@ -969,16 +949,17 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
     EXPECT_EQ(2UL, site_groups.size());
     for (const base::Value& site_group_val : site_groups) {
       const base::Value::Dict& site_group = site_group_val.GetDict();
-      const std::string& etld_plus1_string =
-          CHECK_DEREF(site_group.FindString("etldPlus1"));
+      const std::string& grouping_key_string =
+          CHECK_DEREF(site_group.FindString("groupingKey"));
+      auto grouping_key = GroupingKey::Deserialize(grouping_key_string);
       const base::Value::List& origin_list =
           CHECK_DEREF(site_group.FindList("origins"));
-      if (etld_plus1_string == "example2.net") {
+      if (grouping_key.GetEtldPlusOne() == "example2.net") {
         EXPECT_EQ(1UL, origin_list.size());
         const base::Value::Dict& first_origin = origin_list[0].GetDict();
         EXPECT_EQ(url3.spec(), CHECK_DEREF(first_origin.FindString("origin")));
       } else {
-        EXPECT_EQ("example.com", etld_plus1_string);
+        EXPECT_THAT(grouping_key_string, IsEtldPlus1("example.com"));
       }
     }
   }
@@ -1021,10 +1002,10 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
 
     const base::Value::List& site_groups = data.arg3()->GetList();
     EXPECT_EQ(2UL, site_groups.size());
-    EXPECT_EQ("example.com",
-              CHECK_DEREF(site_groups[0].GetDict().FindString("etldPlus1")));
-    EXPECT_EQ("example2.net",
-              CHECK_DEREF(site_groups[1].GetDict().FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(site_groups[0].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example.com"));
+    EXPECT_THAT(CHECK_DEREF(site_groups[1].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example2.net"));
   }
 
   // Add an expired embargo setting to an existing eTLD+1 group and make sure it
@@ -1051,10 +1032,10 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
 
     const base::Value::List& site_groups = data.arg3()->GetList();
     EXPECT_EQ(2UL, site_groups.size());
-    EXPECT_EQ("example.com",
-              CHECK_DEREF(site_groups[0].GetDict().FindString("etldPlus1")));
-    EXPECT_EQ("example2.net",
-              CHECK_DEREF(site_groups[1].GetDict().FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(site_groups[0].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example.com"));
+    EXPECT_THAT(CHECK_DEREF(site_groups[1].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example2.net"));
   }
 
   // Add an expired embargo to a new eTLD+1 and make sure it doesn't appear.
@@ -1081,10 +1062,10 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
 
     const base::Value::List& site_groups = data.arg3()->GetList();
     EXPECT_EQ(2UL, site_groups.size());
-    EXPECT_EQ("example.com",
-              CHECK_DEREF(site_groups[0].GetDict().FindString("etldPlus1")));
-    EXPECT_EQ("example2.net",
-              CHECK_DEREF(site_groups[1].GetDict().FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(site_groups[0].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example.com"));
+    EXPECT_THAT(CHECK_DEREF(site_groups[1].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example2.net"));
   }
 
   // Same extension url from different content setting types shows only one
@@ -1105,13 +1086,18 @@ TEST_F(SiteSettingsHandlerTest, GetAllSites) {
 
     const base::Value::List& site_groups = data.arg3()->GetList();
     EXPECT_EQ(3UL, site_groups.size());
-    // Extension etldPlus1 string will be in the pattern of
+    // Extension groupingKey will be its origin with the pattern
     // "chrome-extension://<extension_id>" so it is before other site groups in
     // the list.
-    EXPECT_EQ(extension->url().spec(),
-              CHECK_DEREF(site_groups[0].GetDict().FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(site_groups[0].GetDict().FindString("groupingKey")),
+                IsOrigin(extension->url()));
+    EXPECT_EQ(nullptr, site_groups[0].GetDict().FindString("etldPlus1"));
+    EXPECT_THAT(CHECK_DEREF(site_groups[1].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example.com"));
     EXPECT_EQ("example.com",
               CHECK_DEREF(site_groups[1].GetDict().FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(site_groups[2].GetDict().FindString("groupingKey")),
+                IsEtldPlus1("example2.net"));
     EXPECT_EQ("example2.net",
               CHECK_DEREF(site_groups[2].GetDict().FindString("etldPlus1")));
   }
@@ -1139,7 +1125,8 @@ TEST_F(SiteSettingsHandlerTest, Cookies) {
 
     ASSERT_EQ(1UL, site_groups.size());
     const base::Value::Dict& first_group = site_groups[0].GetDict();
-    EXPECT_EQ("c1.com", CHECK_DEREF(first_group.FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(first_group.FindString("groupingKey")),
+                IsEtldPlus1("c1.com"));
     EXPECT_EQ(1, *first_group.FindInt("numCookies"));
     const base::Value::List& first_group_origins =
         CHECK_DEREF(first_group.FindList("origins"));
@@ -1163,7 +1150,8 @@ TEST_F(SiteSettingsHandlerTest, Cookies) {
 
     ASSERT_EQ(1UL, site_groups.size());
     const base::Value::Dict& first_group = site_groups[0].GetDict();
-    EXPECT_EQ("c2.com", CHECK_DEREF(first_group.FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(first_group.FindString("groupingKey")),
+                IsEtldPlus1("c2.com"));
     EXPECT_EQ(2, *first_group.FindInt("numCookies"));
     const base::Value::List& first_group_origins =
         CHECK_DEREF(first_group.FindList("origins"));
@@ -1189,7 +1177,8 @@ TEST_F(SiteSettingsHandlerTest, Cookies) {
 
     ASSERT_EQ(1UL, site_groups.size());
     const base::Value::Dict& first_group = site_groups[0].GetDict();
-    EXPECT_EQ("c3.com", CHECK_DEREF(first_group.FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(first_group.FindString("groupingKey")),
+                IsEtldPlus1("c3.com"));
     EXPECT_EQ(1, *first_group.FindInt("numCookies"));
     const base::Value::List& first_group_origins =
         CHECK_DEREF(first_group.FindList("origins"));
@@ -1212,7 +1201,8 @@ TEST_F(SiteSettingsHandlerTest, Cookies) {
 
     ASSERT_EQ(1UL, site_groups.size());
     const base::Value::Dict& first_group = site_groups[0].GetDict();
-    EXPECT_EQ("c4.com", CHECK_DEREF(first_group.FindString("etldPlus1")));
+    EXPECT_THAT(CHECK_DEREF(first_group.FindString("groupingKey")),
+                IsEtldPlus1("c4.com"));
     EXPECT_EQ(2, *first_group.FindInt("numCookies"));
     const base::Value::List& first_group_origins =
         CHECK_DEREF(first_group.FindList("origins"));
@@ -1353,8 +1343,8 @@ TEST_F(SiteSettingsHandlerTest, OnStorageFetched) {
     ASSERT_TRUE(site_group_val.is_dict());
     const base::Value::Dict& site_group = site_group_val.GetDict();
 
-    ASSERT_TRUE(site_group.FindString("etldPlus1"));
-    ASSERT_EQ("example.com", *site_group.FindString("etldPlus1"));
+    ASSERT_THAT(CHECK_DEREF(site_group.FindString("groupingKey")),
+                IsEtldPlus1("example.com"));
 
     EXPECT_EQ(3, site_group.FindDouble("numCookies"));
 
@@ -1387,8 +1377,8 @@ TEST_F(SiteSettingsHandlerTest, OnStorageFetched) {
   {
     const base::Value::Dict& site_group = storage_and_cookie_list[1].GetDict();
 
-    ASSERT_TRUE(site_group.FindString("etldPlus1"));
-    ASSERT_EQ("google.com", *site_group.FindString("etldPlus1"));
+    ASSERT_THAT(CHECK_DEREF(site_group.FindString("groupingKey")),
+                IsEtldPlus1("google.com"));
 
     EXPECT_EQ(3, site_group.FindDouble("numCookies"));
 
@@ -1425,8 +1415,8 @@ TEST_F(SiteSettingsHandlerTest, OnStorageFetched) {
     ASSERT_TRUE(site_group_val.is_dict());
     const base::Value::Dict& site_group = site_group_val.GetDict();
 
-    ASSERT_TRUE(site_group.FindString("etldPlus1"));
-    ASSERT_EQ("google.com.au", *site_group.FindString("etldPlus1"));
+    ASSERT_THAT(CHECK_DEREF(site_group.FindString("groupingKey")),
+                IsEtldPlus1("google.com.au"));
 
     EXPECT_EQ(4, site_group.FindDouble("numCookies"));
 
@@ -1478,8 +1468,8 @@ TEST_F(SiteSettingsHandlerTest, OnStorageFetched) {
     ASSERT_TRUE(site_group_val.is_dict());
     const base::Value::Dict& site_group = site_group_val.GetDict();
 
-    ASSERT_TRUE(site_group.FindString("etldPlus1"));
-    ASSERT_EQ("ungrouped.com", *site_group.FindString("etldPlus1"));
+    ASSERT_THAT(CHECK_DEREF(site_group.FindString("groupingKey")),
+                IsEtldPlus1("ungrouped.com"));
 
     EXPECT_EQ(1, site_group.FindDouble("numCookies"));
 
@@ -1515,8 +1505,8 @@ TEST_F(SiteSettingsHandlerTest, InstalledApps) {
     ASSERT_TRUE(site_group_val.is_dict());
     const base::Value::Dict& site_group = site_group_val.GetDict();
 
-    ASSERT_TRUE(site_group.FindString("etldPlus1"));
-    ASSERT_EQ("example.com", *site_group.FindString("etldPlus1"));
+    ASSERT_THAT(CHECK_DEREF(site_group.FindString("groupingKey")),
+                IsEtldPlus1("example.com"));
 
     ASSERT_TRUE(site_group.FindBool("hasInstalledPWA").value_or(false));
 
@@ -1536,8 +1526,8 @@ TEST_F(SiteSettingsHandlerTest, InstalledApps) {
     ASSERT_TRUE(site_group_val.is_dict());
     const base::Value::Dict& site_group = site_group_val.GetDict();
 
-    ASSERT_TRUE(site_group.FindString("etldPlus1"));
-    ASSERT_EQ("google.com", *site_group.FindString("etldPlus1"));
+    ASSERT_THAT(CHECK_DEREF(site_group.FindString("groupingKey")),
+                IsEtldPlus1("google.com"));
     EXPECT_FALSE(site_group.FindBool("hasInstalledPWA").value_or(true));
 
     const base::Value::List* origin_list = site_group.FindList("origins");
@@ -2203,7 +2193,9 @@ TEST_F(SiteSettingsHandlerIsolatedWebAppTest, AllSitesDisplaysAppName) {
   const base::Value::Dict& group1 = site_groups[0].GetDict();
   const base::Value::Dict& origin1 =
       CHECK_DEREF(group1.FindList("origins"))[0].GetDict();
-  EXPECT_EQ(CHECK_DEREF(group1.FindString("etldPlus1")), iwa_url());
+  EXPECT_THAT(CHECK_DEREF(group1.FindString("groupingKey")),
+              IsOrigin(iwa_url()));
+  EXPECT_EQ(group1.FindString("etldPlus1"), nullptr);
   EXPECT_EQ(CHECK_DEREF(group1.FindString("displayName")), "IWA Name");
   EXPECT_EQ(CHECK_DEREF(origin1.FindString("origin")), iwa_url());
   EXPECT_EQ(origin1.FindDouble("usage").value(), 50.0);
@@ -2211,6 +2203,8 @@ TEST_F(SiteSettingsHandlerIsolatedWebAppTest, AllSitesDisplaysAppName) {
   const base::Value::Dict& group2 = site_groups[1].GetDict();
   const base::Value::Dict& origin2 =
       CHECK_DEREF(group2.FindList("origins"))[0].GetDict();
+  EXPECT_THAT(CHECK_DEREF(group2.FindString("groupingKey")),
+              IsEtldPlus1(iwa_url().host()));
   EXPECT_EQ(CHECK_DEREF(group2.FindString("etldPlus1")), iwa_url().host());
   EXPECT_EQ(CHECK_DEREF(group2.FindString("displayName")), iwa_url().host());
   EXPECT_EQ(CHECK_DEREF(origin2.FindString("origin")), https_url);
@@ -2679,9 +2673,8 @@ TEST_F(SiteSettingsHandlerTest, ExcludeWebUISchemesInLists) {
     EXPECT_EQ(1UL, site_groups.size());
     const base::Value::Dict& first_site_group = site_groups[0].GetDict();
 
-    const std::string etld_plus1_string =
-        CHECK_DEREF(first_site_group.FindString("etldPlus1"));
-    EXPECT_EQ("example.com", etld_plus1_string);
+    EXPECT_THAT(CHECK_DEREF(first_site_group.FindString("groupingKey")),
+                IsEtldPlus1("example.com"));
     const base::Value::List& origin_list =
         CHECK_DEREF(first_site_group.FindList("origins"));
     EXPECT_EQ(1UL, origin_list.size());
@@ -4683,7 +4676,7 @@ TEST_F(SiteSettingsHandlerUsbTest, HandleSetOriginPermissionsPolicyOnly) {
   TestHandleSetOriginPermissionsPolicyOnly();
 }
 
-TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
+TEST_F(SiteSettingsHandlerTest, HandleClearSiteGroupDataAndCookies) {
   SetupModels();
 
   EXPECT_EQ(28u,
@@ -4692,10 +4685,8 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   auto verify_site_group = [](const base::Value& site_group,
                               std::string expected_etld_plus1) {
     ASSERT_TRUE(site_group.is_dict());
-    const std::string* etld_plus1 =
-        site_group.GetDict().FindString("etldPlus1");
-    ASSERT_TRUE(etld_plus1);
-    ASSERT_EQ(expected_etld_plus1, *etld_plus1);
+    ASSERT_THAT(CHECK_DEREF(site_group.GetDict().FindString("groupingKey")),
+                IsEtldPlus1(expected_etld_plus1));
   };
 
   base::Value::List storage_and_cookie_list = GetOnStorageFetchedSentList();
@@ -4703,8 +4694,8 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   verify_site_group(storage_and_cookie_list[0], "example.com");
 
   base::Value::List args;
-  args.Append("example.com");
-  handler()->HandleClearEtldPlus1DataAndCookies(args);
+  args.Append(GroupingKey::CreateFromEtldPlus1("example.com").Serialize());
+  handler()->HandleClearSiteGroupDataAndCookies(args);
 
   // All host nodes for non-secure example.com, and abc.example.com, which do
   // not have any unpartitioned  storage, should have been removed.
@@ -4737,9 +4728,9 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   verify_site_group(storage_and_cookie_list[0], "google.com");
 
   args.clear();
-  args.Append("google.com");
+  args.Append(GroupingKey::CreateFromEtldPlus1("google.com").Serialize());
 
-  handler()->HandleClearEtldPlus1DataAndCookies(args);
+  handler()->HandleClearSiteGroupDataAndCookies(args);
 
   EXPECT_EQ(14u,
             handler()->cookies_tree_model_->GetRoot()->GetTotalNodeCount());
@@ -4749,9 +4740,9 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   verify_site_group(storage_and_cookie_list[0], "google.com.au");
 
   args.clear();
-  args.Append("google.com.au");
+  args.Append(GroupingKey::CreateFromEtldPlus1("google.com.au").Serialize());
 
-  handler()->HandleClearEtldPlus1DataAndCookies(args);
+  handler()->HandleClearSiteGroupDataAndCookies(args);
   // No nodes representing storage partitioned on google.com.au should be
   // present.
   for (const auto& host_node :
@@ -4776,9 +4767,9 @@ TEST_F(SiteSettingsHandlerTest, HandleClearEtldPlus1DataAndCookies) {
   verify_site_group(storage_and_cookie_list[0], "ungrouped.com");
 
   args.clear();
-  args.Append("ungrouped.com");
+  args.Append(GroupingKey::CreateFromEtldPlus1("ungrouped.com").Serialize());
 
-  handler()->HandleClearEtldPlus1DataAndCookies(args);
+  handler()->HandleClearSiteGroupDataAndCookies(args);
 
   storage_and_cookie_list = GetOnStorageFetchedSentList();
   EXPECT_EQ(0U, storage_and_cookie_list.size());
@@ -4891,7 +4882,6 @@ TEST_F(SiteSettingsHandlerTest, ClearClientHints) {
 
   HostContentSettingsMap* host_content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSettingsForOneType client_hints_settings;
 
   // Add setting for the two hosts host[0], host[1].
   base::Value client_hint_platform_version(14);
@@ -4914,10 +4904,11 @@ TEST_F(SiteSettingsHandlerTest, ClearClientHints) {
 
   // Clear at the eTLD+1 level and ensure affected origins are cleared.
   base::Value::List args;
-  args.Append("example.com");
-  handler()->HandleClearEtldPlus1DataAndCookies(args);
-  host_content_settings_map->GetSettingsForOneType(
-      ContentSettingsType::CLIENT_HINTS, &client_hints_settings);
+  args.Append(GroupingKey::CreateFromEtldPlus1("example.com").Serialize());
+  handler()->HandleClearSiteGroupDataAndCookies(args);
+  ContentSettingsForOneType client_hints_settings =
+      host_content_settings_map->GetSettingsForOneType(
+          ContentSettingsType::CLIENT_HINTS);
   EXPECT_EQ(2U, client_hints_settings.size());
 
   EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(hosts[2]),
@@ -4939,8 +4930,8 @@ TEST_F(SiteSettingsHandlerTest, ClearClientHints) {
   handler()->HandleClearUnpartitionedUsage(args);
 
   // Validate the client hint has been cleared.
-  host_content_settings_map->GetSettingsForOneType(
-      ContentSettingsType::CLIENT_HINTS, &client_hints_settings);
+  client_hints_settings = host_content_settings_map->GetSettingsForOneType(
+      ContentSettingsType::CLIENT_HINTS);
   EXPECT_EQ(1U, client_hints_settings.size());
 
   // www.google.com should be the only remaining entry.
@@ -4958,8 +4949,8 @@ TEST_F(SiteSettingsHandlerTest, ClearClientHints) {
   handler()->HandleClearUnpartitionedUsage(args);
 
   // Validate the client hint has been cleared.
-  host_content_settings_map->GetSettingsForOneType(
-      ContentSettingsType::CLIENT_HINTS, &client_hints_settings);
+  client_hints_settings = host_content_settings_map->GetSettingsForOneType(
+      ContentSettingsType::CLIENT_HINTS);
   EXPECT_EQ(0U, client_hints_settings.size());
 }
 
@@ -4974,7 +4965,6 @@ TEST_F(SiteSettingsHandlerTest, ClearReducedAcceptLanguage) {
 
   HostContentSettingsMap* host_content_settings_map =
       HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSettingsForOneType accept_language_settings;
 
   std::string language = "en-us";
   base::Value::Dict accept_language_dictionary;
@@ -4989,10 +4979,11 @@ TEST_F(SiteSettingsHandlerTest, ClearReducedAcceptLanguage) {
 
   // Clear at the eTLD+1 level and ensure affected origins are cleared.
   base::Value::List args;
-  args.Append("example.com");
-  handler()->HandleClearEtldPlus1DataAndCookies(args);
-  host_content_settings_map->GetSettingsForOneType(
-      ContentSettingsType::REDUCED_ACCEPT_LANGUAGE, &accept_language_settings);
+  args.Append(GroupingKey::CreateFromEtldPlus1("example.com").Serialize());
+  handler()->HandleClearSiteGroupDataAndCookies(args);
+  ContentSettingsForOneType accept_language_settings =
+      host_content_settings_map->GetSettingsForOneType(
+          ContentSettingsType::REDUCED_ACCEPT_LANGUAGE);
   EXPECT_EQ(2U, accept_language_settings.size());
 
   EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(hosts[2]),
@@ -5016,8 +5007,8 @@ TEST_F(SiteSettingsHandlerTest, ClearReducedAcceptLanguage) {
   handler()->HandleClearUnpartitionedUsage(args);
 
   // Validate the reduce accept language has been cleared.
-  host_content_settings_map->GetSettingsForOneType(
-      ContentSettingsType::REDUCED_ACCEPT_LANGUAGE, &accept_language_settings);
+  accept_language_settings = host_content_settings_map->GetSettingsForOneType(
+      ContentSettingsType::REDUCED_ACCEPT_LANGUAGE);
   EXPECT_EQ(1U, accept_language_settings.size());
 
   // www.google.com should be the only remaining entry.
@@ -5036,8 +5027,8 @@ TEST_F(SiteSettingsHandlerTest, ClearReducedAcceptLanguage) {
   handler()->HandleClearUnpartitionedUsage(args);
 
   // Validate the reduced accept language has been cleared.
-  host_content_settings_map->GetSettingsForOneType(
-      ContentSettingsType::REDUCED_ACCEPT_LANGUAGE, &accept_language_settings);
+  accept_language_settings = host_content_settings_map->GetSettingsForOneType(
+      ContentSettingsType::REDUCED_ACCEPT_LANGUAGE);
   EXPECT_EQ(0U, accept_language_settings.size());
 }
 
@@ -5052,7 +5043,7 @@ TEST_F(SiteSettingsHandlerTest, HandleClearPartitionedUsage) {
 
   base::Value::List args;
   args.Append("https://www.example.com/");
-  args.Append("google.com");
+  args.Append(GroupingKey::CreateFromEtldPlus1("google.com").Serialize());
   handler()->HandleClearPartitionedUsage(args);
 
   // This should have only removed cookies for embedded.com partitioned on
@@ -5252,11 +5243,20 @@ TEST_F(SiteSettingsHandlerTest, HandleGetUsageInfo) {
   handler()->ServicePendingRequests();
   ValidateUsageInfo("http://google.com", "", "2 cookies",
                     "2 sites in google.com's group", false);
+
   args.clear();
   args.Append("http://ungrouped.com");
   handler()->HandleFetchUsageTotal(args);
   handler()->ServicePendingRequests();
   ValidateUsageInfo("http://ungrouped.com", "", "1 cookie", "", false);
+
+  // Test that the argument URL formatting is preserved in the response because
+  // the UI ignores responses with different URL strings.
+  args.clear();
+  args.Append("http://ungrouped.com//");
+  handler()->HandleFetchUsageTotal(args);
+  handler()->ServicePendingRequests();
+  ValidateUsageInfo("http://ungrouped.com//", "", "1 cookie", "", false);
 }
 
 TEST_F(SiteSettingsHandlerTest, NonTreeModelDeletion) {
@@ -5274,8 +5274,8 @@ TEST_F(SiteSettingsHandlerTest, NonTreeModelDeletion) {
                   url::Origin::Create(GURL("https://google.com"))));
 
   base::Value::List args;
-  args.Append("google.com");
-  handler()->HandleClearEtldPlus1DataAndCookies(args);
+  args.Append(GroupingKey::CreateFromEtldPlus1("google.com").Serialize());
+  handler()->HandleClearSiteGroupDataAndCookies(args);
 
   auto* browsing_data_remover = profile()->GetBrowsingDataRemover();
   EXPECT_EQ(content::BrowsingDataRemover::DATA_TYPE_PRIVACY_SANDBOX &
@@ -5319,241 +5319,10 @@ TEST_F(SiteSettingsHandlerTest, FirstPartySetsMembership) {
   ValidateSitesWithFps(storage_and_cookie_list, first_party_sets);
 }
 
-TEST_F(SiteSettingsHandlerTest,
-       HandleIgnoreOriginsForNotificationPermissionReview) {
-  base::test::ScopedFeatureList scoped_feature;
-  scoped_feature.InitAndEnableFeature(
-      ::features::kSafetyCheckNotificationPermissions);
-
-  HostContentSettingsMap* content_settings =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSettingsForOneType ignored_patterns;
-  content_settings->GetSettingsForOneType(
-      ContentSettingsType::NOTIFICATION_PERMISSION_REVIEW, &ignored_patterns);
-  ASSERT_EQ(0U, ignored_patterns.size());
-
-  base::Value::List args;
-  args.Append(GetOriginList(1));
-  handler()->HandleIgnoreOriginsForNotificationPermissionReview(args);
-
-  // Check there is 1 origin in ignore list.
-  content_settings->GetSettingsForOneType(
-      ContentSettingsType::NOTIFICATION_PERMISSION_REVIEW, &ignored_patterns);
-  ASSERT_EQ(1U, ignored_patterns.size());
-
-  ValidateNotificationPermissionUpdate();
-}
-
-TEST_F(SiteSettingsHandlerTest, HandleBlockNotificationPermissionForOrigins) {
-  base::test::ScopedFeatureList scoped_feature;
-  scoped_feature.InitAndEnableFeature(
-      ::features::kSafetyCheckNotificationPermissions);
-
-  base::Value::List args;
-  base::Value::List origins = GetOriginList(2);
-  args.Append(origins.Clone());
-
-  handler()->HandleBlockNotificationPermissionForOrigins(args);
-
-  // Check the permission for the two origins is block.
-  HostContentSettingsMap* content_settings =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSettingsForOneType notification_permissions;
-  content_settings->GetSettingsForOneType(ContentSettingsType::NOTIFICATIONS,
-                                          &notification_permissions);
-  auto type = content_settings->GetContentSetting(
-      GURL(origins[0].GetString()), GURL(), ContentSettingsType::NOTIFICATIONS);
-  ASSERT_EQ(CONTENT_SETTING_BLOCK, type);
-
-  type = content_settings->GetContentSetting(
-      GURL(origins[1].GetString()), GURL(), ContentSettingsType::NOTIFICATIONS);
-  ASSERT_EQ(CONTENT_SETTING_BLOCK, type);
-
-  ValidateNotificationPermissionUpdate();
-}
-
-TEST_F(SiteSettingsHandlerTest, HandleAllowNotificationPermissionForOrigins) {
-  base::test::ScopedFeatureList scoped_feature;
-  scoped_feature.InitAndEnableFeature(
-      ::features::kSafetyCheckNotificationPermissions);
-
-  base::Value::List args;
-  base::Value::List origins = GetOriginList(2);
-  args.Append(origins.Clone());
-  handler()->HandleAllowNotificationPermissionForOrigins(args);
-
-  // Check the permission for the two origins is allow.
-  HostContentSettingsMap* content_settings =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSettingsForOneType notification_permissions;
-  content_settings->GetSettingsForOneType(ContentSettingsType::NOTIFICATIONS,
-                                          &notification_permissions);
-  auto type = content_settings->GetContentSetting(
-      GURL(origins[0].GetString()), GURL(), ContentSettingsType::NOTIFICATIONS);
-  ASSERT_EQ(CONTENT_SETTING_ALLOW, type);
-
-  type = content_settings->GetContentSetting(
-      GURL(origins[1].GetString()), GURL(), ContentSettingsType::NOTIFICATIONS);
-  ASSERT_EQ(CONTENT_SETTING_ALLOW, type);
-
-  ValidateNotificationPermissionUpdate();
-}
-
-TEST_F(SiteSettingsHandlerTest, HandleResetNotificationPermissionForOrigins) {
-  base::test::ScopedFeatureList scoped_feature;
-  scoped_feature.InitAndEnableFeature(
-      ::features::kSafetyCheckNotificationPermissions);
-
-  HostContentSettingsMap* content_settings =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  base::Value::List args;
-  base::Value::List origins = GetOriginList(1);
-  args.Append(origins.Clone());
-
-  content_settings->SetContentSettingCustomScope(
-      ContentSettingsPattern::FromString(origins[0].GetString()),
-      ContentSettingsPattern::Wildcard(), ContentSettingsType::NOTIFICATIONS,
-      CONTENT_SETTING_ALLOW);
-
-  handler()->HandleResetNotificationPermissionForOrigins(args);
-
-  // Check the permission for the origin is reset.
-  auto type = content_settings->GetContentSetting(
-      GURL(origins[0].GetString()), GURL(), ContentSettingsType::NOTIFICATIONS);
-  ASSERT_EQ(CONTENT_SETTING_ASK, type);
-
-  ValidateNotificationPermissionUpdate();
-}
-
-TEST_F(SiteSettingsHandlerTest, PopulateNotificationPermissionReviewData) {
-  base::test::ScopedFeatureList scoped_feature;
-  scoped_feature.InitAndEnableFeature(
-      ::features::kSafetyCheckNotificationPermissions);
-
-  // Add a couple of notification permission and check they appear in review
-  // list.
-  HostContentSettingsMap* map =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  GURL urls[] = {GURL("https://google.com:443"),
-                 GURL("https://www.youtube.com:443"),
-                 GURL("https://www.example.com:443")};
-
-  map->SetContentSettingDefaultScope(urls[0], GURL(),
-                                     ContentSettingsType::NOTIFICATIONS,
-                                     CONTENT_SETTING_ALLOW);
-  map->SetContentSettingDefaultScope(urls[1], GURL(),
-                                     ContentSettingsType::NOTIFICATIONS,
-                                     CONTENT_SETTING_ALLOW);
-  map->SetContentSettingDefaultScope(urls[2], GURL(),
-                                     ContentSettingsType::NOTIFICATIONS,
-                                     CONTENT_SETTING_ALLOW);
-
-  // Record initial display date to enable comparing dictionaries for
-  // NotificationEngagementService.
-  auto* notification_engagement_service =
-      NotificationsEngagementServiceFactory::GetForProfile(profile());
-  std::string displayedDate =
-      notification_engagement_service->GetBucketLabel(base::Time::Now());
-
-  auto* site_engagement_service =
-      site_engagement::SiteEngagementServiceFactory::GetForProfile(profile());
-
-  // Set a host to have minimum engagement. This should be in review list.
-  RecordNotification(notification_engagement_service, urls[0], 1);
-  site_engagement::SiteEngagementScore score =
-      site_engagement_service->CreateEngagementScore(urls[0]);
-  score.Reset(0.5, GetReferenceTime());
-  score.Commit();
-  EXPECT_EQ(blink::mojom::EngagementLevel::MINIMAL,
-            site_engagement_service->GetEngagementLevel(urls[0]));
-
-  // Set a host to have large number of notifications, but low engagement. This
-  // should be in review list.
-  RecordNotification(notification_engagement_service, urls[1], 5);
-  site_engagement_service->AddPointsForTesting(urls[1], 1.0);
-  EXPECT_EQ(blink::mojom::EngagementLevel::LOW,
-            site_engagement_service->GetEngagementLevel(urls[1]));
-
-  // Set a host to have medium engagement and high notification count. This
-  // should not be in review list.
-  RecordNotification(notification_engagement_service, urls[2], 5);
-  site_engagement_service->AddPointsForTesting(urls[2], 50.0);
-  EXPECT_EQ(blink::mojom::EngagementLevel::MEDIUM,
-            site_engagement_service->GetEngagementLevel(urls[2]));
-
-  const auto& notification_permissions =
-      handler()->PopulateNotificationPermissionReviewData();
-  // Check if resulting list contains only the expected URLs. They should be in
-  // descending order of notification count.
-  EXPECT_EQ(2UL, notification_permissions.size());
-  EXPECT_EQ("https://www.youtube.com:443",
-            *notification_permissions[0].GetDict().FindString(
-                site_settings::kOrigin));
-  EXPECT_EQ("https://google.com:443",
-            *notification_permissions[1].GetDict().FindString(
-                site_settings::kOrigin));
-
-  // Increasing notification count also promotes host in the list.
-  RecordNotification(notification_engagement_service,
-                     GURL("https://google.com:443"), 10);
-  const auto& updated_notification_permissions =
-      handler()->PopulateNotificationPermissionReviewData();
-  EXPECT_EQ(2UL, updated_notification_permissions.size());
-  EXPECT_EQ("https://google.com:443",
-            *updated_notification_permissions[0].GetDict().FindString(
-                site_settings::kOrigin));
-  EXPECT_EQ("https://www.youtube.com:443",
-            *updated_notification_permissions[1].GetDict().FindString(
-                site_settings::kOrigin));
-}
-
-TEST_F(SiteSettingsHandlerTest,
-       HandleUndoIgnoreOriginsForNotificationPermissionReview) {
-  base::Value::List args;
-  args.Append(GetOriginList(1));
-  handler()->HandleIgnoreOriginsForNotificationPermissionReview(args);
-
-  // Check there is 1 origin in ignore list.
-  HostContentSettingsMap* content_settings =
-      HostContentSettingsMapFactory::GetForProfile(profile());
-  ContentSettingsForOneType ignored_patterns;
-  ASSERT_EQ(0U, ignored_patterns.size());
-  content_settings->GetSettingsForOneType(
-      ContentSettingsType::NOTIFICATION_PERMISSION_REVIEW, &ignored_patterns);
-  ASSERT_EQ(1U, ignored_patterns.size());
-
-  // Check there are no origins in ignore list.
-  handler()->HandleUndoIgnoreOriginsForNotificationPermissionReview(args);
-  content_settings->GetSettingsForOneType(
-      ContentSettingsType::NOTIFICATION_PERMISSION_REVIEW, &ignored_patterns);
-  ASSERT_EQ(0U, ignored_patterns.size());
-}
-
-TEST_F(SiteSettingsHandlerTest,
-       SendNotificationPermissionReviewList_FeatureEnabled) {
-  base::test::ScopedFeatureList scoped_feature;
-  scoped_feature.InitAndEnableFeature(
-      ::features::kSafetyCheckNotificationPermissions);
-
-  handler()->SendNotificationPermissionReviewList();
-
-  ValidateNotificationPermissionUpdate();
-}
-
-TEST_F(SiteSettingsHandlerTest,
-       SendNotificationPermissionReviewList_FeatureDisabled) {
-  base::test::ScopedFeatureList scoped_feature;
-  scoped_feature.InitAndDisableFeature(
-      ::features::kSafetyCheckNotificationPermissions);
-
-  handler()->SendNotificationPermissionReviewList();
-
-  ASSERT_EQ(0U, web_ui()->call_data().size());
-}
-
 TEST_F(SiteSettingsHandlerTest, IsolatedWebAppUsageInfo) {
   std::string iwa_url =
-      "isolated-app://aerugqztij5biqquuk3mfwpsaibuegaqcitgfchwuosuofdjabzqaaic";
+      "isolated-app://"
+      "aerugqztij5biqquuk3mfwpsaibuegaqcitgfchwuosuofdjabzqaaic/";
   SetupModelsWithIsolatedWebAppData(iwa_url, 1000);
 
   base::Value::List args;

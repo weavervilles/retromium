@@ -179,19 +179,6 @@ TEST_P(QuotaDatabaseTest, EnsureOpened) {
   }
 }
 
-TEST_P(QuotaDatabaseTest, RazeAndReopenWithNoDb) {
-  QuotaDatabase db(use_in_memory_db() ? base::FilePath() : DbPath());
-  // RazeAndReopen() with no db tries to create the db one last time.
-  EXPECT_EQ(db.RazeAndReopen(), QuotaError::kNone);
-
-  if (GetParam()) {
-    // Path should not exist for incognito mode.
-    ASSERT_FALSE(base::PathExists(DbPath()));
-  } else {
-    ASSERT_TRUE(base::PathExists(DbPath()));
-  }
-}
-
 TEST_P(QuotaDatabaseTest, UpdateOrCreateBucket) {
   auto db = CreateDatabase(use_in_memory_db());
   EXPECT_TRUE(EnsureOpened(db.get()));
@@ -519,7 +506,7 @@ TEST_P(QuotaDatabaseTest, BucketLastAccessTimeLRU) {
   std::set<BucketId> bucket_exceptions;
   QuotaErrorOr<std::set<BucketLocator>> result =
       db->GetBucketsForEviction(kTemp, 1, {}, bucket_exceptions, nullptr);
-  EXPECT_FALSE(result.has_value());
+  ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), QuotaError::kNotFound);
 
   // Insert bucket entries into BucketTable.
@@ -641,7 +628,7 @@ TEST_P(QuotaDatabaseTest, BucketLastAccessTimeLRU) {
   bucket_exceptions.insert(bucket_id1);
   bucket_exceptions.insert(bucket_id2);
   result = db->GetBucketsForEviction(kTemp, 1, {}, bucket_exceptions, nullptr);
-  EXPECT_FALSE(result.has_value());
+  ASSERT_FALSE(result.has_value());
 
   EXPECT_EQ(result.error(), QuotaError::kNotFound);
 }
@@ -653,7 +640,7 @@ TEST_P(QuotaDatabaseTest, BucketPersistence) {
   std::set<BucketId> bucket_exceptions;
   QuotaErrorOr<std::set<BucketLocator>> result =
       db->GetBucketsForEviction(kTemp, 1, {}, bucket_exceptions, nullptr);
-  EXPECT_FALSE(result.has_value());
+  ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), QuotaError::kNotFound);
 
   // Insert bucket entries into BucketTable.
@@ -685,13 +672,13 @@ TEST_P(QuotaDatabaseTest, BucketPersistence) {
       QuotaError::kNone);
 
   result = db->GetBucketsForEviction(kTemp, 1, {}, bucket_exceptions, nullptr);
-  EXPECT_TRUE(result.has_value());
+  ASSERT_TRUE(result.has_value());
   ASSERT_EQ(1U, result->size());
   EXPECT_EQ(bucket_id1, result->begin()->id);
 
   ASSERT_TRUE(db->UpdateBucketPersistence(bucket_id1, true).has_value());
   result = db->GetBucketsForEviction(kTemp, 1, {}, bucket_exceptions, nullptr);
-  EXPECT_TRUE(result.has_value());
+  ASSERT_TRUE(result.has_value());
   ASSERT_EQ(1U, result->size());
   EXPECT_EQ(bucket_id2, result->begin()->id);
 }
@@ -1016,6 +1003,8 @@ TEST_F(QuotaDatabaseTest, OpenCorruptedDatabase) {
     expecter.ExpectError(SQLITE_CORRUPT);
     auto db = CreateDatabase(/*is_incognito=*/false);
     ASSERT_TRUE(EnsureOpened(db.get()));
+    histograms.ExpectBucketCount("Quota.DatabaseSpecificError.Open",
+                                 sql::SqliteLoggedResultCode::kCorrupt, 1);
     EXPECT_TRUE(expecter.SawExpectedErrors());
 
     // Ensure data is deleted.
@@ -1026,11 +1015,6 @@ TEST_F(QuotaDatabaseTest, OpenCorruptedDatabase) {
   histograms.ExpectTotalCount("Quota.QuotaDatabaseReset", 1);
   histograms.ExpectBucketCount("Quota.QuotaDatabaseReset",
                                DatabaseResetReason::kCreateSchema, 1);
-
-  EXPECT_GE(histograms.GetTotalSum("Quota.QuotaDatabaseError"), 1);
-  EXPECT_GE(histograms.GetBucketCount("Quota.QuotaDatabaseError",
-                                      sql::SqliteLoggedResultCode::kCorrupt),
-            1);
 }
 
 TEST_F(QuotaDatabaseTest, QuotaDatabasePathMigration) {
@@ -1128,14 +1112,20 @@ TEST_F(QuotaDatabaseTest, QuotaDatabaseDirectoryMigrationError) {
 #endif  // !BUILDFLAG(IS_APPLE)
 
 TEST_F(QuotaDatabaseTest, UpdateOrCreateBucket_CorruptedDatabase) {
+  base::HistogramTester histograms;
   QuotaDatabase db(ProfilePath());
   BucketInitParams params(
       StorageKey::CreateFromStringForTesting("http://google/"),
       "google_bucket");
+  int sqlite_error_code = 0;
+  db.SetDbErrorCallback(base::BindRepeating(
+      [](int* error_code_out, int error_code) { *error_code_out = error_code; },
+      &sqlite_error_code));
 
   {
     ASSERT_TRUE(db.UpdateOrCreateBucket(params, 0).has_value())
         << "Failed to create bucket to be used in test";
+    EXPECT_EQ(sqlite_error_code, static_cast<int>(sql::SqliteResultCode::kOk));
   }
 
   // Bucket lookup uses the `buckets_by_storage_key` index.
@@ -1148,14 +1138,12 @@ TEST_F(QuotaDatabaseTest, UpdateOrCreateBucket_CorruptedDatabase) {
       << "Failed to corrupt the database";
 
   {
-    base::HistogramTester histograms;
-
     EXPECT_FALSE(db.UpdateOrCreateBucket(params, 0).has_value());
 
-    histograms.ExpectTotalCount("Quota.QuotaDatabaseError", 1);
-    histograms.ExpectBucketCount("Quota.QuotaDatabaseError",
-                                 sql::SqliteLoggedResultCode::kCorrupt, 1);
+    EXPECT_EQ(sqlite_error_code,
+              static_cast<int>(sql::SqliteResultCode::kCorrupt));
   }
+  histograms.ExpectTotalCount("Quota.DatabaseSpecificError.GetBucket", 1);
 }
 
 TEST_P(QuotaDatabaseTest, Expiration) {

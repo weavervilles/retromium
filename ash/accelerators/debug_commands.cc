@@ -29,6 +29,7 @@
 #include "ash/system/video_conference/video_conference_tray.h"
 #include "ash/system/video_conference/video_conference_tray_controller.h"
 #include "ash/touch/touch_devices_controller.h"
+#include "ash/virtual_trackpad/virtual_trackpad_view.h"
 #include "ash/wallpaper/wallpaper_controller_impl.h"
 #include "ash/wm/float/float_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -227,15 +228,8 @@ void HandleTriggerHUDDisplay() {
   hud_display::HUDDisplayView::Toggle();
 }
 
-void HandleTuckFloatedWindow(AcceleratorAction action) {
-  auto* floated_window = window_util::GetFloatedWindowForActiveDesk();
-  DCHECK(floated_window);
-
-  const float velocity_x =
-      action == AcceleratorAction::kDebugTuckFloatedWindowLeft ? -500.f : 500.f;
-  Shell::Get()->float_controller()->OnFlingOrSwipeForTablet(floated_window,
-                                                            velocity_x,
-                                                            /*velocity_y=*/0.f);
+void HandleToggleVirtualTrackpad() {
+  VirtualTrackpadView::Toggle();
 }
 
 // Toast debug shortcut constants.
@@ -276,10 +270,6 @@ void PrintUIHierarchies() {
   HandlePrintLayerHierarchy();
   HandlePrintWindowHierarchy();
   HandlePrintViewHierarchy();
-}
-
-bool CanTuckFloatedWindow() {
-  return !!window_util::GetFloatedWindowForActiveDesk();
 }
 
 bool DebugAcceleratorsEnabled() {
@@ -348,9 +338,8 @@ void PerformDebugActionIfEnabled(AcceleratorAction action) {
     case AcceleratorAction::kDebugToggleHudDisplay:
       HandleTriggerHUDDisplay();
       break;
-    case AcceleratorAction::kDebugTuckFloatedWindowLeft:
-    case AcceleratorAction::kDebugTuckFloatedWindowRight:
-      HandleTuckFloatedWindow(action);
+    case AcceleratorAction::kDebugToggleVirtualTrackpad:
+      HandleToggleVirtualTrackpad();
       break;
     case AcceleratorAction::kDebugToggleVideoConferenceCameraTrayIcon:
       HandleToggleVideoConferenceCameraTrayIcon();

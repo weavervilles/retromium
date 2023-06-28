@@ -127,7 +127,7 @@ bool ShouldRestoreApps(bool is_post_restart, Profile* profile) {
   return is_post_restart ||
          (primary_user_profile &&
           BrowserLauncher::GetForProfile(primary_user_profile)
-              ->is_launching_for_full_restore());
+              ->is_launching_for_last_opened_profiles());
 #else
   return is_post_restart;
 #endif
@@ -264,18 +264,16 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
     params.startup_id =
         command_line_->GetSwitchValueASCII("desktop-startup-id");
 #endif
+    if (command_line_->HasSwitch(switches::kWindowName)) {
+      params.user_title =
+          command_line_->GetSwitchValueASCII(switches::kWindowName);
+    }
+
     browser = Browser::Create(params);
   }
 
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  auto* init_params = chromeos::BrowserParamsProxy::Get();
-  bool from_arc =
-      init_params->InitialBrowserAction() ==
-          crosapi::mojom::InitialBrowserAction::kOpenWindowWithUrls &&
-      init_params->StartupUrlsFrom() == crosapi::mojom::OpenUrlFrom::kArc;
-#endif
-
   bool first_tab = true;
+  bool process_headless_commands = headless::ShouldProcessHeadlessCommands();
   custom_handlers::ProtocolHandlerRegistry* registry =
       profile_ ? ProtocolHandlerRegistryFactory::GetForBrowserContext(profile_)
                : nullptr;
@@ -301,6 +299,22 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
       continue;
     }
 
+    // Headless mode is restricted to only one url in the command line, so
+    // just grab the first one assuming it's the target.
+    if (first_tab && process_headless_commands) {
+      headless::ProcessHeadlessCommands(
+          profile_, tab.url,
+          base::BindOnce(
+              [](base::WeakPtr<Browser> browser,
+                 headless::HeadlessCommandHandler::Result result) {
+                if (browser && browser->window()) {
+                  browser->window()->Close();
+                }
+              },
+              browser->AsWeakPtr()));
+      continue;
+    }
+
     int add_types = first_tab ? AddTabTypes::ADD_ACTIVE : AddTabTypes::ADD_NONE;
     add_types |= AddTabTypes::ADD_FORCE_INDEX;
     if (tab.type == StartupTab::Type::kPinned)
@@ -320,44 +334,15 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
 #endif  // BUILDFLAG(ENABLE_RLZ)
 
     Navigate(&params);
-
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-    if (from_arc) {
-      auto* contents = params.navigated_or_inserted_contents;
-      if (contents) {
-        // Add a flag to remember this tab originated in the ARC context.
-        contents->SetUserData(
-            &arc::ArcWebContentsData::kArcTransitionFlag,
-            std::make_unique<arc::ArcWebContentsData>(contents));
-      }
-    }
-#endif
-
     first_tab = false;
   }
-  if (!browser->tab_strip_model()->GetActiveWebContents()) {
+  if (!browser->tab_strip_model()->GetActiveWebContents() &&
+      !process_headless_commands) {
     // TODO(sky): this is a work around for 110909. Figure out why it's needed.
     if (!browser->tab_strip_model()->count())
       chrome::AddTabAt(browser, GURL(), -1, true);
     else
       browser->tab_strip_model()->ActivateTabAt(0);
-  }
-
-  if (headless::ShouldProcessHeadlessCommands()) {
-    // Headless mode is restricted to only one url in the command line, so
-    // just grab the actave tab assuming it's the target.
-    content::WebContents* web_contents =
-        browser->tab_strip_model()->GetActiveWebContents();
-    if (web_contents) {
-      headless::ProcessHeadlessCommands(profile_, web_contents->GetVisibleURL(),
-                                        base::BindOnce(
-                                            [](base::WeakPtr<Browser> browser) {
-                                              if (browser->window()) {
-                                                browser->window()->Close();
-                                              }
-                                            },
-                                            browser->AsWeakPtr()));
-    }
   }
 
   browser->window()->Show();
@@ -509,15 +494,6 @@ StartupBrowserCreatorImpl::DetermineStartupTabs(
     bool welcome_enabled,
     bool whats_new_enabled,
     bool privacy_sandbox_dialog_required) {
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  {
-    // If URLs are passed via crosapi, forcibly opens those tabs.
-    StartupTabs crosapi_tabs = provider.GetCrosapiTabs();
-    if (!crosapi_tabs.empty())
-      return {std::move(crosapi_tabs), LaunchResult::kWithGivenUrls};
-  }
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
-
   StartupTabs tabs =
       provider.GetCommandLineTabs(*command_line_, cur_dir_, profile_);
   LaunchResult launch_result =

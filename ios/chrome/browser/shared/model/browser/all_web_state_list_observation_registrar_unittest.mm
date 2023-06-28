@@ -21,11 +21,26 @@
 
 class TestRegisteredWebStateListObserver : public WebStateListObserver {
  public:
-  void WebStateInsertedAt(WebStateList* web_state_list,
-                          web::WebState* web_state,
-                          int index,
-                          bool activating) override {
-    insertion_count_++;
+  void WebStateListDidChange(WebStateList* web_state_list,
+                             const WebStateListChange& change,
+                             const WebStateSelection& selection) override {
+    switch (change.type()) {
+      case WebStateListChange::Type::kSelectionOnly:
+        // Do nothing when a WebState is selected and its status is updated.
+        break;
+      case WebStateListChange::Type::kDetach:
+        // Do nothing when a WebState is detached.
+        break;
+      case WebStateListChange::Type::kMove:
+        // Do nothing when a WebState is moved.
+        break;
+      case WebStateListChange::Type::kReplace:
+        // Do nothing when a WebState is replaced.
+        break;
+      case WebStateListChange::Type::kInsert:
+        insertion_count_++;
+        break;
+    }
   }
   int insertion_count_;
 };
@@ -66,7 +81,7 @@ TEST_F(AllWebStateListObservationRegistrarTest, RegisterAllLists) {
       chrome_browser_state_->GetOffTheRecordChromeBrowserState());
   browser_list_->AddIncognitoBrowser(&incognito_browser_0);
 
-  AllWebStateListObservationRegistrar registrar(chrome_browser_state_.get(),
+  AllWebStateListObservationRegistrar registrar(browser_list_,
                                                 std::move(owned_observer_));
   // Should observe both insertions.
   AppendNewWebState(&regular_browser_0);
@@ -110,7 +125,7 @@ TEST_F(AllWebStateListObservationRegistrarTest, RegisterRegularLists) {
   browser_list_->AddIncognitoBrowser(&incognito_browser_0);
 
   AllWebStateListObservationRegistrar registrar(
-      chrome_browser_state_.get(), std::move(owned_observer_),
+      browser_list_, std::move(owned_observer_),
       AllWebStateListObservationRegistrar::Mode::REGULAR);
   // Should observe only the reugular insertions.
   AppendNewWebState(&regular_browser_0);
@@ -142,7 +157,7 @@ TEST_F(AllWebStateListObservationRegistrarTest, RegisterIncognitoLists) {
   browser_list_->AddIncognitoBrowser(&incognito_browser_0);
 
   AllWebStateListObservationRegistrar registrar(
-      chrome_browser_state_.get(), std::move(owned_observer_),
+      browser_list_, std::move(owned_observer_),
       AllWebStateListObservationRegistrar::Mode::INCOGNITO);
   // Should observe only the incognito insertions.
   AppendNewWebState(&regular_browser_0);
@@ -172,7 +187,7 @@ TEST_F(AllWebStateListObservationRegistrarTest, DeleteWithObservers) {
   browser_list_->AddBrowser(&regular_browser_0);
 
   {
-    AllWebStateListObservationRegistrar registrar(chrome_browser_state_.get(),
+    AllWebStateListObservationRegistrar registrar(browser_list_,
                                                   std::move(owned_observer_));
   }
 }
@@ -186,7 +201,7 @@ TEST_F(AllWebStateListObservationRegistrarTest, DeleteBrowserState) {
       chrome_browser_state_->GetOffTheRecordChromeBrowserState());
   browser_list_->AddIncognitoBrowser(&incognito_browser_0);
 
-  AllWebStateListObservationRegistrar registrar(chrome_browser_state_.get(),
+  AllWebStateListObservationRegistrar registrar(browser_list_,
                                                 std::move(owned_observer_));
   AppendNewWebState(&regular_browser_0);
   AppendNewWebState(&incognito_browser_0);

@@ -99,22 +99,6 @@ int GetIdealPrimaryAdaptiveLauncherIconSizeInPx() {
 #endif
 }
 
-int GetIdealSplashIconSizeInPx() {
-#if BUILDFLAG(IS_ANDROID)
-  return WebappsIconUtils::GetIdealSplashImageSizeInPx();
-#else
-  return kMinimumPrimaryIconSizeInPx;
-#endif
-}
-
-int GetMinimumSplashIconSizeInPx() {
-#if BUILDFLAG(IS_ANDROID)
-  return WebappsIconUtils::GetMinimumSplashImageSizeInPx();
-#else
-  return kMinimumPrimaryIconSizeInPx;
-#endif
-}
-
 using IconPurpose = blink::mojom::ManifestImageResource_Purpose;
 
 struct ImageTypeDetails {
@@ -233,7 +217,8 @@ InstallableManager::InstallableManager(content::WebContents* web_contents)
       manifest_(std::make_unique<ManifestProperty>()),
       valid_manifest_(std::make_unique<ValidManifestProperty>()),
       worker_(std::make_unique<ServiceWorkerProperty>()),
-      service_worker_context_(nullptr) {
+      service_worker_context_(nullptr),
+      sequenced_task_runner_(base::SequencedTaskRunner::GetCurrentDefault()) {
   // This is null in unit tests.
   if (web_contents) {
     content::StoragePartition* storage_partition =
@@ -331,6 +316,11 @@ void InstallableManager::GetPrimaryIcon(
           base::BindOnce(OnDidCompleteGetPrimaryIcon, std::move(callback)));
 }
 
+void InstallableManager::SetSequencedTaskRunnerForTesting(
+    scoped_refptr<base::SequencedTaskRunner> task_runner) {
+  sequenced_task_runner_ = task_runner;
+}
+
 InstallableManager::ManifestProperty::ManifestProperty() = default;
 InstallableManager::ManifestProperty::~ManifestProperty() = default;
 
@@ -392,22 +382,6 @@ std::vector<InstallableStatusCode> InstallableManager::GetErrors(
       errors.push_back(icon.error);
   }
 
-  if (params.valid_splash_icon) {
-    IconProperty& icon = icons_[IconUsage::kSplash];
-
-    // If the icon is MASKABLE, ignore any error since we want to fallback to
-    // fetch IconPurpose::ANY.
-    // If the error is NO_ACCEPTABLE_ICON, there is no icon suitable as a splash
-    // icon in the manifest. Ignore this case since we only want to fail the
-    // check if there was a suitable splash icon specified and we couldn't fetch
-    // it.
-    if (icon.error != NO_ERROR_DETECTED &&
-        icon.purpose != IconPurpose::MASKABLE &&
-        icon.error != NO_ACCEPTABLE_ICON) {
-      errors.push_back(icon.error);
-    }
-  }
-
   return errors;
 }
 
@@ -465,8 +439,7 @@ bool InstallableManager::IsComplete(const InstallableParams& params) const {
          (!params.has_worker || worker_->fetched) &&
          (!params.fetch_screenshots || is_screenshots_fetch_complete_) &&
          (!params.valid_primary_icon ||
-          IsIconFetchComplete(IconUsage::kPrimary)) &&
-         (!params.valid_splash_icon || IsIconFetchComplete(IconUsage::kSplash));
+          IsIconFetchComplete(IconUsage::kPrimary));
 }
 
 void InstallableManager::Reset(InstallableStatusCode error) {
@@ -495,7 +468,6 @@ void InstallableManager::SetManifestDependentTasksComplete() {
   valid_manifest_->fetched = true;
   worker_->fetched = true;
   SetIconFetched(IconUsage::kPrimary);
-  SetIconFetched(IconUsage::kSplash);
   is_screenshots_fetch_complete_ = true;
 }
 
@@ -525,17 +497,11 @@ void InstallableManager::RunCallback(
   IconProperty null_icon;
   IconProperty* primary_icon = &null_icon;
   bool has_maskable_primary_icon = false;
-  IconProperty* splash_icon = &null_icon;
-  bool has_maskable_splash_icon = false;
 
   if (params.valid_primary_icon && IsIconFetchComplete(IconUsage::kPrimary)) {
     primary_icon = &icons_[IconUsage::kPrimary];
     has_maskable_primary_icon =
         (primary_icon->purpose == IconPurpose::MASKABLE);
-  }
-  if (params.valid_splash_icon && IsIconFetchComplete(IconUsage::kSplash)) {
-    splash_icon = &icons_[IconUsage::kSplash];
-    has_maskable_splash_icon = (splash_icon->purpose == IconPurpose::MASKABLE);
   }
 
   bool worker_check_passed = worker_->has_worker || !params.has_worker;
@@ -547,9 +513,6 @@ void InstallableManager::RunCallback(
       primary_icon->url,
       primary_icon->icon.get(),
       has_maskable_primary_icon,
-      splash_icon->url,
-      splash_icon->icon.get(),
-      has_maskable_splash_icon,
       screenshots_,
       valid_manifest_->is_valid,
       worker_check_passed,
@@ -570,7 +533,7 @@ void InstallableManager::WorkOnTask() {
   if ((!check_passed && !params.is_debug_mode) || IsComplete(params)) {
     // Yield the UI thread before processing the next task. If this object is
     // deleted in the meantime, the next task naturally won't run.
-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+    sequenced_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&InstallableManager::CleanupAndStartNextTask,
                                   weak_factory_.GetWeakPtr()));
 
@@ -597,24 +560,9 @@ void InstallableManager::WorkOnTask() {
                           IconUsage::kPrimary);
   } else if (params.fetch_screenshots && !screenshots_downloading_ &&
              !is_screenshots_fetch_complete_) {
-    if (base::FeatureList::IsEnabled(
-            webapps::features::kDesktopPWAsDetailedInstallDialog)) {
-      CheckAndFetchScreenshots();
-    } else {
-      CheckAndFetchScreenshots(/*check_form_factor=*/false);
-    }
+    CheckAndFetchScreenshots();
   } else if (params.has_worker && !worker_->fetched) {
     CheckServiceWorker();
-  } else if (params.valid_splash_icon && params.prefer_maskable_icon &&
-             !IsMaskableIconFetched(IconUsage::kSplash)) {
-    CheckAndFetchBestIcon(GetIdealSplashIconSizeInPx(),
-                          GetMinimumSplashIconSizeInPx(), IconPurpose::MASKABLE,
-                          IconUsage::kSplash);
-  } else if (params.valid_splash_icon &&
-             !IsIconFetchComplete(IconUsage::kSplash)) {
-    CheckAndFetchBestIcon(GetIdealSplashIconSizeInPx(),
-                          GetMinimumSplashIconSizeInPx(), IconPurpose::ANY,
-                          IconUsage::kSplash);
   } else {
     NOTREACHED();
   }
@@ -688,6 +636,9 @@ bool InstallableManager::IsManifestValidForWebApp(
   if (!manifest.start_url.is_valid()) {
     valid_manifest_->errors.push_back(START_URL_NOT_VALID);
     is_valid = false;
+  } else {
+    // If the start_url is valid, the id must be valid.
+    CHECK(manifest.id.is_valid());
   }
 
   if ((!manifest.name || manifest.name->empty()) &&
@@ -889,7 +840,7 @@ void InstallableManager::OnIconFetched(const GURL icon_url,
   WorkOnTask();
 }
 
-void InstallableManager::CheckAndFetchScreenshots(bool check_form_factor) {
+void InstallableManager::CheckAndFetchScreenshots() {
   DCHECK(!blink::IsEmptyManifest(manifest()));
   DCHECK(!is_screenshots_fetch_complete_);
 
@@ -898,15 +849,13 @@ void InstallableManager::CheckAndFetchScreenshots(bool check_form_factor) {
   int num_of_screenshots = 0;
   for (const auto& url : manifest().screenshots) {
 #if BUILDFLAG(IS_ANDROID)
-    if (check_form_factor &&
-        url->form_factor ==
-            blink::mojom::ManifestScreenshot::FormFactor::kWide) {
+    if (url->form_factor ==
+        blink::mojom::ManifestScreenshot::FormFactor::kWide) {
       continue;
     }
 #else
-    if (check_form_factor &&
-        url->form_factor !=
-            blink::mojom::ManifestScreenshot::FormFactor::kWide) {
+    if (url->form_factor !=
+        blink::mojom::ManifestScreenshot::FormFactor::kWide) {
       continue;
     }
 #endif  // BUILDFLAG(IS_ANDROID)

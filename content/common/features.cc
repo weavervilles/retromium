@@ -11,11 +11,9 @@ namespace content {
 
 // Please keep features in alphabetical order.
 
-#if BUILDFLAG(IS_ANDROID)
-BASE_FEATURE(kADPFForBrowserIOThread,
-             "kADPFForBrowserIOThread",
+BASE_FEATURE(kBeforeUnloadBrowserResponseQueue,
+             "BeforeUnloadBrowserResponseQueue",
              base::FEATURE_DISABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_ANDROID)
 
 BASE_FEATURE(kNavigationUpdatesChildViewsVisibility,
              "NavigationUpdatesChildViewsVisibility",
@@ -35,38 +33,11 @@ BASE_FEATURE(kEnsureAllowBindingsIsAlwaysForWebUI,
              "EnsureAllowBindingsIsAlwaysForWebUI",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kQueueNavigationsWhileWaitingForCommit,
-             "QueueNavigationsWhileWaitingForCommit",
+#if BUILDFLAG(IS_WIN)
+BASE_FEATURE(kGpuInfoCollectionSeparatePrefetch,
+             "GpuInfoCollectionSeparatePrefetch",
              base::FEATURE_DISABLED_BY_DEFAULT);
-
-static constexpr base::FeatureParam<NavigationQueueingFeatureLevel>::Option
-    kNavigationQueueingFeatureLevels[] = {
-        {NavigationQueueingFeatureLevel::kNone, "none"},
-        {NavigationQueueingFeatureLevel::kAvoidRedundantCancellations,
-         "avoid-redundant"},
-        {NavigationQueueingFeatureLevel::kFull, "full"}};
-const base::FeatureParam<NavigationQueueingFeatureLevel>
-    kNavigationQueueingFeatureLevelParam{
-        &kQueueNavigationsWhileWaitingForCommit, "level",
-        NavigationQueueingFeatureLevel::kAvoidRedundantCancellations,
-        &kNavigationQueueingFeatureLevels};
-
-NavigationQueueingFeatureLevel GetNavigationQueueingFeatureLevel() {
-  if (base::FeatureList::IsEnabled(kQueueNavigationsWhileWaitingForCommit)) {
-    return kNavigationQueueingFeatureLevelParam.Get();
-  }
-  return NavigationQueueingFeatureLevel::kNone;
-}
-
-bool ShouldAvoidRedundantNavigationCancellations() {
-  return GetNavigationQueueingFeatureLevel() >=
-         NavigationQueueingFeatureLevel::kAvoidRedundantCancellations;
-}
-
-bool ShouldQueueNavigationsWhenPendingCommitRFHExists() {
-  return GetNavigationQueueingFeatureLevel() ==
-         NavigationQueueingFeatureLevel::kFull;
-}
+#endif
 
 BASE_FEATURE(kRestrictCanAccessDataForOriginToUIThread,
              "RestrictCanAccessDataForOriginToUIThread",

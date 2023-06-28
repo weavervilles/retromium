@@ -24,7 +24,6 @@
 #include "ipcz/node_messages.h"
 #include "ipcz/operation_context.h"
 #include "ipcz/parcel.h"
-#include "ipcz/portal.h"
 #include "ipcz/remote_router_link.h"
 #include "ipcz/router.h"
 #include "ipcz/router_link.h"
@@ -374,10 +373,25 @@ bool NodeLink::OnReferNonBroker(msg::ReferNonBroker& refer) {
     return false;
   }
 
+  DriverMemoryWithMapping link_memory =
+      NodeLinkMemory::AllocateMemory(node()->driver());
+  DriverMemoryWithMapping client_link_memory =
+      NodeLinkMemory::AllocateMemory(node()->driver());
+  if (!link_memory.mapping.is_valid() ||
+      !client_link_memory.mapping.is_valid()) {
+    // Not a validation failure, but we can't accept the referral because we
+    // can't allocate link memory for one side or the other.
+    msg::NonBrokerReferralRejected rejected;
+    rejected.params().referral_id = refer.params().referral_id;
+    Transmit(rejected);
+    return true;
+  }
+
   return NodeConnector::HandleNonBrokerReferral(
       node(), refer.params().referral_id, refer.params().num_initial_portals,
       WrapRefCounted(this),
-      MakeRefCounted<DriverTransport>(std::move(transport)));
+      MakeRefCounted<DriverTransport>(std::move(transport)),
+      std::move(link_memory), std::move(client_link_memory));
 }
 
 bool NodeLink::OnNonBrokerReferralAccepted(
@@ -530,7 +544,7 @@ bool NodeLink::OnAcceptParcel(msg::AcceptParcel& accept) {
           continue;
         }
 
-        objects[i] = MakeRefCounted<Portal>(node_, std::move(new_router));
+        objects[i] = std::move(new_router);
         new_routers.remove_prefix(1);
         break;
       }
@@ -831,7 +845,7 @@ void NodeLink::HandleTransportError(const OperationContext& context) {
   }
 
   Ref<NodeLink> self = WrapRefCounted(this);
-  node_->DropConnection(context, remote_node_name_);
+  node_->DropConnection(context, *this);
 }
 
 void NodeLink::WaitForParcelFragmentToResolve(
@@ -841,7 +855,7 @@ void NodeLink::WaitForParcelFragmentToResolve(
     bool is_split_parcel) {
   // ParcelWrapper wraps a Parcel in a RefCounted object so the reference can
   // be captured by a copyable lambda below.
-  struct ParcelWrapper : public RefCounted {
+  struct ParcelWrapper : public RefCounted<ParcelWrapper> {
     explicit ParcelWrapper(Parcel parcel) : parcel(std::move(parcel)) {}
     Parcel parcel;
   };

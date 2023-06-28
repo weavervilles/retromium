@@ -123,8 +123,9 @@ int main(int argc, char** argv) {
   }
 
   // Instantiate Web Instance Host.
-  WebInstanceHost web_instance_host(
-      *base::ComponentContextForProcess()->outgoing());
+  WebInstanceHostWithServicesFromThisComponent web_instance_host(
+      *base::ComponentContextForProcess()->outgoing(),
+      /*is_web_instance_component_in_same_package=*/false);
   fidl::InterfaceRequest<fuchsia::io::Directory> services_request;
   auto services = sys::ServiceDirectory::CreateWithRequest(&services_request);
   base::CommandLine child_command_line =

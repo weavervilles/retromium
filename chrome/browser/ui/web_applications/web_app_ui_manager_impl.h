@@ -80,6 +80,8 @@ class WebAppUiManagerImpl : public BrowserListObserver, public WebAppUiManager {
                            AppLock& lock) override;
   void MaybeTransferAppAttributes(const AppId& from_extension_or_app,
                                   const AppId& to_app) override;
+  content::WebContents* CreateNewTab() override;
+  void TriggerInstallDialog(content::WebContents* web_contents) override;
 
   // BrowserListObserver:
   void OnBrowserAdded(Browser* browser) override;
@@ -106,7 +108,7 @@ class WebAppUiManagerImpl : public BrowserListObserver, public WebAppUiManager {
   const raw_ptr<Profile> profile_;
 
   raw_ptr<WebAppSyncBridge> sync_bridge_ = nullptr;
-  raw_ptr<OsIntegrationManager, DanglingUntriaged> os_integration_manager_ =
+  raw_ptr<OsIntegrationManager, DanglingAcrossTasks> os_integration_manager_ =
       nullptr;
 
   std::map<AppId, std::vector<base::OnceClosure>> windows_closed_requests_map_;

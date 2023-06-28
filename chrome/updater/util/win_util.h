@@ -48,12 +48,6 @@ struct std::hash<IID> {
 
 namespace updater {
 
-// Helper for methods which perform system operations which may fail. The
-// failure reason is returned as an HRESULT.
-// TODO(crbug.com/1369769): Remove the following warning once resolved in
-// base. NOTE: When ValueT is an integral type, base::expected's implicit ctors
-// are ambiguous. To return an error in this case it must be wrapped in a
-// base::unexpected(error);
 template <typename ValueT>
 using HResultOr = base::expected<ValueT, HRESULT>;
 
@@ -217,6 +211,10 @@ std::wstring GetAppCohortKey(const std::wstring& app_id);
 // `Software\{CompanyName}\Update\Clients\{app_id}\Commands\{command_id}`.
 std::wstring GetAppCommandKey(const std::wstring& app_id,
                               const std::wstring& command_id);
+
+// Returns the registry value
+// `{HKRoot}\Software\{CompanyName}\Update\ClientState\{app_id}\ap`.
+std::string GetAppAPValue(UpdaterScope scope, const std::string& app_id);
 
 // Returns the registry path for the Updater app id under the |Clients| subkey.
 // The path does not include the registry root hive prefix.
@@ -419,6 +417,10 @@ template <typename T, typename I, typename... TArgs>
                                        std::forward<TArgs>(args)...);
 }
 
+// Returns the base install directory for the x86 versions of the updater.
+// Does not create the directory if it does not exist.
+[[nodiscard]] absl::optional<base::FilePath> GetInstallDirectoryX86(
+    UpdaterScope scope);
 }  // namespace updater
 
 #endif  // CHROME_UPDATER_UTIL_WIN_UTIL_H_

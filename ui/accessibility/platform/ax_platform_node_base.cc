@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "base/no_destructor.h"
 #include "base/numerics/checked_math.h"
@@ -17,6 +18,11 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/memory_dump_manager.h"
+#include "base/trace_event/memory_dump_provider.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_action_data.h"
@@ -69,14 +75,57 @@ bool FindDescendantRoleWithMaxDepth(const AXPlatformNodeBase* node,
   return false;
 }
 
-}  // namespace
-
-const char16_t AXPlatformNodeBase::kEmbeddedCharacter = u'\xfffc';
-
 // Map from each AXPlatformNode's unique id to its instance.
 using UniqueIdMap = std::unordered_map<int32_t, AXPlatformNode*>;
 base::LazyInstance<UniqueIdMap>::Leaky g_unique_id_map =
     LAZY_INSTANCE_INITIALIZER;
+
+// Adds process-wide statistics about accessibility objects to traces.
+class AXPlatformNodeMemoryDumpProvider
+    : public base::trace_event::MemoryDumpProvider {
+ public:
+  AXPlatformNodeMemoryDumpProvider(const AXPlatformNodeMemoryDumpProvider&) =
+      delete;
+  AXPlatformNodeMemoryDumpProvider& operator=(
+      const AXPlatformNodeMemoryDumpProvider&) = delete;
+
+  // base::trace_event::MemoryDumpProvider:
+  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                    base::trace_event::ProcessMemoryDump* pmd) override;
+
+ private:
+  friend class base::NoDestructor<AXPlatformNodeMemoryDumpProvider>;
+
+  explicit AXPlatformNodeMemoryDumpProvider(const UniqueIdMap& id_to_node);
+  ~AXPlatformNodeMemoryDumpProvider() override = default;
+
+  const raw_ref<const UniqueIdMap> id_to_node_;
+};
+
+bool AXPlatformNodeMemoryDumpProvider::OnMemoryDump(
+    const base::trace_event::MemoryDumpArgs& args,
+    base::trace_event::ProcessMemoryDump* pmd) {
+  auto* const dump = pmd->CreateAllocatorDump("accessibility/ax_platform_node");
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameObjectCount,
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  id_to_node_->size());
+  return true;
+}
+
+AXPlatformNodeMemoryDumpProvider::AXPlatformNodeMemoryDumpProvider(
+    const UniqueIdMap& id_to_node)
+    : id_to_node_(id_to_node) {
+  // Skip this in tests that don't set up a task runner on the main thread.
+  if (base::SingleThreadTaskRunner::HasCurrentDefault()) {
+    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+        this, "AXPlatformNode",
+        base::SingleThreadTaskRunner::GetCurrentDefault());
+  }
+}
+
+}  // namespace
+
+const char16_t AXPlatformNodeBase::kEmbeddedCharacter = u'\xfffc';
 
 // TODO(fxbug.dev/91030): Remove the !BUILDFLAG(IS_FUCHSIA) condition once
 // fuchsia has native accessibility.
@@ -121,6 +170,9 @@ void AXPlatformNodeBase::Init(AXPlatformNodeDelegate* delegate) {
 
   // This must be called after assigning our delegate.
   g_unique_id_map.Get()[GetUniqueId()] = this;
+
+  static base::NoDestructor<AXPlatformNodeMemoryDumpProvider> dump_provider(
+      g_unique_id_map.Get());
 }
 
 const AXNodeData& AXPlatformNodeBase::GetData() const {
@@ -1587,6 +1639,11 @@ void AXPlatformNodeBase::ComputeAttributes(PlatformAttributeList* attributes) {
   std::string details_roles = ComputeDetailsRoles();
   if (!details_roles.empty())
     AddAttributeToList("details-roles", details_roles, attributes);
+
+  if (ui::IsLink(GetRole())) {
+    AddAttributeToList(ax::mojom::StringAttribute::kLinkTarget, "link-target",
+                       attributes);
+  }
 }
 
 void AXPlatformNodeBase::AddAttributeToList(
@@ -1635,6 +1692,18 @@ AXLegacyHypertext::~AXLegacyHypertext() = default;
 AXLegacyHypertext::AXLegacyHypertext(const AXLegacyHypertext& other) = default;
 AXLegacyHypertext& AXLegacyHypertext::operator=(
     const AXLegacyHypertext& other) = default;
+AXLegacyHypertext::AXLegacyHypertext(AXLegacyHypertext&& other) noexcept
+    : needs_update(std::exchange(other.needs_update, true)),
+      hyperlink_offset_to_index(std::move(other.hyperlink_offset_to_index)),
+      hyperlinks(std::move(other.hyperlinks)),
+      hypertext(std::move(other.hypertext)) {}
+AXLegacyHypertext& AXLegacyHypertext::operator=(AXLegacyHypertext&& other) {
+  needs_update = std::exchange(other.needs_update, true);
+  hyperlink_offset_to_index = std::move(other.hyperlink_offset_to_index);
+  hyperlinks = std::move(other.hyperlinks);
+  hypertext = std::move(other.hypertext);
+  return *this;
+}
 
 // TODO(nektar): To be able to use AXNode in Views, move this logic to AXNode.
 void AXPlatformNodeBase::UpdateComputedHypertext() const {
@@ -1946,7 +2015,10 @@ int AXPlatformNodeBase::GetHypertextOffsetFromEndpoint(
   if (endpoint_index_in_common_parent > index_in_common_parent)
     return static_cast<int>(GetHypertext().size());
 
-  NOTREACHED();
+  // TODO(crbug.com/1423589): Make sure this doesn't fire then turn the last
+  // conditional into a CHECK_GT(endpoint_index_in_common_parent,
+  // index_in_common_parent); and remove this code path.
+  DUMP_WILL_BE_NOTREACHED_NORETURN();
   return -1;
 }
 
@@ -2327,12 +2399,16 @@ int AXPlatformNodeBase::NearestTextIndexToPoint(gfx::Point point) {
 ui::TextAttributeList AXPlatformNodeBase::ComputeTextAttributes() const {
   ui::TextAttributeList attributes;
 
-  // We include list markers for now, but there might be other objects that are
-  // auto generated.
-  // TODO(nektar): Compute what objects are auto-generated in Blink and
-  // TODO(1278249): add OCRed text from Screen AI Service too.
-  if (GetRole() == ax::mojom::Role::kListMarker)
+  // From the IA2 Spec:
+  //
+  // Occasionally, word processors will automatically generate characters which
+  // appear on a line along with editable text. The characters are not
+  // themselves editable, but are part of the document. The most common examples
+  // of automatically inserted characters are in bulleted and numbered lists.
+  if (IsTextField() &&
+      HasBoolAttribute(ax::mojom::BoolAttribute::kNotUserSelectableStyle)) {
     attributes.emplace_back("auto-generated", "true");
+  }
 
   int color;
   if ((color = delegate_->GetBackgroundColor())) {

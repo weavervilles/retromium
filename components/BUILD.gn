@@ -47,6 +47,23 @@ if (is_ios) {
     }
     outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
   }
+
+  if (use_blink) {
+    bundle_data("components_tests_distiller_bundle_data") {
+      testonly = true
+      sources = [
+        "//third_party/chaijs/chai.js",
+        "//third_party/dom_distiller_js/dist/test/data/out/domdistillerjstest.js",
+        "//third_party/dom_distiller_js/dist/test/data/war/test.html",
+        "//third_party/mocha/mocha.js",
+        "dom_distiller/core/javascript/dom_distiller_viewer.js",
+        "dom_distiller/core/javascript/domdistiller.js",
+        "dom_distiller/core/javascript/extract_features.js",
+      ]
+      outputs = [ "{{bundle_resources_dir}}/" +
+                  "{{source_root_relative_dir}}/{{source_file_part}}" ]
+    }
+  }
 }
 
 # Omit Lacros because it allows //components to depend on //chrome, which in
@@ -89,12 +106,11 @@ test("components_unittests") {
   }
 
   if (is_fuchsia) {
-    # TODO(https://crbug.com/1185811): Investigate removing the requirement for
-    # job_policy_ambient_mark_vmo_exec for the sake of V8's allocator in tests.
-    test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
-
     additional_manifest_fragments = [
       "//build/config/fuchsia/test/fonts.shard.test-cml",
+
+      # TODO(https://crbug.com/1185811): Investigate removing the requirement
+      # for VmexResource.
       "//build/config/fuchsia/test/mark_vmo_executable.shard.test-cml",
       "//build/config/fuchsia/test/network.shard.test-cml",
       "//build/config/fuchsia/test/present_view.shard.test-cml",
@@ -190,7 +206,6 @@ test("components_unittests") {
     "//components/power_bookmarks/core:unit_tests",
     "//components/power_bookmarks/storage:unit_tests",
     "//components/power_metrics:unit_tests",
-    "//components/power_scheduler:unit_tests",
     "//components/prefs:unit_tests",
     "//components/profile_metrics:unit_tests",
     "//components/proxy_config:unit_tests",
@@ -203,7 +218,9 @@ test("components_unittests") {
     "//components/reporting/metrics:unit_tests",
     "//components/reporting/storage:unit_tests",
     "//components/reporting/util:unit_tests",
+    "//components/safe_browsing/core/browser:safe_browsing_hats_delegate_unittest",
     "//components/safe_browsing/core/browser:safe_browsing_metrics_collector_unittest",
+    "//components/safe_browsing/core/browser/hashprefix_realtime:unit_tests",
     "//components/safe_browsing/core/browser/password_protection:unit_tests",
     "//components/safe_search_api:unit_tests",
     "//components/saved_tab_groups:unit_tests",
@@ -347,11 +364,16 @@ test("components_unittests") {
       "//components/file_access:unit_tests",
       "//components/gcm_driver/instance_id:unit_tests",
       "//components/heavy_ad_intervention:unit_tests",
+      "//components/history/content/browser:unit_tests",
+      "//components/history_clusters/core:unit_tests",
+      "//components/history_clusters/ui:unit_tests",
       "//components/invalidation/impl:unit_tests",
       "//components/javascript_dialogs:unit_tests",
       "//components/js_injection/common:unit_tests",
       "//components/keyed_service/content:unit_tests",
+      "//components/language/content/browser:unit_tests",
       "//components/link_header_util:unit_tests",
+      "//components/media_device_salt:unit_tests",
       "//components/mirroring:mirroring_tests",
       "//components/navigation_interception:unit_tests",
       "//components/no_state_prefetch/browser:unit_tests",
@@ -361,16 +383,26 @@ test("components_unittests") {
       "//components/page_image_annotation/content/renderer:unit_tests",
       "//components/page_image_annotation/core:unit_tests",
       "//components/page_info/core:unit_tests",
+      "//components/paint_preview/browser:unit_tests",
+      "//components/paint_preview/common:unit_tests",
+      "//components/paint_preview/player:unit_tests",
+      "//components/paint_preview/renderer:unit_tests",
+      "//components/password_manager/content/browser:unit_tests",
+      "//components/password_manager/services/csv_password:unit_tests",
+      "//components/payments/content:unit_tests",
+      "//components/payments/content/utility:unit_tests",
       "//components/policy/content:unit_tests",
       "//components/query_tiles:unit_tests",
       "//components/reporting/resources:unit_tests",
       "//components/services/heap_profiling:unit_tests",
+      "//components/services/storage:tests",
       "//components/tracing:unit_tests",
       "//components/translate/content/browser:unit_tests",
       "//components/translate/content/renderer:unit_tests",
       "//components/ukm/content:unit_tests",
       "//components/url_rewrite:unit_tests",
       "//components/user_education/common:unit_tests",
+      "//components/value_store:unit_tests",
       "//components/visitedlink/test:unit_tests",
       "//components/web_cache/browser:unit_tests",
       "//components/webapps/services/web_app_origin_association:unit_tests",
@@ -402,6 +434,9 @@ test("components_unittests") {
       "//components/translate/ios/browser:unit_tests",
       "//components/ukm/ios:unit_tests",
     ]
+    if (use_blink) {
+      deps += [ ":components_tests_distiller_bundle_data" ]
+    }
   } else {  #!is_ios
     deps += [
       "//components/background_sync:unit_tests",
@@ -410,10 +445,6 @@ test("components_unittests") {
       "//components/browsing_topics/common:unit_tests",
       "//components/certificate_transparency:unit_tests",
       "//components/content_settings/browser:unit_tests",
-      "//components/history/content/browser:unit_tests",
-      "//components/history_clusters/core:unit_tests",
-      "//components/history_clusters/ui:unit_tests",
-      "//components/language/content/browser:unit_tests",
       "//components/media_router/browser:unit_tests",
       "//components/media_router/common:unit_tests",
       "//components/media_router/common/providers/cast/channel:unit_tests",
@@ -421,18 +452,11 @@ test("components_unittests") {
       "//components/page_load_metrics/browser:unit_tests",
       "//components/page_load_metrics/browser/observers/ad_metrics:unit_tests",
       "//components/page_load_metrics/renderer:unit_tests",
-      "//components/paint_preview/browser:unit_tests",
-      "//components/paint_preview/common:unit_tests",
-      "//components/paint_preview/player:unit_tests",
-      "//components/paint_preview/renderer:unit_tests",
-      "//components/password_manager/content/browser:unit_tests",
-      "//components/password_manager/services/csv_password:unit_tests",
-      "//components/payments/content:unit_tests",
-      "//components/payments/content/utility:unit_tests",
       "//components/performance_manager:unit_tests",
       "//components/permissions:unit_tests",
       "//components/permissions/prediction_service:unit_tests",
       "//components/privacy_sandbox:unit_tests",
+      "//components/privacy_sandbox/privacy_sandbox_attestations:unit_tests",
       "//components/session_proto_db:unit_tests",
 
       # TODO(chromium: 1169835) components / reporting / storage / resources: unit_tests
@@ -441,7 +465,6 @@ test("components_unittests") {
       "//components/safe_browsing/content/browser/triggers:unit_tests",
       "//components/safe_browsing/content/browser/web_ui:unit_tests",
       "//components/safe_browsing/core/browser:token_fetcher_unit_tests",
-      "//components/safe_browsing/core/browser/hashprefix_realtime:unit_tests",
       "//components/safe_browsing/core/browser/realtime:unit_tests",
       "//components/safe_browsing/core/browser/tailored_security_service:unit_tests",
       "//components/safe_browsing/core/browser/utils:unit_tests",
@@ -450,7 +473,6 @@ test("components_unittests") {
       "//components/security_interstitials/content:unit_tests",
       "//components/services/paint_preview_compositor:unit_tests",
       "//components/services/quarantine:unit_tests",
-      "//components/services/storage:tests",
       "//components/site_engagement/content:unit_tests",
       "//components/site_isolation:unit_tests",
       "//components/spellcheck/browser:unit_tests",
@@ -458,7 +480,6 @@ test("components_unittests") {
       "//components/subresource_filter/content/browser:unit_tests",
       "//components/subresource_filter/content/common:unit_tests",
       "//components/subresource_filter/content/renderer:unit_tests",
-      "//components/value_store:unit_tests",
       "//components/web_package:unit_tests",
       "//components/web_package/test_support:unit_tests",
       "//components/webapps/browser:unit_tests",
@@ -528,6 +549,7 @@ test("components_unittests") {
       "//components/variations/android:variations_java",
       "//components/webapps/browser/android:java",
       "//components/webapps/browser/android:unit_tests",
+      "//components/webauthn/android:unit_tests",
       "//content/public/android:content_java",
       "//content/public/browser",
       "//gin:v8_snapshot_assets",
@@ -664,7 +686,10 @@ test("components_unittests") {
       "//components/safe_browsing/core/common:unit_tests",
     ]
   } else if (safe_browsing_mode == 2) {
-    deps += [ "//components/safe_browsing/android:unit_tests_mobile" ]
+    deps += [
+      "//components/safe_browsing/android:native_java_unittests_java",
+      "//components/safe_browsing/android:unit_tests_mobile",
+    ]
   }
 
   if (safe_browsing_mode == 1) {
@@ -819,7 +844,6 @@ if (use_blink) {
       "dom_distiller/content/browser/test/dom_distiller_js_browsertest.cc",
       "dom_distiller/content/browser/test/test_util.cc",
       "dom_distiller/content/browser/test/test_util.h",
-      "metrics/content/subprocess_metrics_provider_browsertest.cc",
       "optimization_guide/content/renderer/page_text_agent_browsertest.cc",
       "paint_preview/renderer/paint_preview_recorder_browsertest.cc",
       "ukm/content/source_url_recorder_browsertest.cc",
@@ -903,7 +927,13 @@ if (use_blink) {
     }
 
     if (is_ios) {
-      deps += [ ":components_tests_pak_bundle_data" ]
+      deps += [
+        ":components_tests_distiller_bundle_data",
+        ":components_tests_pak_bundle_data",
+        "test:dom_distiller_test_bundle_data",
+        "test:url_rewrite_test_bundle_data",
+        "//content/test:content_test_bundle_data",
+      ]
     }
 
     if (enable_pdf) {
@@ -995,7 +1025,6 @@ if (use_blink) {
     }
 
     if (is_fuchsia) {
-      test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
       additional_manifest_fragments = [
         "//build/config/fuchsia/test/present_view.shard.test-cml",
         "//build/config/fuchsia/test/fonts.shard.test-cml",

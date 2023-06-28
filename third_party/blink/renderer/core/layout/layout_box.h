@@ -27,6 +27,7 @@
 
 #include "base/check_op.h"
 #include "base/dcheck_is_on.h"
+#include "base/gtest_prod_util.h"
 #include "base/notreached.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -58,6 +59,7 @@ struct BoxLayoutExtraInput;
 struct NGFragmentGeometry;
 struct NGPhysicalBoxStrut;
 struct PaintInfo;
+struct PhysicalScrollRange;
 
 enum SizeType { kMainOrPreferredSize, kMinSize, kMaxSize };
 enum AvailableLogicalHeightType {
@@ -97,15 +99,10 @@ struct LayoutBoxRareData final : public GarbageCollected<LayoutBoxRareData> {
   // container.
   Member<LayoutMultiColumnSpannerPlaceholder> spanner_placeholder_;
 
-  LayoutUnit override_logical_width_;
-  LayoutUnit override_logical_height_;
-
   bool has_override_containing_block_content_logical_width_ : 1;
-  bool has_override_containing_block_content_logical_height_ : 1;
   bool has_previous_content_box_rect_ : 1;
 
   LayoutUnit override_containing_block_content_logical_width_;
-  LayoutUnit override_containing_block_content_logical_height_;
 
   // For snap area, the owning snap container.
   Member<LayoutBox> snap_container_;
@@ -245,53 +242,41 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   void SetWidth(LayoutUnit width) {
     NOT_DESTROYED();
-    if (width == frame_size_.Width()) {
+    if (width == frame_size_.width) {
       return;
     }
-    frame_size_.SetWidth(width);
+    frame_size_.width = width;
     SizeChanged();
   }
   void SetHeight(LayoutUnit height) {
     NOT_DESTROYED();
-    if (height == frame_size_.Height()) {
+    if (height == frame_size_.height) {
       return;
     }
-    frame_size_.SetHeight(height);
+    frame_size_.height = height;
     SizeChanged();
   }
 
-  LayoutUnit LogicalLeft() const {
-    NOT_DESTROYED();
-    auto location = Location();
-    return StyleRef().IsHorizontalWritingMode() ? location.X() : location.Y();
-  }
+  LayoutUnit LogicalLeft() const;
   LayoutUnit LogicalRight() const {
     NOT_DESTROYED();
     return LogicalLeft() + LogicalWidth();
   }
-  LayoutUnit LogicalTop() const {
-    NOT_DESTROYED();
-    auto location = Location();
-    return StyleRef().IsHorizontalWritingMode() ? location.Y() : location.X();
-  }
+  LayoutUnit LogicalTop() const;
   LayoutUnit LogicalBottom() const {
     NOT_DESTROYED();
     return LogicalTop() + LogicalHeight();
   }
   LayoutUnit LogicalWidth() const {
     NOT_DESTROYED();
-    LayoutSize size = Size();
-    return StyleRef().IsHorizontalWritingMode() ? size.Width() : size.Height();
+    PhysicalSize size = Size();
+    return StyleRef().IsHorizontalWritingMode() ? size.width : size.height;
   }
   LayoutUnit LogicalHeight() const {
     NOT_DESTROYED();
-    LayoutSize size = Size();
-    return StyleRef().IsHorizontalWritingMode() ? size.Height() : size.Width();
+    PhysicalSize size = Size();
+    return StyleRef().IsHorizontalWritingMode() ? size.height : size.width;
   }
-
-  // Logical height of the object, including content overflowing the
-  // border-after edge.
-  virtual LayoutUnit LogicalHeightWithVisibleOverflow() const;
 
   LayoutUnit ConstrainLogicalHeightByMinMax(
       LayoutUnit logical_height,
@@ -326,12 +311,14 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     NOT_DESTROYED();
     return frame_location_;
   }
+  // LocationOffset() is deprecated.  Use PhysicalLocation() instead.
   LayoutSize LocationOffset() const {
     NOT_DESTROYED();
+    DCHECK(!RuntimeEnabledFeatures::LayoutNGNoLocationEnabled());
     auto location = Location();
     return LayoutSize(location.X(), location.Y());
   }
-  virtual LayoutSize Size() const;
+  virtual PhysicalSize Size() const;
 
   void SetLocation(const LayoutPoint& location) {
     NOT_DESTROYED();
@@ -353,7 +340,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // LayoutUnits for scrollbars.
   void SetLocationAndUpdateOverflowControlsIfNeeded(const LayoutPoint&);
 
-  void SetSize(const LayoutSize& size) {
+  void SetSize(const PhysicalSize& size) {
     NOT_DESTROYED();
     DCHECK(!RuntimeEnabledFeatures::LayoutNGNoCopyBackEnabled());
     if (size == frame_size_) {
@@ -363,10 +350,12 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     SizeChanged();
   }
 
-  // See frame_location_ and frame_size_.
+  // FrameRect() is deprecated. Use
+  // PhysicalRect(box->PhysicalLocation(), box->Size()) instead.
   LayoutRect FrameRect() const {
     NOT_DESTROYED();
-    return LayoutRect(Location(), Size());
+    DCHECK(!RuntimeEnabledFeatures::LayoutNGNoLocationEnabled());
+    return LayoutRect(Location(), Size().ToLayoutSize());
   }
 
   // Note that those functions have their origin at this box's CSS border box.
@@ -376,7 +365,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // FlipForWritingMode() will do nothing on it.
   LayoutRect BorderBoxRect() const {
     NOT_DESTROYED();
-    return LayoutRect(LayoutPoint(), Size());
+    return LayoutRect(LayoutPoint(), Size().ToLayoutSize());
   }
   PhysicalRect PhysicalBorderBoxRect() const {
     NOT_DESTROYED();
@@ -396,17 +385,16 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   }
 
   // TODO(crbug.com/962299): This method snaps to pixels incorrectly because
-  // Location() is not the correct paint offset. It's also incorrect in flipped
-  // blocks writing mode.
+  // PhysicalLocation() is not the correct paint offset.
   gfx::Rect PixelSnappedBorderBoxRect() const {
     NOT_DESTROYED();
-    return gfx::Rect(PixelSnappedBorderBoxSize(PhysicalOffset(Location())));
+    return gfx::Rect(PixelSnappedBorderBoxSize(PhysicalLocation()));
   }
   // TODO(crbug.com/962299): This method is only correct when |offset| is the
   // correct paint offset.
   gfx::Size PixelSnappedBorderBoxSize(const PhysicalOffset& offset) const {
     NOT_DESTROYED();
-    return ToPixelSnappedSize(Size(), offset.ToLayoutPoint());
+    return ToPixelSnappedSize(Size().ToLayoutSize(), offset.ToLayoutPoint());
   }
   gfx::Rect BorderBoundingBox() const final {
     NOT_DESTROYED();
@@ -523,6 +511,9 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   LayoutRect VisualOverflowRect() const;
   PhysicalRect PhysicalVisualOverflowRect() const final {
     NOT_DESTROYED();
+    if (RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()) {
+      return PhysicalRect(VisualOverflowRect());
+    }
     return FlipForWritingMode(VisualOverflowRect());
   }
   // VisualOverflow has DCHECK for reading before it is computed. These
@@ -550,6 +541,9 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   }
   PhysicalRect PhysicalSelfVisualOverflowRect() const {
     NOT_DESTROYED();
+    if (RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()) {
+      return PhysicalRect(SelfVisualOverflowRect());
+    }
     return FlipForWritingMode(SelfVisualOverflowRect());
   }
   LayoutRect ContentsVisualOverflowRect() const {
@@ -560,6 +554,9 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   }
   PhysicalRect PhysicalContentsVisualOverflowRect() const {
     NOT_DESTROYED();
+    if (RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()) {
+      return PhysicalRect(ContentsVisualOverflowRect());
+    }
     return FlipForWritingMode(ContentsVisualOverflowRect());
   }
 
@@ -577,12 +574,17 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   void AddLayoutOverflow(const LayoutRect&);
   void AddSelfVisualOverflow(const PhysicalRect& r) {
     NOT_DESTROYED();
-    AddSelfVisualOverflow(FlipForWritingMode(r));
+    AddSelfVisualOverflow(RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()
+                              ? r.ToLayoutRect()
+                              : FlipForWritingMode(r));
   }
   void AddSelfVisualOverflow(const LayoutRect&);
   void AddContentsVisualOverflow(const PhysicalRect& r) {
     NOT_DESTROYED();
-    AddContentsVisualOverflow(FlipForWritingMode(r));
+    AddContentsVisualOverflow(
+        RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()
+            ? r.ToLayoutRect()
+            : FlipForWritingMode(r));
   }
   void AddContentsVisualOverflow(const LayoutRect&);
 
@@ -590,7 +592,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   NGPhysicalBoxStrut ComputeVisualEffectOverflowOutsets();
   void AddVisualOverflowFromChild(const LayoutBox& child) {
     NOT_DESTROYED();
-    AddVisualOverflowFromChild(child, child.LocationOffset());
+    LayoutSize delta = RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()
+                           ? PhysicalLocation().ToLayoutSize()
+                           : child.LocationOffset();
+    AddVisualOverflowFromChild(child, delta);
   }
   void AddVisualOverflowFromChild(const LayoutBox& child,
                                   const LayoutSize& delta);
@@ -634,9 +639,9 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     return (ClientHeight() - PaddingTop() - PaddingBottom())
         .ClampNegativeToZero();
   }
-  LayoutSize ContentSize() const {
+  PhysicalSize ContentSize() const {
     NOT_DESTROYED();
-    return LayoutSize(ContentWidth(), ContentHeight());
+    return PhysicalSize(ContentWidth(), ContentHeight());
   }
   LayoutUnit ContentLogicalWidth() const {
     NOT_DESTROYED();
@@ -693,25 +698,15 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // of a single line).
   LayoutUnit OffsetWidth() const final {
     NOT_DESTROYED();
-    return Size().Width();
+    return Size().width;
   }
   LayoutUnit OffsetHeight() const final {
     NOT_DESTROYED();
-    return Size().Height();
+    return Size().height;
   }
 
   bool UsesOverlayScrollbars() const;
 
-  // Clamps the left scrollbar size so it is not wider than the content box.
-  DISABLE_CFI_PERF LayoutUnit LogicalLeftScrollbarWidth() const {
-    NOT_DESTROYED();
-    if (CanSkipComputeScrollbars())
-      return LayoutUnit();
-    else if (StyleRef().IsHorizontalWritingMode())
-      return ComputeScrollbarsInternal(kClampToContentBox).left;
-    else
-      return ComputeScrollbarsInternal(kClampToContentBox).top;
-  }
   DISABLE_CFI_PERF LayoutUnit LogicalTopScrollbarHeight() const {
     NOT_DESTROYED();
     if (CanSkipComputeScrollbars())
@@ -755,10 +750,6 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   DISABLE_CFI_PERF LayoutUnit ClientLogicalHeight() const {
     NOT_DESTROYED();
     return IsHorizontalWritingMode() ? ClientHeight() : ClientWidth();
-  }
-  DISABLE_CFI_PERF LayoutUnit ClientLogicalBottom() const {
-    NOT_DESTROYED();
-    return BorderBefore() + LogicalTopScrollbarHeight() + ClientLogicalHeight();
   }
 
   // TODO(crbug.com/962299): This is incorrect in some cases.
@@ -833,9 +824,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   }
 
   void LayoutSubtreeRoot();
-  void LayoutSubtreeRootOld();
 
-  void UpdateLayout() override;
   void Paint(const PaintInfo&) const override;
 
   virtual bool IsInSelfHitTestingPhase(HitTestPhase phase) const {
@@ -861,38 +850,10 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // details about those widths.
   MinMaxSizes PreferredLogicalWidths() const override;
 
-  LayoutUnit OverrideLogicalHeight() const;
-  LayoutUnit OverrideLogicalWidth() const;
-  bool IsOverrideLogicalHeightDefinite() const;
-  bool StretchInlineSizeIfAuto() const;
-  bool StretchBlockSizeIfAuto() const;
-  bool HasOverrideLogicalHeight() const;
-  bool HasOverrideLogicalWidth() const;
-  void SetOverrideLogicalHeight(LayoutUnit);
-  void SetOverrideLogicalWidth(LayoutUnit);
-  void ClearOverrideLogicalHeight();
-  void ClearOverrideLogicalWidth();
-  void ClearOverrideSize();
-
-  LayoutUnit OverrideContentLogicalWidth() const;
-  LayoutUnit OverrideContentLogicalHeight() const;
-
   LayoutUnit OverrideContainingBlockContentLogicalWidth() const;
-  LayoutUnit OverrideContainingBlockContentLogicalHeight() const;
   bool HasOverrideContainingBlockContentLogicalWidth() const;
-  bool HasOverrideContainingBlockContentLogicalHeight() const;
   void SetOverrideContainingBlockContentLogicalWidth(LayoutUnit);
-  void SetOverrideContainingBlockContentLogicalHeight(LayoutUnit);
   void ClearOverrideContainingBlockContentSize();
-
-  // When an available inline size override has been set, we'll use that to fill
-  // available inline size, rather than deducing it from the containing block
-  // (and then subtract space taken up by adjacent floats).
-  LayoutUnit OverrideAvailableInlineSize() const;
-  bool HasOverrideAvailableInlineSize() const {
-    NOT_DESTROYED();
-    return extra_input_;
-  }
 
   LayoutUnit AdjustBorderBoxLogicalWidthForBoxSizing(float width) const;
   LayoutUnit AdjustBorderBoxLogicalHeightForBoxSizing(float height) const;
@@ -1004,8 +965,6 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // Perform any finalization needed after all the layout results have been
   // added.
   void FinalizeLayoutResults();
-
-  void ClearLayoutResults();
 
   void RebuildFragmentTreeSpine();
 
@@ -1143,43 +1102,29 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   LayoutUnit ContainingBlockLogicalHeightForContent(
       AvailableLogicalHeightType) const;
 
-  LayoutUnit PerpendicularContainingBlockLogicalHeight() const;
-
   virtual void ComputeLogicalHeight(LayoutUnit logical_height,
                                     LayoutUnit logical_top,
                                     LogicalExtentComputedValues&) const;
-  // This function will compute the logical border-box height, without laying
-  // out the box. This means that the result is only "correct" when the height
-  // is explicitly specified. This function exists so that intrinsic width
-  // calculations have a way to deal with children that have orthogonal flows.
-  // When there is no explicit height, this function assumes a content height of
-  // zero (and returns just border+padding).
-  LayoutUnit ComputeLogicalHeightWithoutLayout() const;
 
   bool StretchesToViewport() const {
     NOT_DESTROYED();
     return GetDocument().InQuirksMode() && StretchesToViewportInQuirksMode();
   }
 
-  virtual LayoutSize IntrinsicSize() const {
+  virtual PhysicalSize IntrinsicSize() const {
     NOT_DESTROYED();
-    return LayoutSize();
+    return PhysicalSize();
   }
   LayoutUnit IntrinsicLogicalWidth() const {
     NOT_DESTROYED();
-    return StyleRef().IsHorizontalWritingMode() ? IntrinsicSize().Width()
-                                                : IntrinsicSize().Height();
+    return StyleRef().IsHorizontalWritingMode() ? IntrinsicSize().width
+                                                : IntrinsicSize().height;
   }
   LayoutUnit IntrinsicLogicalHeight() const {
     NOT_DESTROYED();
-    return StyleRef().IsHorizontalWritingMode() ? IntrinsicSize().Height()
-                                                : IntrinsicSize().Width();
+    return StyleRef().IsHorizontalWritingMode() ? IntrinsicSize().height
+                                                : IntrinsicSize().width;
   }
-
-  // Whether or not the element shrinks to its intrinsic width (rather than
-  // filling the width of a containing block). HTML4 buttons, <select>s,
-  // <input>s, legends, and floating/compact elements do this.
-  bool SizesLogicalWidthToFitContent(const Length& logical_width) const;
 
   bool AutoWidthShouldFitContent() const;
 
@@ -1247,8 +1192,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     }
   }
 
-  bool CanBeScrolledAndHasScrollableArea() const;
-  virtual bool CanBeProgrammaticallyScrolled() const;
+  bool IsUserScrollable() const;
   virtual void Autoscroll(const PhysicalOffset&);
   PhysicalOffset CalculateAutoscrollDirection(
       const gfx::PointF& point_in_root_frame) const;
@@ -1292,11 +1236,11 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     return ScrollsOverflowY() &&
            PixelSnappedScrollHeight() != PixelSnappedClientHeight();
   }
-  virtual bool ScrollsOverflowX() const {
+  bool ScrollsOverflowX() const {
     NOT_DESTROYED();
     return HasNonVisibleOverflow() && StyleRef().ScrollsOverflowX();
   }
-  virtual bool ScrollsOverflowY() const {
+  bool ScrollsOverflowY() const {
     NOT_DESTROYED();
     return HasNonVisibleOverflow() && StyleRef().ScrollsOverflowY();
   }
@@ -1346,12 +1290,8 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;
   ResourcePriority ComputeResourcePriority() const final;
 
-  PositionWithAffinity PositionForPoint(const PhysicalOffset&) const override;
   PositionWithAffinity PositionForPointInFragments(const PhysicalOffset&) const;
 
-  void RemoveFloatingOrPositionedChildFromBlockLists();
-
-  bool ShrinkToAvoidFloats() const;
   virtual bool CreatesNewFormattingContext() const {
     NOT_DESTROYED();
     return true;
@@ -1412,7 +1352,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     if (LIKELY(!HasFlippedBlocksWritingMode()))
       return position;
     DCHECK(!IsHorizontalWritingMode());
-    return Size().Width() - (position + width);
+    return Size().width - (position + width);
   }
   // Inherit other flipping methods from LayoutObject.
   using LayoutObject::FlipForWritingMode;
@@ -1445,11 +1385,11 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
 
   LayoutRect VisualOverflowRectForPropagation() const {
     NOT_DESTROYED();
+    if (RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()) {
+      return VisualOverflowRect();
+    }
     return RectForOverflowPropagation(VisualOverflowRect());
   }
-  LayoutRect LogicalLayoutOverflowRectForPropagation(
-      LayoutObject* container) const;
-  LayoutRect LayoutOverflowRectForPropagation(LayoutObject* container) const;
 
   bool HasSelfVisualOverflow() const {
     NOT_DESTROYED();
@@ -1518,8 +1458,6 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
                                 VisualRectFlags,
                                 TransformState&) const;
 
-  bool HasRelativeLogicalHeight() const;
-
   virtual LayoutBox* CreateAnonymousBoxWithSameTypeAs(
       const LayoutObject*) const {
     NOT_DESTROYED();
@@ -1573,7 +1511,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     void SavePreviousSize() {
       GetLayoutBox().previous_size_ = GetLayoutBox().Size();
     }
-    void ClearPreviousSize() { GetLayoutBox().previous_size_ = LayoutSize(); }
+    void ClearPreviousSize() { GetLayoutBox().previous_size_ = PhysicalSize(); }
     void SavePreviousOverflowData();
     void ClearPreviousOverflowData() {
       DCHECK(!GetLayoutBox().HasVisualOverflow());
@@ -1596,7 +1534,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     // original LayoutBox.
     void SetPreviousGeometryForLayoutShiftTracking(
         const PhysicalOffset& paint_offset,
-        const LayoutSize& size,
+        const PhysicalSize& size,
         const PhysicalRect& visual_overflow_rect);
 
    protected:
@@ -1613,7 +1551,7 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
     return MutableForPainting(*this);
   }
 
-  LayoutSize PreviousSize() const {
+  PhysicalSize PreviousSize() const {
     NOT_DESTROYED();
     return previous_size_;
   }
@@ -1741,6 +1679,22 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   // This should be called when the border-box size of this box is changed.
   void SizeChanged();
 
+  // Finds the target anchor element for the given name in the containing block.
+  // https://drafts.csswg.org/css-anchor-position-1/#target-anchor-element
+  const LayoutObject* FindTargetAnchor(const ScopedCSSName&) const;
+
+  // Returns this element's implicit anchor element if there is one and it is an
+  // acceptable anchor element.
+  // https://drafts.csswg.org/css-anchor-position-1/#ref-for-valdef-anchor-implicit
+  const LayoutObject* AcceptableImplicitAnchor() const;
+
+  // Returns position fallback results for anchor positioned element.
+  absl::optional<wtf_size_t> PositionFallbackIndex() const;
+  const Vector<PhysicalScrollRange>* PositionFallbackNonOverflowingRanges()
+      const;
+
+  const NGBoxStrut& OutOfFlowInsetsForGetComputedStyle() const;
+
  protected:
   ~LayoutBox() override;
 
@@ -1806,13 +1760,6 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
       const LayoutBox* child,
       const LayoutBoxModelObject* container_block,
       const NGBoxFragmentBuilder* = nullptr);
-  static void ComputeInlineStaticDistance(
-      Length& logical_left,
-      Length& logical_right,
-      const LayoutBox* child,
-      const LayoutBoxModelObject* container_block,
-      LayoutUnit container_logical_width,
-      const NGBoxFragmentBuilder* = nullptr);
   static void ComputeLogicalTopPositionedOffset(
       LayoutUnit& logical_top_pos,
       const LayoutBox* child,
@@ -1872,18 +1819,6 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   bool StretchesToViewportInQuirksMode() const;
 
   virtual void ComputePositionedLogicalHeight(
-      LogicalExtentComputedValues&) const;
-  void ComputePositionedLogicalWidthUsing(
-      SizeType,
-      const Length& logical_width,
-      const LayoutBoxModelObject* container_block,
-      TextDirection container_direction,
-      LayoutUnit container_logical_width,
-      LayoutUnit borders_plus_padding,
-      const Length& logical_left,
-      const Length& logical_right,
-      const Length& margin_logical_left,
-      const Length& margin_logical_right,
       LogicalExtentComputedValues&) const;
   void ComputePositionedLogicalHeightUsing(
       SizeType,
@@ -1960,18 +1895,22 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
       return PhysicalOffset(location);
 
     return PhysicalOffset(
-        container_box->Size().Width() - Size().Width() - location.X(),
+        container_box->Size().width - Size().width - location.X(),
         location.Y());
   }
 
   bool BackgroundClipBorderBoxIsEquivalentToPaddingBox() const;
 
   // Compute the border-box size from physical fragments.
-  LayoutSize ComputeSize() const;
+  PhysicalSize ComputeSize() const;
   void InvalidateCachedGeometry();
 
   // Clear LayoutObject fields of physical fragments.
   void DisassociatePhysicalFragments();
+
+  LayoutRect FlippedLocalCaretRect(
+      int caret_offset,
+      LayoutUnit* extra_width_to_end_of_line) const;
 
  protected:
   // The CSS border box rect for this box.
@@ -1985,11 +1924,11 @@ class CORE_EXPORT LayoutBox : public LayoutBoxModelObject {
   LayoutPoint frame_location_;
 
   // TODO(crbug.com/1353190): Remove frame_size_.
-  LayoutSize frame_size_;
+  PhysicalSize frame_size_;
 
  private:
   // Previous value of frame_size_, updated after paint invalidation.
-  LayoutSize previous_size_;
+  PhysicalSize previous_size_;
 
  protected:
   MinMaxSizes intrinsic_logical_widths_;

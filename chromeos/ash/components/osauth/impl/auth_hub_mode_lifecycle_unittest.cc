@@ -12,6 +12,7 @@
 #include "base/test/gmock_move_support.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
+#include "chromeos/ash/components/osauth/impl/auth_hub_common.h"
 #include "chromeos/ash/components/osauth/impl/auth_hub_impl.h"
 #include "chromeos/ash/components/osauth/impl/auth_hub_mode_lifecycle.h"
 #include "chromeos/ash/components/osauth/impl/auth_parts_impl.h"
@@ -41,10 +42,7 @@ class MockModeLifecycleOwner : public AuthHubModeLifecycle::Owner {
   MockModeLifecycleOwner() = default;
   ~MockModeLifecycleOwner() override = default;
 
-  MOCK_METHOD(void,
-              OnReadyForMode,
-              (AuthHubMode, AuthHubModeLifecycle::EnginesMap),
-              (override));
+  MOCK_METHOD(void, OnReadyForMode, (AuthHubMode, AuthEnginesMap), (override));
   MOCK_METHOD(void, OnExitedMode, (AuthHubMode), (override));
   MOCK_METHOD(void, OnModeShutdown, (), (override));
 };
@@ -115,7 +113,9 @@ class AuthHubModeLifecycleTest : public ::testing::Test {
   std::unique_ptr<AuthPartsImpl> parts_;
   StrictMock<MockModeLifecycleOwner> owner_;
   AuthHubModeLifecycle lifecycle_{&owner_};
-  base::flat_map<AshAuthFactor, base::raw_ptr<MockAuthFactorEngine>> engines_;
+  base::flat_map<AshAuthFactor,
+                 base::raw_ptr<MockAuthFactorEngine, DanglingUntriaged>>
+      engines_;
   base::flat_map<AshAuthFactor, AuthFactorEngine::CommonInitCallback>
       init_callbacks_;
 };
@@ -131,7 +131,7 @@ TEST_F(AuthHubModeLifecycleTest, SingleFactorInitShutdown) {
   EXPECT_FALSE(lifecycle_.IsReady());
   Mock::VerifyAndClearExpectations(&owner_);
 
-  AuthHubModeLifecycle::EnginesMap engines;
+  AuthEnginesMap engines;
   EXPECT_CALL(owner_, OnReadyForMode(Eq(AuthHubMode::kLoginScreen), _))
       .WillOnce(MoveArg<1>(&engines));
 
@@ -148,7 +148,7 @@ TEST_F(AuthHubModeLifecycleTest, SingleFactorInitShutdown) {
   EXPECT_CALL(*engines_[kOneFactor], ShutdownCommon(_))
       .WillOnce(MoveArg<0>(&callback));
 
-  lifecycle_.Shutdown();
+  lifecycle_.SwitchToMode(AuthHubMode::kNone);
 
   // Should not notify immediately.
   EXPECT_FALSE(lifecycle_.IsReady());
@@ -180,7 +180,7 @@ TEST_F(AuthHubModeLifecycleTest, SingleFactorShutdownEarly) {
   EXPECT_CALL(*engines_[kOneFactor], ShutdownCommon(_))
       .WillOnce(MoveArg<0>(&callback));
 
-  lifecycle_.Shutdown();
+  lifecycle_.SwitchToMode(AuthHubMode::kNone);
 
   // Eventually engine initializes.
   ASSERT_TRUE(init_callbacks_.contains(kOneFactor));
@@ -233,7 +233,7 @@ TEST_F(AuthHubModeLifecycleTest, SingleFactorReInitialization) {
 
   // Should finish shutdown and proceed to initialization for second
   // requested mode.
-  AuthHubModeLifecycle::EnginesMap engines;
+  AuthEnginesMap engines;
   EXPECT_CALL(owner_, OnReadyForMode(Eq(AuthHubMode::kInSession), _))
       .WillOnce(MoveArg<1>(&engines));
 
@@ -264,7 +264,7 @@ TEST_F(AuthHubModeLifecycleTest, FactorInitializationTimeout) {
 
   EXPECT_CALL(*engines_[kOneFactor], InitializationTimedOut());
 
-  AuthHubModeLifecycle::EnginesMap engines;
+  AuthEnginesMap engines;
   EXPECT_CALL(owner_, OnReadyForMode(Eq(AuthHubMode::kLoginScreen), _))
       .WillOnce(MoveArg<1>(&engines));
 
@@ -287,7 +287,7 @@ TEST_F(AuthHubModeLifecycleTest, FactorInitializationTimeout) {
   EXPECT_CALL(owner_, OnExitedMode(Eq(AuthHubMode::kLoginScreen)));
   EXPECT_CALL(owner_, OnModeShutdown());
 
-  lifecycle_.Shutdown();
+  lifecycle_.SwitchToMode(AuthHubMode::kNone);
 }
 
 // Check logic when one of the engines takes too long to shut down.
@@ -295,7 +295,7 @@ TEST_F(AuthHubModeLifecycleTest, FactorShutdownTimeout) {
   ExpectLoginFactor(kOneFactor);
   ExpectLoginFactor(kAnotherFactor);
 
-  AuthHubModeLifecycle::EnginesMap engines;
+  AuthEnginesMap engines;
   EXPECT_CALL(owner_, OnReadyForMode(Eq(AuthHubMode::kLoginScreen), _))
       .WillOnce(MoveArg<1>(&engines));
 
@@ -312,7 +312,7 @@ TEST_F(AuthHubModeLifecycleTest, FactorShutdownTimeout) {
   EXPECT_CALL(*engines_[kAnotherFactor], ShutdownCommon(_))
       .WillOnce(RunOnceCallback<0>(kAnotherFactor));
 
-  lifecycle_.Shutdown();
+  lifecycle_.SwitchToMode(AuthHubMode::kNone);
 
   // Should not notify immediately.
   EXPECT_FALSE(lifecycle_.IsReady());

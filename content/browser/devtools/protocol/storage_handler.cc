@@ -18,6 +18,7 @@
 #include "components/services/storage/privileged/mojom/indexed_db_control.mojom.h"
 #include "components/services/storage/public/cpp/buckets/bucket_locator.h"
 #include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
+#include "content/browser/attribution_reporting/attribution_manager.h"
 #include "content/browser/devtools/protocol/browser_handler.h"
 #include "content/browser/devtools/protocol/handler_helpers.h"
 #include "content/browser/devtools/protocol/network.h"
@@ -190,22 +191,23 @@ class StorageHandler::CacheStorageObserver
     storage_keys_.erase(storage_key);
   }
 
-  void OnCacheListChanged(const blink::StorageKey& storage_key) override {
+  void OnCacheListChanged(
+      const storage::BucketLocator& bucket_locator) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    auto found = storage_keys_.find(storage_key);
+    auto found = storage_keys_.find(bucket_locator.storage_key);
     if (found == storage_keys_.end()) {
       return;
     }
-    owner_->NotifyCacheStorageListChanged(storage_key);
+    owner_->NotifyCacheStorageListChanged(bucket_locator);
   }
 
-  void OnCacheContentChanged(const blink::StorageKey& storage_key,
+  void OnCacheContentChanged(const storage::BucketLocator& bucket_locator,
                              const std::string& cache_name) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    if (storage_keys_.find(storage_key) == storage_keys_.end()) {
+    if (storage_keys_.find(bucket_locator.storage_key) == storage_keys_.end()) {
       return;
     }
-    owner_->NotifyCacheStorageContentChanged(storage_key, cache_name);
+    owner_->NotifyCacheStorageContentChanged(bucket_locator, cache_name);
   }
 
  private:
@@ -376,7 +378,7 @@ class StorageHandler::QuotaManagerObserver
         base::BindOnce(
             [](base::WeakPtr<StorageHandler> owner_storage_handler,
                storage::QuotaErrorOr<std::set<storage::BucketInfo>> buckets) {
-              if (!buckets.has_value()) {
+              if (!owner_storage_handler || !buckets.has_value()) {
                 return;
               }
 
@@ -442,6 +444,7 @@ Response StorageHandler::Disable() {
   SetInterestGroupTracking(false);
   shared_storage_observer_.reset();
   quota_manager_observer_.reset();
+  ResetAttributionReportingLocalTestingMode();
   return Response::Success();
 }
 
@@ -862,18 +865,22 @@ storage::QuotaManagerProxy* StorageHandler::GetQuotaManagerProxy() {
 }
 
 void StorageHandler::NotifyCacheStorageListChanged(
-    const blink::StorageKey& storage_key) {
+    const storage::BucketLocator& bucket_locator) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  frontend_->CacheStorageListUpdated(storage_key.origin().Serialize(),
-                                     storage_key.Serialize());
+  frontend_->CacheStorageListUpdated(
+      bucket_locator.storage_key.origin().Serialize(),
+      bucket_locator.storage_key.Serialize(),
+      base::NumberToString(bucket_locator.id.value()));
 }
 
 void StorageHandler::NotifyCacheStorageContentChanged(
-    const blink::StorageKey& storage_key,
+    const storage::BucketLocator& bucket_locator,
     const std::string& name) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  frontend_->CacheStorageContentUpdated(storage_key.origin().Serialize(),
-                                        storage_key.Serialize(), name);
+  frontend_->CacheStorageContentUpdated(
+      bucket_locator.storage_key.origin().Serialize(),
+      bucket_locator.storage_key.Serialize(),
+      base::NumberToString(bucket_locator.id.value()), name);
 }
 
 void StorageHandler::NotifyIndexedDBListChanged(
@@ -1600,6 +1607,42 @@ void StorageHandler::NotifyDeleteBucket(
     const storage::BucketLocator& bucket_locator) {
   frontend_->StorageBucketDeleted(
       base::NumberToString(bucket_locator.id.value()));
+}
+
+void StorageHandler::SetAttributionReportingLocalTestingMode(
+    bool enabled,
+    std::unique_ptr<SetAttributionReportingLocalTestingModeCallback> callback) {
+  if (!storage_partition_) {
+    callback->sendFailure(Response::InternalError());
+    return;
+  }
+
+  auto* manager = static_cast<StoragePartitionImpl*>(storage_partition_)
+                      ->GetAttributionManager();
+  if (!manager) {
+    callback->sendFailure(Response::InternalError());
+    return;
+  }
+
+  manager->SetDebugMode(
+      enabled,
+      base::BindOnce(
+          &SetAttributionReportingLocalTestingModeCallback::sendSuccess,
+          std::move(callback)));
+}
+
+void StorageHandler::ResetAttributionReportingLocalTestingMode() {
+  if (!storage_partition_) {
+    return;
+  }
+
+  auto* manager = static_cast<StoragePartitionImpl*>(storage_partition_)
+                      ->GetAttributionManager();
+  if (!manager) {
+    return;
+  }
+
+  manager->SetDebugMode(/*enabled=*/absl::nullopt, base::DoNothing());
 }
 
 }  // namespace protocol

@@ -12,8 +12,7 @@
 #include "base/logging.h"
 #include "chrome/browser/ash/policy/dlp/dlp_files_controller_ash.h"
 #include "chrome/browser/chromeos/policy/dlp/dlp_file_destination.h"
-#include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager.h"
-#include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager_factory.h"
+#include "chrome/browser/chromeos/policy/dlp/dlp_files_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/dbus/dlp/dlp_service.pb.h"
 #include "dbus/message.h"
@@ -25,41 +24,42 @@ namespace ash {
 namespace {
 
 // Maps dlp::FileAction proto enum to DlpFilesController::FileAction enum.
-policy::DlpFilesController::FileAction MapProtoToFileAction(
-    dlp::FileAction file_action) {
+policy::dlp::FileAction MapProtoToFileAction(dlp::FileAction file_action) {
   switch (file_action) {
     case dlp::FileAction::UPLOAD:
-      return policy::DlpFilesController::FileAction::kUpload;
+      return policy::dlp::FileAction::kUpload;
     case dlp::FileAction::COPY:
-      return policy::DlpFilesController::FileAction::kCopy;
+      return policy::dlp::FileAction::kCopy;
     case dlp::FileAction::MOVE:
-      return policy::DlpFilesController::FileAction::kMove;
+      return policy::dlp::FileAction::kMove;
     case dlp::FileAction::OPEN:
     // TODO(crbug.com/1378653): Return open FileAction.
     case dlp::FileAction::SHARE:
     // TODO(crbug.com/1378653): Return share FileAction.
     case dlp::FileAction::TRANSFER:
-      return policy::DlpFilesController::FileAction::kTransfer;
+      return policy::dlp::FileAction::kTransfer;
   }
 }
 
-// Maps |component| to DlpRulesManager::Component.
-policy::DlpRulesManager::Component MapProtoToPolicyComponent(
+// Maps |component| to data_controls::Component.
+data_controls::Component MapProtoToPolicyComponent(
     ::dlp::DlpComponent component) {
   switch (component) {
     case ::dlp::DlpComponent::ARC:
-      return policy::DlpRulesManager::Component::kArc;
+      return data_controls::Component::kArc;
     case ::dlp::DlpComponent::CROSTINI:
-      return policy::DlpRulesManager::Component::kCrostini;
+      return data_controls::Component::kCrostini;
     case ::dlp::DlpComponent::PLUGIN_VM:
-      return policy::DlpRulesManager::Component::kPluginVm;
+      return data_controls::Component::kPluginVm;
     case ::dlp::DlpComponent::USB:
-      return policy::DlpRulesManager::Component::kUsb;
+      return data_controls::Component::kUsb;
     case ::dlp::DlpComponent::GOOGLE_DRIVE:
-      return policy::DlpRulesManager::Component::kDrive;
+      return data_controls::Component::kDrive;
+    case ::dlp::DlpComponent::MICROSOFT_ONEDRIVE:
+      return data_controls::Component::kOneDrive;
     case ::dlp::DlpComponent::UNKNOWN_COMPONENT:
     case ::dlp::DlpComponent::SYSTEM:
-      return policy::DlpRulesManager::Component::kUnknownComponent;
+      return data_controls::Component::kUnknownComponent;
   }
 }
 
@@ -110,12 +110,8 @@ void DlpFilesPolicyServiceProvider::IsDlpPolicyMatched(
     return;
   }
 
-  policy::DlpRulesManager* rules_manager =
-      policy::DlpRulesManagerFactory::GetForPrimaryProfile();
-  DCHECK(rules_manager);
   policy::DlpFilesControllerAsh* files_controller =
-      static_cast<policy::DlpFilesControllerAsh*>(
-          rules_manager->GetDlpFilesController());
+      policy::DlpFilesControllerAsh::GetForPrimaryProfile();
 
   // TODO(crbug.com/1360005): Add actual file path.
   bool restricted =
@@ -165,12 +161,8 @@ void DlpFilesPolicyServiceProvider::IsFilesTransferRestricted(
                             file.source_url());
   }
 
-  policy::DlpRulesManager* rules_manager =
-      policy::DlpRulesManagerFactory::GetForPrimaryProfile();
-  DCHECK(rules_manager);
   policy::DlpFilesControllerAsh* files_controller =
-      static_cast<policy::DlpFilesControllerAsh*>(
-          rules_manager->GetDlpFilesController());
+      policy::DlpFilesControllerAsh::GetForPrimaryProfile();
   if (!files_controller) {
     std::vector<std::pair<policy::DlpFilesControllerAsh::FileDaemonInfo,
                           dlp::RestrictionLevel>>
@@ -192,13 +184,19 @@ void DlpFilesPolicyServiceProvider::IsFilesTransferRestricted(
     destination.emplace(request.destination_url());
   }
 
-  policy::DlpFilesController::FileAction files_action =
-      policy::DlpFilesController::FileAction::kTransfer;
-  if (request.has_file_action())
+  policy::dlp::FileAction files_action = policy::dlp::FileAction::kTransfer;
+  if (request.has_file_action()) {
     files_action = MapProtoToFileAction(request.file_action());
+  }
+
+  absl::optional<file_manager::io_task::IOTaskId> task_id = absl::nullopt;
+  if (request.has_io_task_id()) {
+    task_id = request.io_task_id();
+  }
 
   files_controller->IsFilesTransferRestricted(
-      std::move(files_info), std::move(destination.value()), files_action,
+      std::move(task_id), std::move(files_info), std::move(destination.value()),
+      files_action,
       base::BindOnce(
           &DlpFilesPolicyServiceProvider::RespondWithRestrictedFilesTransfer,
           weak_ptr_factory_.GetWeakPtr(), method_call,

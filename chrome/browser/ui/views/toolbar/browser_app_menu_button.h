@@ -30,6 +30,8 @@ class BrowserAppMenuButton : public AppMenuButton {
   BrowserAppMenuButton& operator=(const BrowserAppMenuButton&) = delete;
   ~BrowserAppMenuButton() override;
 
+  // Returns true if a text is set and is visible.
+  bool IsLabelPresentAndVisible() const;
   void SetTypeAndSeverity(
       AppMenuIconController::TypeAndSeverity type_and_severity);
 
@@ -41,7 +43,11 @@ class BrowserAppMenuButton : public AppMenuButton {
   // Used only in testing.
   static bool g_open_app_immediately_for_testing;
 
-  void UpdateColors();
+  void UpdateThemeBasedState();
+
+  // Updates the inkdrop highlight and ripple properties depending on whether
+  // the chip is expanded.
+  void UpdateInkdrop();
 
   // AppMenuButton:
   void OnThemeChanged() override;
@@ -59,9 +65,11 @@ class BrowserAppMenuButton : public AppMenuButton {
   bool ShouldPaintBorder() const override;
   absl::optional<SkColor> GetHighlightTextColor() const override;
 
-  bool IsLabelPresentAndVisible() const;
   SkColor GetForegroundColor(ButtonState state) const override;
   void SetHasInProductHelpPromo(bool has_in_product_help_promo);
+
+  // Sets the padding values depending on whether label is visible.
+  void UpdateLayoutInsets();
 
   // Closes and continue the flow of an in-product help promo; Returns
   // AlertMenuItem which indicates the app menu item that should be alerted.

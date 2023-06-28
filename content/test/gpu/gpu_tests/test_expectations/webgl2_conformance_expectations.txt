@@ -25,7 +25,9 @@
 #         lacros-chrome cros-chrome ]
 # GPU
 # tags: [ amd amd-0x6613 amd-0x679e amd-0x67ef amd-0x6821 amd-0x7340
-#         apple apple-apple-m1 apple-angle-metal-renderer:-apple-m1
+#         apple apple-apple-m1 apple-apple-m2
+#             apple-angle-metal-renderer:-apple-m1
+#             apple-angle-metal-renderer:-apple-m2
 #         arm
 #         google google-0xffff google-0xc0de
 #         intel intel-gen-9 intel-gen-12 intel-0xa2e intel-0xd26 intel-0xa011
@@ -63,6 +65,8 @@
 # tags: [ dawn-backend-validation dawn-no-backend-validation ]
 # WebGPU Adapter
 # tags: [ webgpu-adapter-default webgpu-adapter-swiftshader ]
+# WebGPU Compat Mode
+# tags: [ webgpu-compat webgpu-not-compat ]
 # Clang coverage
 # tags: [ clang-coverage no-clang-coverage ]
 # results: [ Failure RetryOnFailure Skip Slow ]
@@ -220,6 +224,56 @@ crbug.com/1345782 [ mac amd-0x6821 passthrough angle-opengl ] deqp/functional/gl
 crbug.com/1345782 [ mac amd-0x679e passthrough angle-opengl ] deqp/functional/gles3/shadertexturefunction/texturesize.html [ Skip ]
 crbug.com/1345782 [ mac amd-0x67ef passthrough angle-opengl ] deqp/functional/gles3/shadertexturefunction/texturesize.html [ Skip ]
 
+# Skipped due to low capacity of Lacros devices
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/ogles/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/canvas/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/canvas_sub_rectangle/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image_data/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/svg_image/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/video/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/webgl_canvas/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image_bitmap_from_image_data/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image_bitmap_from_image/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image_bitmap_from_video/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image_bitmap_from_canvas/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image_bitmap_from_blob/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/textures/image_bitmap_from_image_bitmap/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/uniforms/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance/more/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] deqp/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/canvas/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/canvas_sub_rectangle/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image_data/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/svg_image/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/video/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/webgl_canvas/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image_bitmap_from_image_data/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image_bitmap_from_image/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image_bitmap_from_video/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image_bitmap_from_canvas/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image_bitmap_from_blob/* [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome passthrough ] conformance2/textures/image_bitmap_from_image_bitmap/* [ Skip ]
+
+# Extensions not available on Lacros, skip as failures causes re-login which takes ~1 min
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-octopus passthrough ] WebglExtension_OVR_multiview2 [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-octopus passthrough ] WebglExtension_WEBGL_compressed_texture_pvrtc [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-octopus passthrough ] WebglExtension_WEBGL_provoking_vertex [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-octopus passthrough ] WebglExtension_WEBGL_webcodecs_video_frame [ Skip ]
+
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_EXT_texture_compression_bptc [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_EXT_texture_compression_rgtc [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_EXT_texture_norm16 [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_OES_texture_float_linear [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_OVR_multiview2 [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_WEBGL_clip_cull_distance [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_WEBGL_compressed_texture_pvrtc [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_WEBGL_compressed_texture_s3tc [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_WEBGL_compressed_texture_s3tc_srgb [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_WEBGL_provoking_vertex [ Skip ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] WebglExtension_WEBGL_webcodecs_video_frame [ Skip ]
+
 ###############################
 # Permanent Slow Expectations #
 ###############################
@@ -309,7 +363,6 @@ crbug.com/483282 [ angle-d3d11 win amd ] conformance2/rendering/blitframebuffer-
 # Failing on AMD RX 5500 XT
 crbug.com/1152597 [ win amd-0x7340 angle-d3d11 ] conformance/renderbuffers/framebuffer-state-restoration.html [ Failure ]
 crbug.com/1152599 [ win amd-0x7340 angle-d3d11 ] conformance/rendering/polygon-offset.html [ Failure ]
-crbug.com/1152602 [ win amd-0x7340 angle-d3d11 ] conformance/canvas/drawingbuffer-static-canvas-test.html [ RetryOnFailure ]
 crbug.com/1409858 [ win amd-0x7340 angle-d3d11 ] conformance/context/context-attributes-alpha-depth-stencil-antialias.html [ Failure ]
 crbug.com/1152603 [ win amd-0x7340 angle-d3d11 ] conformance2/renderbuffers/multisampled-depth-renderbuffer-initialization.html [ Failure ]
 crbug.com/1152606 [ win amd-0x7340 angle-d3d11 ] deqp/functional/gles3/fboinvalidate/* [ Failure ]
@@ -320,7 +373,6 @@ crbug.com/1152606 [ win amd-0x7340 angle-d3d11 ] deqp/functional/gles3/fragdepth
 crbug.com/1152606 [ win amd-0x7340 angle-d3d11 ] deqp/functional/gles3/framebufferblit/depth_stencil.html [ Failure ]
 
 # D3D11 / AMD RX 5500 XT / Passthrough command decoder
-crbug.com/1159539 [ win amd-0x7340 angle-d3d11 passthrough ] deqp/functional/gles3/fbodepthbuffer.html [ RetryOnFailure ]
 crbug.com/1159539 [ win amd-0x7340 angle-d3d11 passthrough ] deqp/functional/gles3/fborender/recreate_color_* [ RetryOnFailure ]
 
 ######################
@@ -332,9 +384,6 @@ crbug.com/1159539 [ win amd-0x7340 angle-d3d11 passthrough ] deqp/functional/gle
 
 crbug.com/angleproject/7079 [ angle-metal mac mac-x86_64 passthrough ] deqp/functional/gles3/fboinvalidate/sub.html [ Failure ]
 crbug.com/angleproject/7079 [ angle-metal mac mac-x86_64 passthrough ] deqp/functional/gles3/fboinvalidate/whole.html [ Failure ]
-crbug.com/angleproject/7079 [ angle-metal mac-x86_64 monterey passthrough ] deqp/functional/gles3/fbomultisample.2_samples.html [ Failure ]
-crbug.com/angleproject/7079 [ angle-metal mac-x86_64 monterey passthrough ] deqp/functional/gles3/fbomultisample.4_samples.html [ Failure ]
-crbug.com/angleproject/7079 [ angle-metal mac-x86_64 monterey passthrough ] deqp/functional/gles3/fbomultisample.8_samples.html [ Failure ]
 
 ## Metal AMD ##
 
@@ -364,43 +413,34 @@ crbug.com/1316389 [ amd-0x67ef angle-metal passthrough ventura ] deqp/functional
 crbug.com/1316389 [ amd-0x67ef angle-metal passthrough ventura ] deqp/functional/gles3/transformfeedback/point_size.html [ Failure ]
 crbug.com/1316389 [ amd-0x67ef angle-metal passthrough ventura ] deqp/functional/gles3/transformfeedback/random_interleaved_points.html [ Failure ]
 crbug.com/1316389 [ amd-0x67ef angle-metal passthrough ventura ] deqp/functional/gles3/transformfeedback/random_separate_points.html [ Failure ]
+crbug.com/1435021 [ mac amd-0x67ef angle-metal ] conformance/textures/misc/texture-active-bind.html [ RetryOnFailure ]
+crbug.com/1435021 [ mac amd-0x67ef angle-metal ] conformance/textures/misc/texture-active-bind-2.html [ RetryOnFailure ]
 crbug.com/1435021 [ mac amd-0x67ef angle-metal ] conformance/canvas/draw-webgl-to-canvas-test.html [ RetryOnFailure ]
 
 ## Metal Intel ##
 
 crbug.com/angleproject/6430 [ angle-metal intel mac passthrough ] deqp/functional/gles3/readpixel.html [ Failure ]
-crbug.com/angleproject/6430 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/shadertexturefunction/texturegrad.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/fboinvalidate/default.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/fboinvalidate/default.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/basic_types_interleaved_points.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/basic_types_interleaved_points.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/basic_types_separate_points.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/basic_types_separate_points.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/interpolation_centroid.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/interpolation_centroid.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/interpolation_flat.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/interpolation_flat.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/interpolation_smooth.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/interpolation_smooth.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/point_size.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/point_size.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/random_interleaved_points.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/random_interleaved_points.html [ Failure ]
-crbug.com/1316389 [ angle-metal intel monterey passthrough ] deqp/functional/gles3/transformfeedback/random_separate_points.html [ Failure ]
 crbug.com/1316389 [ angle-metal intel passthrough ventura ] deqp/functional/gles3/transformfeedback/random_separate_points.html [ Failure ]
-crbug.com/angleproject/8026 [ angle-metal intel monterey passthrough ] conformance2/uniforms/dependent-buffer-change.html [ Failure ]
 
-## Metal M1 ##
+## Metal Apple Silicon ##
 
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/framebufferblit/rect_03.html [ Failure ]
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/framebufferblit/rect_04.html [ Failure ]
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/shadertexturefunction/texturegrad.html [ Failure ]
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/texturefiltering/cube_combinations_00.html [ Failure ]
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/texturefiltering/cube_combinations_02.html [ Failure ]
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/texturefiltering/cube_combinations_04.html [ Failure ]
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/texturefiltering/cube_sizes_03.html [ Failure ]
-crbug.com/angleproject/6430 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/texturefiltering/cube_sizes_04.html [ Failure ]
-crbug.com/1298619 [ mac passthrough angle-metal apple-angle-metal-renderer:-apple-m1 ] deqp/functional/gles3/occlusionquery_strict.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/framebufferblit/rect_03.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/framebufferblit/rect_04.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/shadertexturefunction/texturegrad.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/texturefiltering/cube_combinations_00.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/texturefiltering/cube_combinations_02.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/texturefiltering/cube_combinations_04.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/texturefiltering/cube_sizes_03.html [ Failure ]
+crbug.com/angleproject/6430 [ mac passthrough angle-metal apple ] deqp/functional/gles3/texturefiltering/cube_sizes_04.html [ Failure ]
+crbug.com/1298619 [ mac passthrough angle-metal apple ] deqp/functional/gles3/occlusionquery_strict.html [ Failure ]
 
 ######################################################################
 # Mac failures (mainly OpenGL; some need to be reevaluated on Metal) #
@@ -408,11 +448,15 @@ crbug.com/1298619 [ mac passthrough angle-metal apple-angle-metal-renderer:-appl
 
 crbug.com/angleproject/4242 [ angle-opengl mac mac-x86_64 oop-c ] conformance2/glsl3/matrix-row-major-dynamic-indexing.html [ Failure ]
 
-# Regressed in 10.13, still fails in 10.14
+# Regressed in 10.13, still fails in 10.14 and 11.7
 crbug.com/774827 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fborender/resize_03.html [ Failure ]
 crbug.com/774827 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/shaderindexing/mat_00.html [ Failure ]
 crbug.com/774827 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/shaderindexing/mat_02.html [ Failure ]
 crbug.com/774827 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/texturespecification/teximage2d_pbo_cube_00.html [ Failure ]
+crbug.com/774827 [ bigsur nvidia-0xfe9 angle-opengl ] deqp/functional/gles3/fborender/resize_03.html [ Failure ]
+crbug.com/774827 [ bigsur nvidia-0xfe9 angle-opengl ] deqp/functional/gles3/shaderindexing/mat_00.html [ Failure ]
+crbug.com/774827 [ bigsur nvidia-0xfe9 angle-opengl ] deqp/functional/gles3/shaderindexing/mat_02.html [ Failure ]
+crbug.com/774827 [ bigsur nvidia-0xfe9 angle-opengl ] deqp/functional/gles3/texturespecification/teximage2d_pbo_cube_00.html [ Failure ]
 
 # Fails on multiple GPU types.
 crbug.com/844311 [ angle-opengl mac ] conformance/glsl/misc/fragcolor-fragdata-invariant.html [ Failure ]
@@ -426,44 +470,44 @@ crbug.com/1289803 [ angle-opengl mac mac-x86_64 oop-c ] conformance2/extensions/
 
 crbug.com/728271 [ mac nvidia-0xfe9 ] deqp/functional/gles3/shaderindexing/mat_01.html [ Failure ]
 crbug.com/728271 [ mac nvidia-0xfe9 ] deqp/functional/gles3/shaderindexing/tmp.html [ Failure ]
-crbug.com/641209 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fbomultisample* [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/default_framebuffer_04.html [ Failure ]
+crbug.com/641209 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fbomultisample* [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/default_framebuffer_04.html [ Failure ]
 crbug.com/996344 [ mac nvidia-0xfe9 ] conformance/glsl/bugs/vector-scalar-arithmetic-inside-loop.html [ Failure ]
 crbug.com/996344 [ mac nvidia-0xfe9 ] conformance2/textures/misc/tex-base-level-bug.html [ Failure ]
 crbug.com/784817 [ mac nvidia-0xfe9 ] conformance/glsl/bugs/init-array-with-loop.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_04.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_07.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_10.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_11.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_12.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_13.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_18.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_25.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_29.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_32.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_34.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/pixelbufferobject.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/array.fixed.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/basic.fixed.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/random_00.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/random_01.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/random_02.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/clear.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/tex2d_05.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/tex2darray_05.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/tex3d_05.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/texcube_05.html [ Failure ]
-crbug.com/483282 [ mac nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/blend.html [ Failure ]
-crbug.com/654187 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_28.html [ Failure ]
-crbug.com/654187 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_30.html [ Failure ]
-crbug.com/654187 [ mac nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_33.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_04.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_07.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_10.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_11.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_12.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_13.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_18.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_25.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_29.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_32.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_34.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/pixelbufferobject.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/array.fixed.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/basic.fixed.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/random_00.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/random_01.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fragmentoutput/random_02.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/clear.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/tex2d_05.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/tex2darray_05.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/tex3d_05.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/texcube_05.html [ Failure ]
+crbug.com/483282 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/fbocolorbuffer/blend.html [ Failure ]
+crbug.com/654187 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_28.html [ Failure ]
+crbug.com/654187 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_30.html [ Failure ]
+crbug.com/654187 [ mojave nvidia-0xfe9 ] deqp/functional/gles3/framebufferblit/conversion_33.html [ Failure ]
 crbug.com/1424484 [ mac nvidia-0xfe9 ] deqp/functional/gles3/multisample/fbo_max_samples.html [ RetryOnFailure ]
 crbug.com/772651 [ mac nvidia ] conformance/glsl/bugs/vector-scalar-arithmetic-inside-loop-complex.html [ Failure ]
 crbug.com/795052 [ mac nvidia-0xfe9 ] conformance2/uniforms/draw-with-uniform-blocks.html [ Failure ]
-crbug.com/1037650 [ mac nvidia-0xfe9 ] conformance2/textures/canvas_sub_rectangle/* [ RetryOnFailure ]
-crbug.com/1414878 [ mac nvidia-0xfe9 ] conformance2/textures/video/* [ RetryOnFailure ]
-
+crbug.com/1414878 [ mojave nvidia-0xfe9 ] conformance2/textures/video/* [ RetryOnFailure ]
 crbug.com/1338004 [ mac nvidia-0xfe9 passthrough ] deqp/functional/gles3/multisample/fbo_4_samples.html [ RetryOnFailure ]
+crbug.com/1446664 [ mac nvidia-0xfe9 angle-opengl passthrough ] conformance2/rendering/vertex-id-large-count.html [ Failure ]
+crbug.com/1457723 [ bigsur nvidia-0xfe9 angle-opengl ] conformance2/textures/canvas_sub_rectangle/tex-3d-* [ Failure ]
 
 ## Mac AMD ##
 
@@ -501,8 +545,6 @@ crbug.com/1278935 [ ventura amd renderer-skia-gl angle-opengl ] deqp/functional/
 
 crbug.com/1276186 [ mac amd-0x679e angle-opengl passthrough ] conformance/rendering/clear-default-framebuffer-with-scissor-test.html [ Failure ]
 crbug.com/1276186 [ mac amd-0x67ef angle-opengl passthrough ] conformance/rendering/clear-default-framebuffer-with-scissor-test.html [ Failure ]
-crbug.com/1240443 [ mac amd-0x679e angle-opengl passthrough ] conformance/renderbuffers/stencil-renderbuffer-initialization.html [ Failure ]
-crbug.com/1240443 [ mac amd-0x67ef angle-opengl passthrough ] conformance/renderbuffers/stencil-renderbuffer-initialization.html [ Failure ]
 
 crbug.com/angleproject/5224 [ mac passthrough angle-opengl amd ] conformance2/rendering/instanced-arrays.html [ Failure ]
 crbug.com/angleproject/5225 [ mac passthrough angle-opengl amd ] conformance2/rendering/vertex-id.html [ Failure ]
@@ -523,6 +565,9 @@ crbug.com/1422032 [ mac amd-0x67ef angle-opengl ] deqp/functional/gles3/transfor
 crbug.com/1422032 [ mac amd-0x67ef angle-opengl ] deqp/functional/gles3/transformfeedback/random_interleaved_lines.html [ Failure ]
 crbug.com/1422032 [ mac amd-0x67ef angle-opengl ] deqp/functional/gles3/transformfeedback/random_interleaved_points.html [ Failure ]
 crbug.com/1422032 [ mac amd-0x67ef angle-opengl ] deqp/functional/gles3/transformfeedback/random_interleaved_triangles.html [ Failure ]
+
+
+crbug.com/1450355 [ amd angle-opengl mac ] deqp/functional/gles3/occlusionquery_strict.html [ Failure ]
 
 ## Mac Intel ##
 
@@ -561,34 +606,33 @@ crbug.com/angleproject/5221 [ mac passthrough angle-opengl intel ] deqp/function
 
 ## Mac / M1 / OpenGL ##
 
-crbug.com/angleproject/5223 [ angle-opengl apple-apple-m1 mac mac-arm64 no-asan oop-c passthrough ] conformance2/textures/misc/tex-mipmap-levels.html [ Failure ]
-crbug.com/1130112 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_combinations_00.html [ Failure ]
-crbug.com/1130112 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_combinations_02.html [ Failure ]
-crbug.com/1130112 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_combinations_04.html [ Failure ]
-crbug.com/1130112 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_sizes_03.html [ Failure ]
-crbug.com/1130112 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_sizes_04.html [ Failure ]
-crbug.com/1130117 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/multisample/fbo_4_samples.html [ Failure ]
-crbug.com/1130117 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/multisample/fbo_max_samples.html [ Failure ]
-crbug.com/1130118 [ mac apple-apple-m1 passthrough angle-opengl ] conformance2/rendering/blitframebuffer-filter-srgb.html [ Failure ]
-crbug.com/1130118 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/framebufferblit/rect_03.html [ Failure ]
-crbug.com/1130118 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/framebufferblit/rect_04.html [ Failure ]
-crbug.com/1130119 [ mac apple-apple-m1 passthrough angle-opengl ] conformance2/glsl3/vector-dynamic-indexing.html [ Failure ]
-crbug.com/1130119 [ mac apple-apple-m1 passthrough angle-opengl ] conformance2/textures/misc/tex-base-level-bug.html [ Failure ]
-crbug.com/1130119 [ mac apple-apple-m1 passthrough angle-opengl ] conformance2/rendering/framebuffer-completeness-unaffected.html [ Failure ]
-crbug.com/1130119 [ mac apple-apple-m1 passthrough angle-opengl ] conformance2/rendering/framebuffer-render-to-layer.html [ Failure ]
-crbug.com/1130119 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/fbocompleteness.html [ Failure ]
-crbug.com/1130119 [ mac apple-apple-m1 passthrough angle-opengl ] deqp/functional/gles3/shadertexturefunction/texturegrad.html [ Failure ]
-crbug.com/1240443 [ angle-opengl apple-apple-m1 monterey passthrough ] conformance/renderbuffers/stencil-renderbuffer-initialization.html [ Failure ]
+crbug.com/angleproject/5223 [ angle-opengl apple mac mac-arm64 no-asan oop-c passthrough ] conformance2/textures/misc/tex-mipmap-levels.html [ Failure ]
+crbug.com/1130112 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_combinations_00.html [ Failure ]
+crbug.com/1130112 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_combinations_02.html [ Failure ]
+crbug.com/1130112 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_combinations_04.html [ Failure ]
+crbug.com/1130112 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_sizes_03.html [ Failure ]
+crbug.com/1130112 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/texturefiltering/cube_sizes_04.html [ Failure ]
+crbug.com/1130117 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/multisample/fbo_4_samples.html [ Failure ]
+crbug.com/1130117 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/multisample/fbo_max_samples.html [ Failure ]
+crbug.com/1130118 [ mac apple passthrough angle-opengl ] conformance2/rendering/blitframebuffer-filter-srgb.html [ Failure ]
+crbug.com/1130118 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/framebufferblit/rect_03.html [ Failure ]
+crbug.com/1130118 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/framebufferblit/rect_04.html [ Failure ]
+crbug.com/1130119 [ mac apple passthrough angle-opengl ] conformance2/glsl3/vector-dynamic-indexing.html [ Failure ]
+crbug.com/1130119 [ mac apple passthrough angle-opengl ] conformance2/textures/misc/tex-base-level-bug.html [ Failure ]
+crbug.com/1130119 [ mac apple passthrough angle-opengl ] conformance2/rendering/framebuffer-completeness-unaffected.html [ Failure ]
+crbug.com/1130119 [ mac apple passthrough angle-opengl ] conformance2/rendering/framebuffer-render-to-layer.html [ Failure ]
+crbug.com/1130119 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/fbocompleteness.html [ Failure ]
+crbug.com/1130119 [ mac apple passthrough angle-opengl ] deqp/functional/gles3/shadertexturefunction/texturegrad.html [ Failure ]
 
 # Newly added tests on NVIDIA passthrough
 crbug.com/982292 [ mac nvidia angle-opengl passthrough ] conformance/extensions/webgl-multi-draw.html [ Failure ]
-crbug.com/982292 [ mac nvidia angle-opengl passthrough ] conformance/textures/misc/format-filterable-renderable.html [ Failure ]
+crbug.com/982292 [ angle-opengl mojave nvidia passthrough ] conformance/textures/misc/format-filterable-renderable.html [ Failure ]
 crbug.com/982292 [ mac nvidia angle-opengl passthrough ] conformance2/glsl3/tricky-loop-conditions.html [ Failure ]
-crbug.com/982292 [ mac nvidia angle-opengl passthrough ] conformance2/rendering/framebuffer-render-to-layer.html [ Failure ]
-crbug.com/982292 [ mac nvidia angle-opengl passthrough ] conformance2/textures/misc/tex-input-validation.html [ Failure ]
-crbug.com/982292 [ mac nvidia angle-opengl passthrough ] deqp/functional/gles3/fboinvalidate/format_02.html [ Failure ]
-crbug.com/982292 [ mac nvidia angle-opengl passthrough ] deqp/functional/gles3/framebufferblit/conversion_08.html [ Failure ]
-crbug.com/982292 [ mac nvidia angle-opengl passthrough ] deqp/functional/gles3/framebufferblit/conversion_31.html [ Failure ]
+crbug.com/982292 [ angle-opengl mojave nvidia passthrough ] conformance2/rendering/framebuffer-render-to-layer.html [ Failure ]
+crbug.com/982292 [ angle-opengl mojave nvidia passthrough ] conformance2/textures/misc/tex-input-validation.html [ Failure ]
+crbug.com/982292 [ angle-opengl mojave nvidia passthrough ] deqp/functional/gles3/fboinvalidate/format_02.html [ Failure ]
+crbug.com/982292 [ angle-opengl mojave nvidia passthrough ] deqp/functional/gles3/framebufferblit/conversion_08.html [ Failure ]
+crbug.com/982292 [ angle-opengl mojave nvidia passthrough ] deqp/functional/gles3/framebufferblit/conversion_31.html [ Failure ]
 crbug.com/982292 [ mac nvidia angle-opengl passthrough ] deqp/functional/gles3/instancedrendering.html [ Failure ]
 
 ## Mac ASAN ##
@@ -606,9 +650,9 @@ crbug.com/1081978 [ linux intel angle-opengl passthrough ] conformance2/textures
 
 ## Linux NVIDIA ##
 
+crbug.com/1453988 [ linux nvidia angle-opengl passthrough ] conformance/textures/misc/texparameter-test.html [ RetryOnFailure ]
 crbug.com/angleproject/5783 [ linux nvidia angle-opengl passthrough ] conformance2/textures/misc/immutable-tex-render-feedback.html [ Failure ]
 crbug.com/1115314 [ linux nvidia-0x2184 angle-opengl passthrough ] deqp/functional/gles3/fbocompleteness.html [ Failure ]
-crbug.com/1411726 [ linux nvidia-0x2184 angle-opengl passthrough ] conformance2/textures/image_bitmap_from_video/tex-2d-rg16f-rg-float.html [ RetryOnFailure ]
 
 ## Linux AMD RX 5500 XT ##
 
@@ -653,6 +697,14 @@ crbug.com/1143323 [ android android-pixel-2 passthrough ] conformance/rendering/
 crbug.com/1276186 [ android android-pixel-2 ] conformance2/glsl3/array-equality.html [ Failure ]
 crbug.com/angleproject/7421 [ android android-pixel-2 angle-disabled no-passthrough ] conformance2/renderbuffers/invalidate-framebuffer.html [ Failure ]
 
+crbug.com/1458040 [ android android-pixel-2 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb10_a2-rgba-unsigned_int_2_10_10_10_rev.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-2 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb565-rgb-unsigned_byte.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-2 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb565-rgb-unsigned_short_5_6_5.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-2 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb5_a1-rgba-unsigned_byte.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-2 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb5_a1-rgba-unsigned_short_5_5_5_1.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-2 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgba4-rgba-unsigned_byte.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-2 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgba4-rgba-unsigned_short_4_4_4_4.html [ Failure ]
+
 
 ## Pixel 4 ##
 
@@ -660,30 +712,19 @@ crbug.com/angleproject/7421 [ android android-pixel-2 angle-disabled no-passthro
 crbug.com/1289303 [ android-pixel-4 android-r ] conformance/textures/misc/texture-video-transparent.html [ Failure ] # finder:disable-narrowing
 
 crbug.com/1175232 [ android android-pixel-4 angle-opengles passthrough ] conformance2/reading/read-pixels-from-fbo-test.html [ Failure ]
+
+crbug.com/1458040 [ android android-pixel-4 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb10_a2-rgba-unsigned_int_2_10_10_10_rev.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-4 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb565-rgb-unsigned_byte.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-4 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb565-rgb-unsigned_short_5_6_5.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-4 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb5_a1-rgba-unsigned_byte.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-4 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgb5_a1-rgba-unsigned_short_5_5_5_1.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-4 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgba4-rgba-unsigned_byte.html [ Failure ]
+crbug.com/1458040 [ android android-pixel-4 angle-opengles passthrough ] conformance2/textures/image_bitmap_from_canvas/tex-2d-rgba4-rgba-unsigned_short_4_4_4_4.html [ Failure ]
+
 crbug.com/angleproject/3684 [ android angle-opengles ] conformance2/renderbuffers/multisample-with-full-sample-counts.html [ Failure ]
-crbug.com/angleproject/3685 [ android-pie android-pixel-2 angle-opengles ] conformance2/transform_feedback/simultaneous_binding.html [ Failure ]
 crbug.com/angleproject/3686 [ android angle-opengles ] deqp/functional/gles3/multisample/fbo_4_samples.html [ Failure ]
 crbug.com/angleproject/3686 [ android angle-opengles ] deqp/functional/gles3/multisample/fbo_max_samples.html [ Failure ]
 
-# finder:group-start crbug.com/1382796 failures happen in many tests, so can be classified as stale for one specific test
-# finder:disable-narrowing
-crbug.com/1382796 [ android android-pixel-4 ] conformance/canvas/rapid-resizing.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance/canvas/to-data-url-test.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance/context/context-release-with-workers.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance/ogles/GL/biConstants/biConstants_001_to_008.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance/textures/misc/texture-corner-case-videos.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance2/sync/sync-webgl-specific.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] deqp/data/gles3/shaders/declarations.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] deqp/functional/gles3/primitiverestart/00.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] deqp/functional/gles3/shadermatrix/mul_uniform_lowp.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] deqp/functional/gles3/shadermatrix/transpose.html [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] deqp/functional/gles3/textureshadow/* [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance/textures/image_bitmap_from_video/* [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance/textures/video/* [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance2/textures/image_bitmap_from_video/* [ RetryOnFailure ]
-crbug.com/1382796 [ android android-pixel-4 ] conformance2/textures/video/* [ RetryOnFailure ]
-# finder:enable-narrowing
-# finder:group-end
 
 
 #####################
@@ -743,27 +784,26 @@ crbug.com/1219024 [ chromeos chromeos-board-kevin ] conformance/misc/shader-prec
 crbug.com/1219024 [ chromeos chromeos-board-kevin ] conformance/rendering/blending.html [ Failure ]
 crbug.com/1219057 [ chromeos chromeos-board-kevin ] conformance2/buffers/uniform-buffers.html [ Failure ]
 
-crbug.com/1374285 [ chromeos chromeos-board-kevin passthrough ] conformance/context/context-hidden-alpha.html [ Failure ]
-crbug.com/1374285 [ chromeos chromeos-board-kevin passthrough ] conformance/renderbuffers/stencil-renderbuffer-initialization.html [ Failure ]
-crbug.com/1374285 [ chromeos chromeos-board-kevin passthrough ] conformance2/renderbuffers/multisampled-depth-renderbuffer-initialization.html [ Failure ]
+crbug.com/1446328 [ chromeos chromeos-board-kevin passthrough ] conformance/context/context-creation-and-destruction.html [ Failure ]
 crbug.com/1374285 [ chromeos chromeos-board-kevin passthrough ] conformance2/rendering/rasterizer-discard-and-implicit-clear.html [ Failure ]
 crbug.com/1285112 [ chromeos chromeos-board-kevin passthrough ] conformance2/rendering/blitframebuffer-multisampled-readbuffer.html [ Failure ]
+crbug.com/1446328 [ chromeos chromeos-board-kevin passthrough ] conformance2/rendering/vertex-id-large-count.html [ Failure ]
 crbug.com/1285114 [ chromeos chromeos-board-kevin passthrough ] conformance2/transform_feedback/transform_feedback.html [ Failure ]
 crbug.com/1286099 [ chromeos chromeos-board-kevin passthrough ] conformance2/rendering/blitframebuffer-r11f-g11f-b10f.html [ Failure ]
 
-crbug.com/1213198 [ chromeos chromeos-board-kevin no-passthrough ] WebglExtension_WEBGL_draw_instanced_base_vertex_base_instance [ Failure ]
-crbug.com/1213198 [ chromeos chromeos-board-kevin no-passthrough ] WebglExtension_WEBGL_multi_draw_instanced_base_vertex_base_instance [ Failure ]
+crbug.com/1212917 [ chromeos chromeos-board-kevin no-passthrough ] conformance/context/context-creation-and-destruction.html [ Failure ]
 crbug.com/1213198 [ chromeos chromeos-board-kevin no-passthrough ] conformance/extensions/ext-float-blend.html [ Failure ]
 crbug.com/1218157 [ chromeos chromeos-board-kevin no-passthrough ] conformance/offscreencanvas/context-lost-restored.html [ Failure ]
 crbug.com/1218157 [ chromeos chromeos-board-kevin no-passthrough ] conformance/offscreencanvas/context-lost-restored-worker.html [ Failure ]
 crbug.com/1218607 [ chromeos chromeos-board-kevin no-passthrough ] conformance2/reading/read-pixels-from-fbo-test.html [ Failure ]
 crbug.com/1219024 [ chromeos chromeos-board-kevin no-passthrough ] conformance2/rendering/framebuffer-render-to-layer.html [ Failure ]
-crbug.com/1212917 [ chromeos chromeos-board-kevin no-passthrough ] conformance/context/context-creation-and-destruction.html [ Failure ]
+crbug.com/1219024 [ chromeos chromeos-board-kevin no-passthrough ] conformance2/rendering/rasterizer-discard-and-implicit-clear.html [ Failure ]
+crbug.com/1446328 [ chromeos chromeos-board-kevin no-passthrough ] conformance2/textures/canvas/tex-2d-srgb8_alpha8-rgba-unsigned_byte.html [ Failure ]
+crbug.com/1213198 [ chromeos chromeos-board-kevin no-passthrough ] WebglExtension_WEBGL_draw_instanced_base_vertex_base_instance [ Failure ]
+crbug.com/1213198 [ chromeos chromeos-board-kevin no-passthrough ] WebglExtension_WEBGL_multi_draw_instanced_base_vertex_base_instance [ Failure ]
 
-crbug.com/1441195 [ chromeos chromeos-board-kevin no-passthrough ] conformance/canvas/framebuffer-bindings-unaffected-on-resize.html [ RetryOnFailure ]
 crbug.com/1441195 [ chromeos chromeos-board-kevin no-passthrough ] conformance2/extensions/oes-draw-buffers-indexed.html [ Failure ]
 crbug.com/1441195 [ chromeos chromeos-board-kevin no-passthrough ] conformance2/rendering/framebuffer-mismatched-attachment-targets.html [ Failure ]
-crbug.com/1441195 [ chromeos chromeos-board-kevin no-passthrough ] conformance2/textures/canvas/tex-2d-srgb8_alpha8-rgba-unsigned_byte.html [ RetryOnFailure ]
 
 crbug.com/1232106 [ chromeos chromeos-board-amd64-generic no-passthrough ] conformance/extensions/webgl-compressed-texture-astc.html [ Failure ]
 crbug.com/1232118 [ angle-opengles chromeos chromeos-board-amd64-generic passthrough ] conformance/uniforms/uniform-samplers-test.html [ Failure ]
@@ -771,7 +811,6 @@ crbug.com/1238075 [ chromeos chromeos-board-amd64-generic ] conformance/renderin
 crbug.com/1241179 [ chromeos chromeos-board-amd64-generic passthrough ] conformance2/extensions/ext-texture-norm16.html [ Failure ]
 crbug.com/1241183 [ chromeos chromeos-board-amd64-generic passthrough ] conformance2/textures/misc/immutable-tex-render-feedback.html [ Failure ]
 crbug.com/1399117 [ chromeos chromeos-board-amd64-generic passthrough ] WebglExtension_WEBGL_provoking_vertex [ Skip ]
-crbug.com/1426916 [ chromeos chromeos-board-amd64-generic passthrough ] conformance/textures/misc/tex-image-and-sub-image-2d-with-array-buffer-view.html [ Failure ]
 
 # Must investigate ChromeOS failures with passthrough command decoder.
 crbug.com/angleproject/5038 [ chromeos passthrough ] conformance/extensions/ext-color-buffer-half-float.html [ Failure ]
@@ -783,8 +822,20 @@ crbug.com/angleproject/5038 [ chromeos chromeos-board-amd64-generic mesa_ge_21.0
 # Lacros failures #
 #####################
 
-crbug.com/1392806 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/rendering/blitframebuffer-multisampled-readbuffer.html [ Failure ]
-crbug.com/1392806 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/rendering/blitframebuffer-r11f-g11f-b10f.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-octopus passthrough ] conformance2/textures/misc/immutable-tex-render-feedback.html [ Failure ]
+
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance/glsl/bugs/constant-precision-qualifier.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance/limits/gl-max-texture-dimensions.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance/misc/shader-precision-format.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/buffers/uniform-buffers.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/glsl3/array-as-return-value.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/glsl3/matrix-row-major.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/glsl3/tricky-loop-conditions.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/glsl3/uninitialized-local-global-variables.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/reading/read-pixels-pack-parameters.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/rendering/blitframebuffer-r11f-g11f-b10f.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/textures/misc/immutable-tex-render-feedback.html [ Failure ]
+crbug.com/1446435 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/transform_feedback/transform_feedback.html [ Failure ]
 
 ##############################
 # Lacros-like Linux Failures #
@@ -838,6 +889,27 @@ crbug.com/1399117 [ linux intel display-server-wayland no-passthrough ] WebglExt
 # Conflicts if between a generic os condition and a specific version
 #[ highsierra nvidia debug angle-opengl ] WebglExtension_test_10 [ Failure ]
 #[ mac nvidia debug angle-opengl ] WebglExtension_test_10 [ Failure ]
+
+###############################
+# New failures in WebGL rolls #
+###############################
+
+# Roll WebGL d1b65aa..b934957.
+crbug.com/1448567 [ android ] conformance2/transform_feedback/simultaneous_binding.html [ Failure ]
+crbug.com/1448567 [ chromeos ] conformance2/transform_feedback/simultaneous_binding.html [ Failure ]
+crbug.com/1448567 [ linux ] conformance2/transform_feedback/simultaneous_binding.html [ Failure ]
+crbug.com/1448567 [ mac ] conformance2/transform_feedback/simultaneous_binding.html [ Failure ]
+crbug.com/1448567 [ win ] conformance2/transform_feedback/simultaneous_binding.html [ Failure ]
+crbug.com/1448570 [ android-pixel-4 angle-disabled no-passthrough ] conformance/extensions/webgl-compressed-texture-etc.html [ Failure ]
+crbug.com/1448570 [ android-pixel-4 angle-disabled no-passthrough ] conformance/extensions/webgl-compressed-texture-etc1.html [ Failure ]
+crbug.com/1448570 [ android android-pixel-2 angle-disabled no-passthrough ] conformance/extensions/webgl-compressed-texture-etc.html [ Failure ]
+crbug.com/1448570 [ android android-pixel-2 angle-disabled no-passthrough ] conformance/extensions/webgl-compressed-texture-etc1.html [ Failure ]
+crbug.com/1405252 [ chromeos chromeos-board-kevin no-passthrough ] conformance/extensions/webgl-compressed-texture-astc.html [ Failure ]
+crbug.com/1405252 [ chromeos chromeos-board-kevin no-passthrough ] conformance/extensions/webgl-compressed-texture-etc.html [ Failure ]
+crbug.com/1405252 [ chromeos chromeos-board-kevin no-passthrough ] conformance/extensions/webgl-compressed-texture-etc1.html [ Failure ]
+crbug.com/1448569 [ win angle-d3d11 ] conformance2/glsl3/texture-bias.html [ Failure ]
+crbug.com/1450357 [ chromeos lacros-chrome chromeos-board-jacuzzi passthrough ] conformance2/glsl3/texture-bias.html [ Failure ]
+crbug.com/1450367 [ chromeos chromeos-board-amd64-generic passthrough ] conformance2/extensions/webgl-clip-cull-distance.html [ Failure ]
 
 #######################################################################
 # Automated Entries After This Point - Do Not Manually Add Below Here #

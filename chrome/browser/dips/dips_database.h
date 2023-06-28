@@ -18,9 +18,6 @@
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 
-// TODO(crbug.com/1342228): This is currently in-memory only. Add support for a
-// persistent SQLite database to be used for non-OTR profiles.
-//
 // Encapsulates an SQL database that holds DIPS info.
 class DIPSDatabase {
  public:
@@ -39,12 +36,21 @@ class DIPSDatabase {
   DIPSDatabase(const DIPSDatabase&) = delete;
   DIPSDatabase& operator=(const DIPSDatabase&) = delete;
 
-  // Updates `db_` to use the latest schema.
-  // Returns whether the migration was successful.
-  bool UpdateSchema();
+  // Updates `db_` to use the latest schema. Returns whether the migration was
+  // successful.
+  bool MigrateAsNeeded();
 
-  // Migrates from v1 to v2 of the DIPS database schema.
+  // Migrates from v1 to v2 of the DIPS database schema. This migration:
+  // - Makes all timestamp columns nullable instead of using base::Time() as
+  // default.
+  // - Replaces both the first and last stateless bounce columns to track the
+  // first and last bounce times instead.
   bool MigrateToVersion2();
+
+  // Migrates from v2 to v3 of the DIPS database schema. This migration adds two
+  // extra columns for recording the first and last time a web authn assertion
+  // was called.
+  bool MigrateToVersion3();
 
   // DIPS Bounce table functions -----------------------------------------------
   bool Write(const std::string& site,
@@ -69,8 +75,7 @@ class DIPSDatabase {
   // - it's still in its grace period after the first bounce
   // - it received user interaction before the first bounce
   // - it received user interaction in the grace period after the first bounce
-  std::vector<std::string> GetSitesThatBounced(
-      const base::TimeDelta& grace_period);
+  std::vector<std::string> GetSitesThatBounced(base::TimeDelta grace_period);
 
   // Returns all sites which used storage and aren't protected from DIPS.
   //
@@ -79,7 +84,7 @@ class DIPSDatabase {
   // - it received user interaction before the first storage
   // - it received user interaction in the grace period after the first storage
   std::vector<std::string> GetSitesThatUsedStorage(
-      const base::TimeDelta& grace_period);
+      base::TimeDelta grace_period);
 
   // Returns all sites which statefully bounced the user and aren't protected
   // from DIPS.
@@ -90,7 +95,7 @@ class DIPSDatabase {
   // - it received user interaction in the grace period after the first stateful
   //   bounce
   std::vector<std::string> GetSitesThatBouncedWithState(
-      const base::TimeDelta& grace_period);
+      base::TimeDelta grace_period);
 
   // Deletes all rows in the database whose interactions have expired out.
   //
@@ -165,6 +170,7 @@ class DIPSDatabase {
   sql::InitStatus Init();
   sql::InitStatus InitImpl();
   sql::InitStatus OpenDatabase();
+  // Creates the bounce table following the latest schema.
   bool InitTables();
 
   // Internal utility functions ------------------------------------------------

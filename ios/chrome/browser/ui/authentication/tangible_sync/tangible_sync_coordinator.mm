@@ -5,7 +5,7 @@
 #import "ios/chrome/browser/ui/authentication/tangible_sync/tangible_sync_coordinator.h"
 
 #import "base/metrics/histogram_functions.h"
-#import "components/sync/driver/sync_service.h"
+#import "components/sync/service/sync_service.h"
 #import "ios/chrome/browser/consent_auditor/consent_auditor_factory.h"
 #import "ios/chrome/browser/first_run/first_run_metrics.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
@@ -81,7 +81,6 @@ constexpr signin_metrics::AccessPoint kTangibleSyncAccessPoint =
   [super start];
   _viewController = [[TangibleSyncViewController alloc] init];
   _viewController.delegate = self;
-  _viewController.modalInPresentation = YES;
   ChromeBrowserState* browserState = self.browser->GetBrowserState();
   AuthenticationService* authenticationService =
       AuthenticationServiceFactory::GetForBrowserState(browserState);
@@ -104,6 +103,7 @@ constexpr signin_metrics::AccessPoint kTangibleSyncAccessPoint =
   _mediator.consumer = _viewController;
   _mediator.delegate = self;
   if (_firstRun) {
+    _viewController.modalInPresentation = YES;
     base::UmaHistogramEnumeration("FirstRun.Stage",
                                   first_run::kTangibleSyncScreenStart);
   }

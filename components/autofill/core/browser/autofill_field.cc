@@ -25,6 +25,15 @@ namespace autofill {
 using FieldPrediction =
     AutofillQueryResponse::FormSuggestion::FieldSuggestion::FieldPrediction;
 
+template <>
+struct DenseSetTraits<FieldPrediction::Source> {
+  static constexpr FieldPrediction::Source kMinValue =
+      FieldPrediction::Source(0);
+  static constexpr FieldPrediction::Source kMaxValue =
+      FieldPrediction::Source_MAX;
+  static constexpr bool kPacked = false;
+};
+
 namespace {
 
 // Returns true, if the prediction is non-experimental and should be used by
@@ -33,10 +42,10 @@ namespace {
 // default prediction. We don't need to store it, because its meaning is that
 // there is no default prediction.
 bool IsDefaultPrediction(const FieldPrediction& prediction) {
-  constexpr DenseSet<FieldPrediction::Source, FieldPrediction::Source_MAX>
-      default_sources = {FieldPrediction::SOURCE_AUTOFILL_DEFAULT,
-                         FieldPrediction::SOURCE_PASSWORDS_DEFAULT,
-                         FieldPrediction::SOURCE_OVERRIDE};
+  constexpr DenseSet<FieldPrediction::Source> default_sources = {
+      FieldPrediction::SOURCE_AUTOFILL_DEFAULT,
+      FieldPrediction::SOURCE_PASSWORDS_DEFAULT,
+      FieldPrediction::SOURCE_OVERRIDE};
   return default_sources.contains(prediction.source());
 }
 
@@ -158,11 +167,11 @@ DenseSet<HtmlFieldType> BelievedHtmlTypes(ServerFieldType heuristic_prediction,
         features::kAutofillServerPrecedenceScopeOverAutocomplete.Get());
   }
   // If the field is credit-card related or the feature
-  // `kAutofillFillAndImportFromMoreFields` is enabled, we always override
-  // unrecognized autocomplete attributes.
+  // `kAutofillPredictionsForAutocompleteUnrecognized` is enabled, we always
+  // override unrecognized autocomplete attributes.
   if (is_credit_card_prediction ||
       base::FeatureList::IsEnabled(
-          features::kAutofillFillAndImportFromMoreFields)) {
+          features::kAutofillPredictionsForAutocompleteUnrecognized)) {
     believed_html_types.erase(HtmlFieldType::kUnrecognized);
   }
   return believed_html_types;
@@ -320,9 +329,16 @@ AutofillType AutofillField::ComputedType() const {
     return AutofillType(server_type());
   }
 
-  // If the explicit type is cc-exp and either the server or heuristics agree
-  // on a 2 vs 4 digit specialization of cc-exp, use that specialization.
-  if (html_type_ == HtmlFieldType::kCreditCardExp) {
+  // TODO(crbug/1441057) Delete this if-statement when
+  // features::kAutofillEnableExpirationDateImprovements has launched. This
+  // should be covered by
+  // FormStructureRationalizer::RationalizeAutocompleteAttributes.
+  //
+  // If the explicit type is cc-exp and either the server or heuristics agree on
+  // a 2 vs 4 digit specialization of cc-exp, use that specialization.
+  if (html_type_ == HtmlFieldType::kCreditCardExp &&
+      !base::FeatureList::IsEnabled(
+          features::kAutofillEnableExpirationDateImprovements)) {
     if (server_type() == CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR ||
         server_type() == CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR) {
       return AutofillType(server_type());
@@ -436,12 +452,9 @@ bool AutofillField::HasExpirationDateType() const {
   return base::Contains(kExpirationDateTypes, Type().GetStorableType());
 }
 
-bool AutofillField::HasPredictionDespiteUnrecognizedAutocompleteAttribute()
-    const {
+bool AutofillField::ShouldSuppressSuggestionsAndFillingByDefault() const {
   return html_type_ == HtmlFieldType::kUnrecognized &&
-         !IsCreditCardPrediction() &&
-         base::FeatureList::IsEnabled(
-             features::kAutofillFillAndImportFromMoreFields);
+         !server_type_prediction_is_override() && !IsCreditCardPrediction();
 }
 
 void AutofillField::SetPasswordRequirements(PasswordRequirementsSpec spec) {
@@ -485,7 +498,11 @@ void AutofillField::AppendLogEventIfNotRepeated(
 }
 
 FormControlType AutofillField::FormControlType() const {
-  if (form_control_type == "text") {
+  // Keep in sync with https://html.spec.whatwg.org/#attr-input-type.
+  if (form_control_type == "text" || form_control_type == "search" ||
+      form_control_type == "tel" || form_control_type == "url" ||
+      form_control_type == "email" || form_control_type == "password" ||
+      form_control_type == "number") {
     return FormControlType::kText;
   } else if (form_control_type == "textarea") {
     return FormControlType::kTextarea;
@@ -495,6 +512,8 @@ FormControlType AutofillField::FormControlType() const {
     return FormControlType::kRadio;
   } else if (form_control_type == "select-one") {
     return FormControlType::kSelectOne;
+  } else if (form_control_type == "selectmenu") {
+    return FormControlType::kSelectmenu;
   } else if (form_control_type == "") {
     return FormControlType::kEmpty;
   } else {

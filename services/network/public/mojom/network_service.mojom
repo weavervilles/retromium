@@ -7,6 +7,7 @@ module network.mojom;
 import "mojo/public/mojom/base/byte_string.mojom";
 import "mojo/public/mojom/base/file.mojom";
 import "mojo/public/mojom/base/memory_pressure_level.mojom";
+import "mojo/public/mojom/base/read_only_file.mojom";
 import "mojo/public/mojom/base/time.mojom";
 import "mojo/public/mojom/base/values.mojom";
 import "sandbox/policy/mojom/context.mojom";
@@ -280,8 +281,11 @@ interface NetworkService {
   // network interfaces. Corresponds to enum net::HostAddressSelectionPolicy.
   GetNetworkList(uint32 policy) => (array<NetworkInterface>? networks);
 
-  // Notification that the certificate database has been modified.
-  OnCertDBChanged();
+  // Notification that the certificate trust store has been modified.
+  OnTrustStoreChanged();
+
+  // Notification that the client certificate store has been modified.
+  OnClientCertStoreChanged();
 
   // Send the encryption key to the network service to use for AES encryption.
   SetEncryptionKey(mojo_base.mojom.ByteString encryption_key);
@@ -358,6 +362,15 @@ interface NetworkService {
   // be restricted.
   SetExplicitlyAllowedPorts(array<uint16> ports);
 
+  // Updates the Masked Domain List data used to generate custom proxy configs
+  // for the Privacy Proxy. Any existing NetworkContexts that are using the
+  // custom proxy configs will have their configs updated.
+  //
+  // |raw_mdl| contains the byte string representation of the MaskedDomainList
+  // proto. See the proto definition at
+  // //components/privacy_sandbox/masked_domain_list/masked_domain_list.proto.
+  UpdateMaskedDomainList(mojo_base.mojom.ByteString raw_mdl);
+
   // Parses response headers and returns a structured version to the caller.
   // This call originates from the browser process. Used for navigations when
   // the URLLoader didn't provide ParsedHeader in the first place. This happens
@@ -373,4 +386,13 @@ interface NetworkService {
   // URLLoaderNetworkServiceObserver::OnDataUseUpdate. By default it's not
   // enabled.
   EnableDataUseUpdates(bool enable);
+};
+
+// Service that tests new process overhead on Android.
+// TODO(http://crbug.com/1395707): Remove this once
+// --disable-features=NetworkServiceInProcess2 is launched stable.
+[EnableIf=is_android, ServiceSandbox=sandbox.mojom.Sandbox.kNetwork]
+interface EmptyNetworkService {
+  // Test function to check if the service is available. Returns same `value`.
+  Ping(int32 value) => (int32 value);
 };

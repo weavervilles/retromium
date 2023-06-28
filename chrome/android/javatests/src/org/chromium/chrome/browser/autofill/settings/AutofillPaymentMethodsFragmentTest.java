@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,7 +75,6 @@ public class AutofillPaymentMethodsFragmentTest {
 
     // Card Issuer values that map to the browser CreditCard.Issuer enum.
     private static final int CARD_ISSUER_UNKNOWN = 0;
-    private static final int CARD_ISSUER_GOOGLE = 1;
 
     private static final CreditCard SAMPLE_CARD_VISA = new CreditCard(/* guid= */ "",
             /* origin= */ "",
@@ -300,30 +300,46 @@ public class AutofillPaymentMethodsFragmentTest {
     @Features.EnableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_PAYMENTS_MANDATORY_REAUTH})
     // Use the policy to simulate AutofillCreditCard is disabled.
     @Policies.Add({ @Policies.Item(key = "AutofillCreditCardEnabled", string = "false") })
-    public void testMandatoryReauthToggle_notShownWhenAutofillDisabled() throws Exception {
-        // Simulate the user can authenticate with biometric.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(true);
-
+    public void testMandatoryReauthToggle_disabledWhenAutofillDisabled() throws Exception {
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
-        // Verify that Reauth toggle is not shown when Autofill toggle is disabled. The preferences
-        // on the initial screen map are Save and Fill toggle + Payment Apps (No add card button
-        // when Autofill is disabled).
-        Assert.assertEquals(2, getPreferenceScreen(activity).getPreferenceCount());
+        // Verify that Reauth toggle is shown but greyed out when Autofill toggle is disabled.
+        Assert.assertFalse(getMandatoryReauthPreference(activity).isEnabled());
     }
 
     @Test
     @MediumTest
     @Features.EnableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_PAYMENTS_MANDATORY_REAUTH})
-    public void testMandatoryReauthToggle_notShownWhenBiometricIsDisabled() throws Exception {
-        // Simulate the user can't authenticate with biometric.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(false);
+    public void testMandatoryReauthToggle_disabledWhenBothBiometricAndScreenLockAreDisabled()
+            throws Exception {
+        // Simulate the user can't authenticate with neither biometric nor screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock())
+                .thenReturn(false);
 
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
-        // Verify that the preferences on the initial screen map are Save and Fill toggle + Add Card
-        // button + Payment Apps.
-        Assert.assertEquals(3, getPreferenceScreen(activity).getPreferenceCount());
+        Assert.assertFalse(getMandatoryReauthPreference(activity).isEnabled());
+    }
+
+    @Test
+    @MediumTest
+    @Features.EnableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_PAYMENTS_MANDATORY_REAUTH})
+    public void testMandatoryReauthToggle_disabledWithCorrespondingPrefValue() throws Exception {
+        // Simulate the pref was enabled previously, to ensure the toggle value is set
+        // correspondingly.
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, true);
+        });
+        // Simulate the user can't authenticate with neither biometric nor screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock())
+                .thenReturn(false);
+
+        SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
+
+        Assert.assertFalse(getMandatoryReauthPreference(activity).isEnabled());
+        // Also verify that the Reauth toggle is disabled with the corresponding pref value (greyed
+        // out whe pref = ON).
+        Assert.assertTrue(getMandatoryReauthPreference(activity).isChecked());
     }
 
     @Test
@@ -335,8 +351,8 @@ public class AutofillPaymentMethodsFragmentTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, true);
         });
-        // Simulate the user can authenticate with biometric, so that Reauth toggle can be shown.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(true);
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
 
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
@@ -349,6 +365,7 @@ public class AutofillPaymentMethodsFragmentTest {
                 activity.getString(
                         R.string.autofill_settings_page_enable_payment_method_mandatory_reauth_label));
         Assert.assertTrue(mandatoryReauthPreference.isChecked());
+        Assert.assertTrue(mandatoryReauthPreference.isEnabled());
     }
 
     @Test
@@ -359,8 +376,8 @@ public class AutofillPaymentMethodsFragmentTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, false);
         });
-        // Simulate the user can authenticate with biometric, so that Reauth toggle can be shown.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(true);
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
 
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
@@ -370,14 +387,11 @@ public class AutofillPaymentMethodsFragmentTest {
         // Simulate the biometric authentication will succeed.
         setUpBiometricAuthenticationResult(/*success=*/true);
         // Simulate click on the Reauth toggle, trying to toggle on. Now Chrome is waiting for OS
-        // authentication.
+        // authentication which should succeed.
         TestThreadUtils.runOnUiThreadBlocking(getMandatoryReauthPreference(activity)::performClick);
-        // Now call onResume to simulate bringing the settings page back to foreground, which will
-        // rebuild the fragment.
-        TestThreadUtils.runOnUiThreadBlocking(activity.getMainFragment()::onResume);
 
         verify(mReauthenticatorMock).reauthenticate(notNull(), /*useLastValidReauth=*/eq(false));
-        // Verify that the refreshed Reauth toggle is now checked.
+        // Verify that the Reauth toggle is now checked.
         Assert.assertTrue(getMandatoryReauthPreference(activity).isChecked());
     }
 
@@ -389,8 +403,8 @@ public class AutofillPaymentMethodsFragmentTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, true);
         });
-        // Simulate the user can authenticate with biometric, so that Reauth toggle can be shown.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(true);
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
 
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
@@ -400,14 +414,11 @@ public class AutofillPaymentMethodsFragmentTest {
         // Simulate the biometric authentication will fail.
         setUpBiometricAuthenticationResult(/*success=*/false);
         // Simulate click on the Reauth toggle, trying to toggle off. Now Chrome is waiting for OS
-        // authentication.
+        // authentication which should fail.
         TestThreadUtils.runOnUiThreadBlocking(getMandatoryReauthPreference(activity)::performClick);
-        // Now call onResume to simulate bringing the settings page back to foreground, which will
-        // rebuild the fragment.
-        TestThreadUtils.runOnUiThreadBlocking(activity.getMainFragment()::onResume);
 
         verify(mReauthenticatorMock).reauthenticate(notNull(), /*useLastValidReauth=*/eq(false));
-        // Verify that the refreshed Reauth toggle is still checked since authentication failed.
+        // Verify that the Reauth toggle is still checked since authentication failed.
         Assert.assertTrue(getMandatoryReauthPreference(activity).isChecked());
     }
 
@@ -420,8 +431,8 @@ public class AutofillPaymentMethodsFragmentTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, true);
         });
-        // Simulate the user can authenticate with biometric, so that Reauth toggle can be shown.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(true);
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
 
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
@@ -454,8 +465,8 @@ public class AutofillPaymentMethodsFragmentTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, true);
         });
-        // Simulate the user can authenticate with biometric, so that Reauth toggle can be shown.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(true);
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
 
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
@@ -468,12 +479,9 @@ public class AutofillPaymentMethodsFragmentTest {
 
         // Simulate the biometric authentication will fails.
         setUpBiometricAuthenticationResult(/*success=*/false);
-        // Simulate click on the local card widget. Now Chrome is waiting for OS authentication.
+        // Simulate click on the local card widget. Now Chrome is waiting for OS authentication
+        // which should fail and hence the payment methods page should still be open.
         TestThreadUtils.runOnUiThreadBlocking(cardPreference::performClick);
-        // Now mReauthenticatorMock simulates failed authentication, which will stay on the payment
-        // methods page. Thus call onResume to simulate bringing the settings page back to
-        // foreground, which will rebuild the fragment.
-        TestThreadUtils.runOnUiThreadBlocking(activity.getMainFragment()::onResume);
 
         verify(mReauthenticatorMock).reauthenticate(notNull(), /*useLastValidReauth=*/eq(false));
         // Verify that the local card edit dialog was NOT shown.
@@ -520,8 +528,8 @@ public class AutofillPaymentMethodsFragmentTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, false);
         });
-        // Simulate the user can authenticate with biometric, so that Reauth toggle can be shown.
-        when(mReauthenticatorMock.canUseAuthentication()).thenReturn(true);
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
 
         SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
 
@@ -539,6 +547,90 @@ public class AutofillPaymentMethodsFragmentTest {
         rule.waitForFragmentToBeShown();
 
         verify(mReauthenticatorMock, never())
+                .reauthenticate(notNull(), /*useLastValidReauth=*/eq(false));
+        // Verify that the local card edit dialog was shown.
+        Assert.assertTrue(rule.getLastestShownFragment() instanceof AutofillLocalCardEditor);
+    }
+
+    @Test
+    @MediumTest
+    @Features.EnableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_PAYMENTS_MANDATORY_REAUTH})
+    public void testLocalCardEditWithReauth_turnOnReauthAndVerifyReauthOnClick() throws Exception {
+        mAutofillTestHelper.setCreditCard(SAMPLE_LOCAL_CARD);
+
+        // Initial state, Reauth pref is disabled by default.
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, false);
+        });
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
+
+        SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
+
+        // Simulate the biometric authentication will succeed.
+        setUpBiometricAuthenticationResult(/*success=*/true);
+        // Simulate click on the Reauth toggle, trying to toggle on. Now Chrome is waiting for OS
+        // authentication which should succeed.
+        TestThreadUtils.runOnUiThreadBlocking(getMandatoryReauthPreference(activity)::performClick);
+
+        // Get the local card's widget.
+        Preference cardPreference = getPreferenceScreen(activity).getPreference(2);
+        String title = cardPreference.getTitle().toString();
+        assertThat(title).contains("Visa");
+        assertThat(title).contains("1111");
+
+        // Simulate click on the local card widget. Now Chrome is waiting for OS authentication.
+        TestThreadUtils.runOnUiThreadBlocking(cardPreference::performClick);
+        // Now mReauthenticatorMock simulate success auth, which will open local card dialog
+        // afterwards. Wait for the new dialog to be rendered.
+        rule.waitForFragmentToBeShown();
+
+        // Verify there were 2 biometric authentication attempts, once for enabling mandatory
+        // reauth, and another time for opening the local card edit page.
+        verify(mReauthenticatorMock, times(2))
+                .reauthenticate(notNull(), /*useLastValidReauth=*/eq(false));
+        // Verify that the local card edit dialog was shown.
+        Assert.assertTrue(rule.getLastestShownFragment() instanceof AutofillLocalCardEditor);
+    }
+
+    @Test
+    @MediumTest
+    @Features.EnableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_PAYMENTS_MANDATORY_REAUTH})
+    public void testLocalCardEditWithReauth_turnOffReauthAndVerifyNoReauthOnClick()
+            throws Exception {
+        mAutofillTestHelper.setCreditCard(SAMPLE_LOCAL_CARD);
+
+        // Simulate Reauth pref is enabled.
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            getPrefService().setBoolean(Pref.AUTOFILL_PAYMENT_METHODS_MANDATORY_REAUTH, true);
+        });
+        // Simulate the user can authenticate with biometric or screen lock.
+        when(mReauthenticatorMock.canUseAuthenticationWithBiometricOrScreenLock()).thenReturn(true);
+
+        SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
+
+        // Simulate the biometric authentication will succeed.
+        setUpBiometricAuthenticationResult(/*success=*/true);
+        // Simulate click on the Reauth toggle, trying to toggle off. Now Chrome is waiting for OS
+        // authentication which should succeed.
+        TestThreadUtils.runOnUiThreadBlocking(getMandatoryReauthPreference(activity)::performClick);
+
+        // Get the local card's widget.
+        Preference cardPreference = getPreferenceScreen(activity).getPreference(2);
+        String title = cardPreference.getTitle().toString();
+        assertThat(title).contains("Visa");
+        assertThat(title).contains("1111");
+
+        // Simulate click on the local card widget.
+        TestThreadUtils.runOnUiThreadBlocking(cardPreference::performClick);
+        // Since reauth pref is disabled, we will directly open local card dialog. Wait for the new
+        // dialog to be rendered.
+        rule.waitForFragmentToBeShown();
+
+        // Verify there was only 1 biometric authentication attempt, for disabling mandatory reauth.
+        // After disabling, biometric authentication challenge should not be presented to open the
+        // local card edit page.
+        verify(mReauthenticatorMock, times(1))
                 .reauthenticate(notNull(), /*useLastValidReauth=*/eq(false));
         // Verify that the local card edit dialog was shown.
         Assert.assertTrue(rule.getLastestShownFragment() instanceof AutofillLocalCardEditor);

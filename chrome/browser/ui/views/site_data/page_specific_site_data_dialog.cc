@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/views/site_data/site_data_row_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browsing_data/content/browsing_data_model.h"
+#include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
@@ -300,6 +301,9 @@ class PageSpecificSiteDataDialogModelDelegate : public ui::DialogModelDelegate {
 
     RecordPageSpecificSiteDataDialogAction(
         PageSpecificSiteDataDialogAction::kSiteDeleted);
+
+    browsing_data::RecordDeleteBrowsingDataAction(
+        browsing_data::DeleteBrowsingDataAction::kCookiesInUseDialog);
   }
 
   void SetContentException(const url::Origin& origin, ContentSetting setting) {
@@ -506,8 +510,10 @@ class PageSpecificSiteDataDialogModelDelegate : public ui::DialogModelDelegate {
   // the actual content settings to determine the state.
   std::unique_ptr<CookiesTreeModel> allowed_cookies_tree_model_;
   std::unique_ptr<CookiesTreeModel> blocked_cookies_tree_model_;
-  raw_ptr<BrowsingDataModel> allowed_browsing_data_model_for_testing_ = nullptr;
-  raw_ptr<BrowsingDataModel> blocked_browsing_data_model_for_testing_ = nullptr;
+  raw_ptr<BrowsingDataModel, DanglingUntriaged>
+      allowed_browsing_data_model_for_testing_ = nullptr;
+  raw_ptr<BrowsingDataModel, DanglingUntriaged>
+      blocked_browsing_data_model_for_testing_ = nullptr;
   std::unique_ptr<FaviconCache> favicon_cache_;
   scoped_refptr<content_settings::CookieSettings> cookie_settings_;
   raw_ptr<HostContentSettingsMap> host_content_settings_map_;

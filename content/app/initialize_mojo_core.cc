@@ -13,7 +13,6 @@
 #include "content/public/common/content_switches.h"
 #include "mojo/core/embedder/configuration.h"
 #include "mojo/core/embedder/embedder.h"
-#include "mojo/core/embedder/features.h"
 #include "mojo/public/c/system/functions.h"
 #include "mojo/public/c/system/types.h"
 #include "mojo/public/cpp/base/shared_memory_utils.h"
@@ -57,6 +56,7 @@ void InitializeMojoCore() {
       config.force_direct_shared_memory_allocation = true;
   } else {
 #if BUILDFLAG(IS_WIN)
+<<<<<<< HEAD
     if (base::win::GetVersion() >= base::win::Version::WIN8_1) {
       // On Windows 8.1 and later it's not necessary to broker shared memory
       // allocation, as even sandboxed processes can allocate their own without
@@ -67,6 +67,11 @@ void InitializeMojoCore() {
     // On Android we run a Finch experiment testing direct memory allocation.
     config.force_direct_shared_memory_allocation = base::FeatureList::IsEnabled(
         mojo::core::kMojoDirectSharedMemoryAndroid);
+=======
+    // On Windows it's not necessary to broker shared memory allocation, as
+    // even sandboxed processes can allocate their own without trouble.
+    config.force_direct_shared_memory_allocation = true;
+>>>>>>> 4abd918b29516f4a97125e618c490f82492b935b
 #endif
   }
 
@@ -93,7 +98,8 @@ void InitializeMojoCore() {
   // Note #2: some platforms can directly allocated shared memory in a
   // sandboxed process. The defines below must be in sync with the
   // implementation of mojo::NodeController::CreateSharedBuffer().
-#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_FUCHSIA)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_FUCHSIA) && \
+    !BUILDFLAG(IS_ANDROID)
   if (sandbox::policy::IsUnsandboxedSandboxType(
           sandbox::policy::SandboxTypeFromCommandLine(
               *base::CommandLine::ForCurrentProcess()))) {

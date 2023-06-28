@@ -62,7 +62,8 @@ class AndroidAutofillManager : public AutofillManager {
   void OnDidPreviewAutofillFormDataImpl() override {}
   void OnDidEndTextFieldEditingImpl() override {}
   void OnHidePopupImpl() override;
-  void OnSelectFieldOptionsDidChangeImpl(const FormData& form) override {}
+  void OnSelectOrSelectMenuFieldOptionsDidChangeImpl(
+      const FormData& form) override {}
 
   void Reset() override;
   void OnContextMenuShownInField(const FormGlobalId& form_global_id,
@@ -108,8 +109,7 @@ class AndroidAutofillManager : public AutofillManager {
       const FormData& form,
       const FormFieldData& field,
       const gfx::RectF& bounding_box,
-      AutoselectFirstSuggestion autoselect_first_suggestion,
-      FormElementWasClicked form_element_was_clicked) override;
+      AutofillSuggestionTriggerSource trigger_source) override;
 
   void OnFocusOnFormFieldImpl(const FormData& form,
                               const FormFieldData& field,

@@ -4,7 +4,9 @@
 #include "device/vr/openxr/openxr_platform_helper.h"
 
 #include <memory>
+#include <utility>
 
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/version.h"
 #include "build/build_config.h"
@@ -45,19 +47,45 @@ OpenXrPlatformHelper::GetExtensionEnumeration() const {
 }
 
 XrResult OpenXrPlatformHelper::CreateInstance(XrInstance* instance) {
-  return CreateInstance(instance, absl::nullopt);
+  return CreateInstance(instance, nullptr);
 }
 
-XrResult OpenXrPlatformHelper::CreateInstance(
-    XrInstance* instance,
-    absl::optional<OpenXrCreateInfo> create_info) {
+void OpenXrPlatformHelper::CreateInstanceWithCreateInfo(
+    absl::optional<OpenXrCreateInfo> create_info,
+    CreateInstanceCallback callback) {
+  DVLOG(1) << __func__;
+  CHECK(initialized_);
+
+  if (create_info.has_value()) {
+    GetPlatformCreateInfo(
+        create_info.value(),
+        base::BindOnce(&OpenXrPlatformHelper::OnPlatformCreateInfoResult,
+                       base::Unretained(this), std::move(callback)));
+  } else {
+    OnPlatformCreateInfoResult(std::move(callback), nullptr);
+  }
+}
+
+void OpenXrPlatformHelper::OnPlatformCreateInfoResult(
+    CreateInstanceCallback callback,
+    void* instance_create_info) {
+  DVLOG(1) << __func__;
+  XrInstance instance;
+  XrResult result = CreateInstance(&instance, instance_create_info);
+  std::move(callback).Run(result, instance);
+}
+
+XrResult OpenXrPlatformHelper::CreateInstance(XrInstance* instance,
+                                              void* create_info) {
+  DVLOG(1) << __func__;
   CHECK(initialized_);
   CHECK(xr_instance_ == XR_NULL_HANDLE)
       << "Each Process is only allowed one XrInstance at a time";
   XrInstanceCreateInfo instance_create_info = {XR_TYPE_INSTANCE_CREATE_INFO};
 
-  std::string application_name = version_info::GetProductName() + " " +
-                                 version_info::GetMajorVersionNumber();
+  std::string application_name =
+      base::StrCat({version_info::GetProductName(), " ",
+                    version_info::GetMajorVersionNumber()});
   size_t dest_size =
       std::size(instance_create_info.applicationInfo.applicationName);
   size_t src_size =
@@ -134,9 +162,13 @@ XrResult OpenXrPlatformHelper::CreateInstance(
       static_cast<uint32_t>(extensions.size());
   instance_create_info.enabledExtensionNames = extensions.data();
 
-  if (create_info.has_value()) {
-    instance_create_info.next = GetPlatformCreateInfo(create_info.value());
+#if BUILDFLAG(IS_ANDROID)
+  if (create_info == nullptr) {
+    LOG(ERROR) << "Android was missing CreateInfo";
   }
+#endif
+
+  instance_create_info.next = create_info;
 
   XrResult result = xrCreateInstance(&instance_create_info, instance);
   if (XR_SUCCEEDED(result)) {

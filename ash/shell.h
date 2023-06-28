@@ -100,6 +100,7 @@ class AccessibilityEventHandlerManager;
 class AccessibilityFocusRingControllerImpl;
 class AdaptiveChargingController;
 class AmbientController;
+class AnchoredNudgeManagerImpl;
 class AppListControllerImpl;
 class AppListFeatureUsageMetrics;
 class AshAcceleratorConfiguration;
@@ -113,6 +114,7 @@ class AutoclickController;
 class AutozoomControllerImpl;
 class BackGestureEventHandler;
 class BacklightsForcedOffSetter;
+class BatterySaverController;
 class BluetoothDeviceStatusUiHandler;
 class BluetoothNotificationController;
 class BluetoothStateCache;
@@ -155,6 +157,7 @@ class GlanceablesController;
 class GlanceablesV2Controller;
 class ColorEnhancementController;
 class HoldingSpaceController;
+class HotspotIconAnimation;
 class HotspotInfoCache;
 class HumanPresenceOrientationController;
 class ImeControllerImpl;
@@ -410,6 +413,9 @@ class ASH_EXPORT Shell : public SessionObserver,
     return adaptive_charging_controller_.get();
   }
   AmbientController* ambient_controller() { return ambient_controller_.get(); }
+  AnchoredNudgeManagerImpl* anchored_nudge_manager() {
+    return anchored_nudge_manager_.get();
+  }
   AshAcceleratorConfiguration* ash_accelerator_configuration() {
     return ash_accelerator_configuration_.get();
   }
@@ -427,6 +433,9 @@ class ASH_EXPORT Shell : public SessionObserver,
   }
   BacklightsForcedOffSetter* backlights_forced_off_setter() {
     return backlights_forced_off_setter_.get();
+  }
+  BatterySaverController* battery_saver_controller() {
+    return battery_saver_controller_.get();
   }
   BluetoothStateCache* bluetooth_state_cache() {
     return bluetooth_state_cache_.get();
@@ -553,6 +562,9 @@ class ASH_EXPORT Shell : public SessionObserver,
   }
   ColorEnhancementController* color_enhancement_controller() {
     return color_enhancement_controller_.get();
+  }
+  HotspotIconAnimation* hotspot_icon_animation() {
+    return hotspot_icon_animation_.get();
   }
   HotspotInfoCache* hotspot_info_cache() { return hotspot_info_cache_.get(); }
   HumanPresenceOrientationController* human_presence_orientation_controller() {
@@ -860,12 +872,14 @@ class ASH_EXPORT Shell : public SessionObserver,
   explicit Shell(std::unique_ptr<ShellDelegate> shell_delegate);
   ~Shell() override;
 
-  void Init(ui::ContextFactory* context_factory,
-            PrefService* local_state,
-            std::unique_ptr<keyboard::KeyboardUIFactory> keyboard_ui_factory,
-            std::unique_ptr<ash::quick_pair::Mediator::Factory>
-                quick_pair_mediator_factory,
-            scoped_refptr<dbus::Bus> dbus_bus);
+  void Init(
+      ui::ContextFactory* context_factory,
+      PrefService* local_state,
+      std::unique_ptr<keyboard::KeyboardUIFactory> keyboard_ui_factory,
+      std::unique_ptr<ash::quick_pair::Mediator::Factory>
+          quick_pair_mediator_factory,
+      scoped_refptr<dbus::Bus> dbus_bus,
+      std::unique_ptr<display::NativeDisplayDelegate> native_display_delegate);
 
   // Initializes the display manager and related components.
   void InitializeDisplayManager();
@@ -901,6 +915,7 @@ class ASH_EXPORT Shell : public SessionObserver,
   // The CompoundEventFilter owned by aura::Env object.
   std::unique_ptr<::wm::CompoundEventFilter> env_filter_;
 
+  std::unique_ptr<BatterySaverController> battery_saver_controller_;
   std::unique_ptr<EventRewriterControllerImpl> event_rewriter_controller_;
   std::unique_ptr<InputDeviceSettingsControllerImpl>
       input_device_settings_controller_;
@@ -922,6 +937,7 @@ class ASH_EXPORT Shell : public SessionObserver,
       accessibility_focus_ring_controller_;
   std::unique_ptr<AdaptiveChargingController> adaptive_charging_controller_;
   std::unique_ptr<AmbientController> ambient_controller_;
+  std::unique_ptr<AnchoredNudgeManagerImpl> anchored_nudge_manager_;
   std::unique_ptr<AppListControllerImpl> app_list_controller_;
   std::unique_ptr<AppListFeatureUsageMetrics> app_list_feature_usage_metrics_;
   // May be null in tests or when running on linux-chromeos.
@@ -1102,6 +1118,7 @@ class ASH_EXPORT Shell : public SessionObserver,
   std::unique_ptr<DisplayColorManager> display_color_manager_;
   std::unique_ptr<DisplayErrorObserver> display_error_observer_;
   std::unique_ptr<ProjectingObserver> projecting_observer_;
+  std::unique_ptr<HotspotIconAnimation> hotspot_icon_animation_;
   std::unique_ptr<HotspotInfoCache> hotspot_info_cache_;
   std::unique_ptr<display::DisplayPortObserver> display_port_observer_;
 
@@ -1170,6 +1187,8 @@ class ASH_EXPORT Shell : public SessionObserver,
       federated_service_controller_;
 
   std::unique_ptr<quick_pair::Mediator> quick_pair_mediator_;
+
+  std::unique_ptr<display::NativeDisplayDelegate> native_display_delegate_;
 
   base::ObserverList<ShellObserver>::Unchecked shell_observers_;
 

@@ -31,6 +31,7 @@
 #include "components/autofill/core/browser/data_model/autofill_structured_address_utils.h"
 #include "components/autofill/core/browser/data_model/contact_info.h"
 #include "components/autofill/core/browser/data_model/phone_number.h"
+#include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/geo/address_i18n.h"
 #include "components/autofill/core/browser/geo/autofill_country.h"
 #include "components/autofill/core/browser/geo/phone_number_i18n.h"
@@ -212,7 +213,7 @@ AutofillProfile::AutofillProfile()
     : AutofillProfile(Source::kLocalOrSyncable) {}
 
 AutofillProfile::AutofillProfile(const std::string& guid, Source source)
-    : AutofillDataModel(guid, /*origin=*/""),
+    : AutofillDataModel(guid),
       phone_number_(this),
       record_type_(LOCAL_PROFILE),
       has_converted_(false),
@@ -226,8 +227,7 @@ AutofillProfile::AutofillProfile(Source source)
 
 // TODO(crbug.com/1177366): Remove this constructor.
 AutofillProfile::AutofillProfile(RecordType type, const std::string& server_id)
-    : AutofillDataModel(base::Uuid::GenerateRandomV4().AsLowercaseString(),
-                        /*origin=*/""),
+    : AutofillDataModel(base::Uuid::GenerateRandomV4().AsLowercaseString()),
       phone_number_(this),
       server_id_(server_id),
       record_type_(type),
@@ -237,7 +237,7 @@ AutofillProfile::AutofillProfile(RecordType type, const std::string& server_id)
 }
 
 AutofillProfile::AutofillProfile(const AutofillProfile& profile)
-    : AutofillDataModel(/*guid=*/"", /*origin=*/""), phone_number_(this) {
+    : AutofillDataModel(/*guid=*/""), phone_number_(this) {
   operator=(profile);
 }
 
@@ -247,15 +247,12 @@ AutofillProfile& AutofillProfile::operator=(const AutofillProfile& profile) {
   if (this == &profile)
     return *this;
 
-  set_disallow_settings_visible_updates(
-      profile.disallow_settings_visible_updates());
   set_use_count(profile.use_count());
   set_use_date(profile.use_date());
   set_previous_use_date(profile.previous_use_date());
   set_modification_date(profile.modification_date());
 
   set_guid(profile.guid());
-  set_origin(profile.origin());
 
   set_profile_label(profile.profile_label());
 
@@ -422,6 +419,8 @@ int AutofillProfile::Compare(const AutofillProfile& profile) const {
       ADDRESS_HOME_SORTING_CODE,
       ADDRESS_HOME_COUNTRY,
       ADDRESS_HOME_LANDMARK,
+      ADDRESS_HOME_BETWEEN_STREETS,
+      ADDRESS_HOME_ADMIN_LEVEL2,
       ADDRESS_HOME_HOUSE_NUMBER,
       ADDRESS_HOME_STREET_NAME,
       ADDRESS_HOME_DEPENDENT_STREET_NAME,
@@ -516,9 +515,9 @@ bool AutofillProfile::IsSubsetOfForFieldSet(
       continue;
     } else if (type == NAME_FULL) {
       if (!comparator.IsNameVariantOf(
-              comparator.NormalizeForComparison(
+              AutofillProfileComparator::NormalizeForComparison(
                   profile.GetInfo(NAME_FULL, app_locale)),
-              comparator.NormalizeForComparison(value))) {
+              AutofillProfileComparator::NormalizeForComparison(value))) {
         // Check whether the full name of |this| can be derived from the full
         // name of |profile| if the form contains a full name field.
         //
@@ -526,7 +525,7 @@ bool AutofillProfile::IsSubsetOfForFieldSet(
         // is Mia L Park. Mia Park can be derived from Mia L Park, so |this|
         // could be a subset of |profile|.
         //
-        // If the form contains fields for a name's constiuent parts, e.g.
+        // If the form contains fields for a name's constituent parts, e.g.
         // NAME_FIRST, then these values are compared according to the
         // conditions that follow.
         return false;
@@ -620,9 +619,6 @@ bool AutofillProfile::MergeDataFrom(const AutofillProfile& profile,
     return false;
   }
 
-  // TODO(rogerm): As implemented, "origin" really denotes "domain of last use".
-  // Find a better merge heuristic. Ditto for language code.
-  set_origin(profile.origin());
   set_language_code(profile.language_code());
 
   // Update the use-count to be the max of the two merge-counts. Alternatively,
@@ -1016,9 +1012,7 @@ FormGroup* AutofillProfile::MutableFormGroupForType(const AutofillType& type) {
 }
 
 bool AutofillProfile::EqualsSansGuid(const AutofillProfile& profile) const {
-  return disallow_settings_visible_updates() ==
-             profile.disallow_settings_visible_updates() &&
-         language_code() == profile.language_code() &&
+  return language_code() == profile.language_code() &&
          profile_label() == profile.profile_label() &&
          source() == profile.source() && Compare(profile) == 0;
 }
@@ -1028,8 +1022,7 @@ std::ostream& operator<<(std::ostream& os, const AutofillProfile& profile) {
              ? profile.guid()
              : base::HexEncode(profile.server_id().data(),
                                profile.server_id().size()))
-     << " " << profile.origin() << " "
-     << "label: " << profile.profile_label() << " " << profile.has_converted()
+     << " label: " << profile.profile_label() << " " << profile.has_converted()
      << " " << profile.use_count() << " " << profile.use_date() << " "
      << profile.language_code() << std::endl;
 
@@ -1070,6 +1063,9 @@ std::ostream& operator<<(std::ostream& os, const AutofillProfile& profile) {
       ADDRESS_HOME_ZIP,
       ADDRESS_HOME_SORTING_CODE,
       ADDRESS_HOME_COUNTRY,
+      ADDRESS_HOME_LANDMARK,
+      ADDRESS_HOME_BETWEEN_STREETS,
+      ADDRESS_HOME_ADMIN_LEVEL2,
       PHONE_HOME_WHOLE_NUMBER};
 
   base::ranges::for_each(field_types_to_print, print_values_lambda);

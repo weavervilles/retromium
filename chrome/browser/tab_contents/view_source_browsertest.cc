@@ -21,6 +21,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -184,9 +185,8 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, DISABLED_TestViewSourceReload) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url_viewsource));
   observer.Wait();
 
-  ASSERT_TRUE(
-      content::ExecuteScript(browser()->tab_strip_model()->GetWebContentsAt(0),
-                             "window.location.reload();"));
+  ASSERT_TRUE(content::ExecJs(browser()->tab_strip_model()->GetWebContentsAt(0),
+                              "window.location.reload();"));
 
   content::LoadStopObserver observer2(
       browser()->tab_strip_model()->GetWebContentsAt(0));
@@ -214,9 +214,9 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest,
     GURL url = embedded_test_server()->GetURL("a.com", "/title1.html");
     ui_test_utils::UrlLoadObserver load_complete(
         url, content::NotificationService::AllSources());
-    EXPECT_TRUE(content::ExecuteScript(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        "window.open('" + url.spec() + "');"));
+    EXPECT_TRUE(
+        content::ExecJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                        "window.open('" + url.spec() + "');"));
     load_complete.Wait();
     EXPECT_EQ(2, browser()->tab_strip_model()->count());
   }
@@ -344,8 +344,8 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, HttpPostInMainframe) {
 
   // Submit the form and verify that we arrived at the expected location.
   content::TestNavigationObserver form_post_observer(original_contents, 1);
-  EXPECT_TRUE(ExecuteScript(original_main_frame,
-                            "document.getElementById('form').submit();"));
+  EXPECT_TRUE(
+      ExecJs(original_main_frame, "document.getElementById('form').submit();"));
   form_post_observer.Wait();
   GURL target_url(embedded_test_server()->GetURL("a.com", "/echoall"));
 
@@ -536,8 +536,8 @@ IN_PROC_BROWSER_TEST_P(ViewSourceWithSplitCacheTest, HttpPostInSubframe) {
 
   // Submit the form and verify that we arrived at the expected location.
   content::TestNavigationObserver form_post_observer(original_contents, 1);
-  EXPECT_TRUE(ExecuteScript(original_child_frame,
-                            "document.getElementById('form').submit();"));
+  EXPECT_TRUE(ExecJs(original_child_frame,
+                     "document.getElementById('form').submit();"));
   form_post_observer.Wait();
   original_child_frame = ChildFrameAt(original_contents, 0);
 
@@ -715,9 +715,9 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, NavigationOmitsReferrer) {
 
   // Click the first link in the view-source markup.
   content::WebContentsAddedObserver nav_observer;
-  EXPECT_TRUE(content::ExecuteScript(
-      browser()->tab_strip_model()->GetActiveWebContents(),
-      "document.getElementsByTagName('A')[0].click();"));
+  EXPECT_TRUE(
+      content::ExecJs(browser()->tab_strip_model()->GetActiveWebContents(),
+                      "document.getElementsByTagName('A')[0].click();"));
   content::WebContents* new_contents = nav_observer.GetWebContents();
   EXPECT_TRUE(WaitForLoadStop(new_contents));
 

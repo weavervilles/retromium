@@ -50,9 +50,6 @@ const char kFakeVideoInputGroupId2[] = "fake_video_input_group 2";
 const char kFakeAudioOutputDeviceId1[] = "fake_audio_output 1";
 const char kFakeAudioOutputDeviceId2[] = "fake_audio_output 2";
 
-constexpr char kEnumerateDevicesLatencyHistogram[] =
-    "WebRTC.EnumerateDevices.Latency";
-
 String MaxLengthCaptureHandle() {
   String maxHandle = "0123456789abcdef";  // 16 characters.
   while (maxHandle.length() < 1024) {
@@ -342,8 +339,6 @@ class MediaDevicesTest : public PageTestBase {
         "Media.MediaDevices.EnumerateDevices.Result", expected_result, 1);
     histogram_tester_.ExpectTotalCount(
         "Media.MediaDevices.EnumerateDevices.Latency", 1);
-    // Legacy latency histogram.
-    histogram_tester_.ExpectTotalCount(kEnumerateDevicesLatencyHistogram, 1);
   }
 
  private:
@@ -759,7 +754,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdUnsupportedOnAndroid) {
   )HTML");
 
   Document& document = GetDocument();
-  Element* const div = document.getElementById("test-div");
+  Element* const div = document.getElementById(AtomicString("test-div"));
   const ScriptPromise div_promise = media_devices->ProduceCropTarget(
       scope.GetScriptState(), div, scope.GetExceptionState());
   platform()->RunUntilIdle();
@@ -802,7 +797,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdWithValidElement) {
       "test-select", "test-svg",    "test-rect", "test-math"};
 
   for (const char* id : kElementIds) {
-    Element* const element = document.getElementById(id);
+    Element* const element = document.getElementById(AtomicString(id));
     dispatcher_host().SetNextCropId(
         String(base::Uuid::GenerateRandomV4().AsLowercaseString()));
     const ScriptPromise promise = media_devices->ProduceCropTarget(
@@ -828,7 +823,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdRejectedIfDifferentWindow) {
   )HTML");
 
   Document& document = GetDocument();
-  Element* const div = document.getElementById("test-div");
+  Element* const div = document.getElementById(AtomicString("test-div"));
   const ScriptPromise element_promise = media_devices->ProduceCropTarget(
       scope.GetScriptState(), div, scope.GetExceptionState());
   platform()->RunUntilIdle();
@@ -853,7 +848,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdDuplicate) {
   )HTML");
 
   Document& document = GetDocument();
-  Element* const div = document.getElementById("test-div");
+  Element* const div = document.getElementById(AtomicString("test-div"));
   const ScriptPromise first_promise = media_devices->ProduceCropTarget(
       scope.GetScriptState(), div, scope.GetExceptionState());
   ScriptPromiseTester first_tester(scope.GetScriptState(), first_promise);
@@ -885,7 +880,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdStringFormat) {
   )HTML");
 
   Document& document = GetDocument();
-  Element* const div = document.getElementById("test-div");
+  Element* const div = document.getElementById(AtomicString("test-div"));
   dispatcher_host().SetNextCropId(
       String(base::Uuid::GenerateRandomV4().AsLowercaseString()));
   const ScriptPromise promise = media_devices->ProduceCropTarget(
@@ -896,7 +891,7 @@ TEST_F(MediaDevicesTest, ProduceCropIdStringFormat) {
   EXPECT_FALSE(scope.GetExceptionState().HadException());
 
   const CropTarget* const crop_target =
-      V8CropTarget::ToImpl(tester.Value().V8Value().As<v8::Object>());
+      V8CropTarget::ToWrappable(scope.GetIsolate(), tester.Value().V8Value());
   const WTF::String& crop_id = crop_target->GetCropId();
   EXPECT_TRUE(crop_id.ContainsOnlyASCIIOrEmpty());
   EXPECT_TRUE(base::Uuid::ParseLowercase(crop_id.Ascii()).is_valid());

@@ -20,6 +20,7 @@
 #include <string>
 #include <utility>
 
+#include "base/auto_reset.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -37,6 +38,7 @@
 #include "storage/browser/quota/quota_settings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/gfx/animation/animation.h"
 
 namespace base {
 class CommandLine;
@@ -46,6 +48,10 @@ class TimeDelta;
 
 namespace chromeos {
 class ScopedDisableCrosapiForTesting;
+}
+
+namespace ui {
+class ScopedAnimationDurationScaleMode;
 }
 
 namespace content {
@@ -268,6 +274,12 @@ class BrowserTestBase : public ::testing::Test {
   // the --force-device-scale-factor flag in SetUp.
   float force_device_scale_factor_ = 0.f;
 
+  // When verifying pixel output, animations are disabled to reduce flakiness.
+  std::unique_ptr<ui::ScopedAnimationDurationScaleMode>
+      disable_layer_animations_;
+  std::unique_ptr<base::AutoReset<gfx::Animation::RichAnimationRenderMode>>
+      disable_rich_animations_;
+
   // When true, do compositing with the software backend instead of using GL.
   bool use_software_compositing_ = false;
 
@@ -293,7 +305,7 @@ class BrowserTestBase : public ::testing::Test {
 
   bool allow_network_access_to_host_resolutions_ = false;
 
-  raw_ptr<BrowserMainParts, DanglingUntriaged> browser_main_parts_ = nullptr;
+  raw_ptr<BrowserMainParts, DanglingAcrossTasks> browser_main_parts_ = nullptr;
 
 #if BUILDFLAG(IS_POSIX)
   bool handle_sigterm_;

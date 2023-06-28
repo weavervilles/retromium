@@ -322,11 +322,8 @@ int BrowserViewLayout::NonClientHitTest(const gfx::Point& point) {
   // if we're in an app defined draggable region so we can return htcaption.
   web_app::AppBrowserController* controller =
       browser_view_->browser()->app_controller();
-  bool is_wco_or_borderless_mode =
-      browser_view_->IsWindowControlsOverlayEnabled() ||
-      browser_view_->IsBorderlessModeEnabled();
 
-  if (is_wco_or_borderless_mode && controller &&
+  if (browser_view_->AreDraggableRegionsEnabled() && controller &&
       controller->draggable_region().has_value()) {
     // Draggable regions are defined relative to the web contents.
     gfx::Point point_in_contents_web_view_coords(point_in_browser_view_coords);
@@ -337,7 +334,12 @@ int BrowserViewLayout::NonClientHitTest(const gfx::Point& point) {
     if (controller->draggable_region()->contains(
             point_in_contents_web_view_coords.x(),
             point_in_contents_web_view_coords.y())) {
-      return HTCAPTION;
+      // Draggable regions should be ignored for clicks into any browser view's
+      // owned widgets, for example alerts, permission prompts or find bar.
+      return browser_view_->WidgetOwnedByAnchorContainsPoint(
+                 point_in_browser_view_coords)
+                 ? HTCLIENT
+                 : HTCAPTION;
     }
   }
 
@@ -451,17 +453,21 @@ std::vector<views::View*> BrowserViewLayout::GetChildViewsInPaintOrder(
     const views::View* host) const {
   std::vector<views::View*> result =
       views::LayoutManager::GetChildViewsInPaintOrder(host);
-  // Make sure `top_container_` is last in paint order when this is a window
-  // using WindowControlsOverlay, to make sure the window controls are in fact
-  // drawn on top of anything else.
+  // Make sure `top_container_` is after `contents_container_` in paint order
+  // when this is a window using WindowControlsOverlay, to make sure the window
+  // controls are in fact drawn on top of the web contents.
   if (delegate_->IsWindowControlsOverlayEnabled()) {
-    auto iter = base::ranges::find(result, top_container_);
+    auto top_container_iter = base::ranges::find(result, top_container_);
+    auto contents_container_iter =
+        base::ranges::find(result, contents_container_);
+    CHECK(contents_container_iter != result.end());
     // When in Immersive Fullscreen `top_container_` might not be one of our
     // children at all. While Window Controls Overlay shouldn't be enabled in
     // fullscreen either, during the transition there is a moment where both
     // could be true at the same time.
-    if (iter != result.end()) {
-      std::rotate(iter, iter + 1, result.end());
+    if (top_container_iter != result.end()) {
+      std::rotate(top_container_iter, top_container_iter + 1,
+                  contents_container_iter + 1);
     }
   }
   return result;

@@ -24,6 +24,7 @@ class AppListViewDelegate;
 class ResultSelectionController;
 class SearchBoxView;
 class SearchResultPageDialogController;
+class SearchResultImageListView;
 
 // The search results view for productivity launcher. Contains a scrolling list
 // of search results. Does not include the search box, which is owned by a
@@ -77,11 +78,12 @@ class ASH_EXPORT AppListSearchView : public views::View,
     return result_selection_controller_.get();
   }
 
-  raw_ptr<SearchBoxView, ExperimentalAsh> search_box_view() {
-    return search_box_view_.get();
-  }
+  SearchBoxView* search_box_view() { return search_box_view_.get(); }
 
  private:
+  // views::View:
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+
   // Passed to |result_selection_controller_| as a callback that gets called
   // when the currently selected result changes.
   // Scrolls the list view to the newly selected result.
@@ -131,6 +133,11 @@ class ASH_EXPORT AppListSearchView : public views::View,
   // Containers for search result views. The contained views are owned by the
   // views hierarchy. Used by result_selection_controller_.
   std::vector<SearchResultContainerView*> result_container_views_;
+
+  // The container of the image search results. This is owned by the views
+  // hierarchy and is an element in result_container_views_;
+  raw_ptr<SearchResultImageListView, ExperimentalAsh> image_search_container_ =
+      nullptr;
 
   // Cache of the last shown search results' animation metadata.
   std::vector<SearchResultContainerView::SearchResultAimationMetadata>

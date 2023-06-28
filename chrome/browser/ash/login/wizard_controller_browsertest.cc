@@ -25,10 +25,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/ash/base/locale_util.h"
+#include "chrome/browser/ash/login/demo_mode/demo_mode_test_utils.h"
 #include "chrome/browser/ash/login/demo_mode/demo_setup_controller.h"
-#include "chrome/browser/ash/login/demo_mode/demo_setup_test_utils.h"
 #include "chrome/browser/ash/login/enrollment/enrollment_screen.h"
-#include "chrome/browser/ash/login/enrollment/enterprise_enrollment_helper.h"
 #include "chrome/browser/ash/login/enrollment/mock_auto_enrollment_check_screen.h"
 #include "chrome/browser/ash/login/enrollment/mock_enrollment_screen.h"
 #include "chrome/browser/ash/login/existing_user_controller.h"
@@ -61,6 +60,7 @@
 #include "chrome/browser/ash/login/test/oobe_configuration_waiter.h"
 #include "chrome/browser/ash/login/test/oobe_screen_exit_waiter.h"
 #include "chrome/browser/ash/login/test/oobe_screen_waiter.h"
+#include "chrome/browser/ash/login/test/oobe_screens_utils.h"
 #include "chrome/browser/ash/login/ui/login_display_host.h"
 #include "chrome/browser/ash/login/ui/webui_login_view.h"
 #include "chrome/browser/ash/net/network_portal_detector_test_impl.h"
@@ -82,6 +82,7 @@
 #include "chrome/browser/lifetime/termination_notification.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/ash/login/consolidated_consent_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/display_size_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/gaia_info_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/gaia_screen_handler.h"
@@ -91,6 +92,7 @@
 #include "chrome/browser/ui/webui/ash/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/ash/login/reset_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/theme_selection_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/touchpad_scroll_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/update_required_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/user_creation_screen_handler.h"
 #include "chrome/common/chrome_switches.h"
@@ -119,6 +121,7 @@
 #include "components/prefs/testing_pref_store.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/session_manager/session_manager_types.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -140,6 +143,15 @@ using ::testing::_;
 using ::testing::IsNull;
 using ::testing::Mock;
 using ::testing::NotNull;
+
+const char kUnifiedStateDeterminationKillSwitchConfigURL[] =
+    "https://www.gstatic.com/chromeos-usd-experiment/v1.json";
+const char kUnifiedStateDeterminationKillSwitchConfigResponseBody[] = R"({
+  "disable_up_to_version": 0
+})";
+
+const char kDMServerURLPrefix[] =
+    "https://m.google.com/devicemanagement/data/api";
 
 const char kGeolocationResponseBody[] =
     "{\n"
@@ -481,7 +493,7 @@ class WizardControllerTest : public OobeBaseTest {
   }
 
   bool JSExecute(const std::string& script) {
-    return content::ExecuteScript(GetWebContents(), script);
+    return content::ExecJs(GetWebContents(), script);
   }
 
   bool JSExecuteBooleanExpression(const std::string& expression) {
@@ -517,6 +529,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerTest, SwitchLanguage) {
   ASSERT_TRUE(WizardController::default_controller() != nullptr);
   WizardController::default_controller()->AdvanceToScreen(
       WelcomeView::kScreenId);
+  test::WaitForWelcomeScreen();
 
   // Checking the default locale. Provided that the profile is cleared in SetUp.
   EXPECT_EQ("en-US", g_browser_process->GetApplicationLocale());
@@ -614,6 +627,7 @@ class WizardControllerFlowTest : public WizardControllerTest {
     WizardController* wizard_controller =
         WizardController::default_controller();
     wizard_controller->SetCurrentScreen(nullptr);
+    WaitForOobeUI();
     wizard_controller->SetSharedURLLoaderFactoryForTesting(
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             &test_url_loader_factory_));
@@ -889,10 +903,11 @@ class WizardControllerFlowTest : public WizardControllerTest {
 
   std::unique_ptr<MockDeviceDisabledScreenView> device_disabled_screen_view_;
 
+  network::TestURLLoaderFactory test_url_loader_factory_;
+
  private:
   raw_ptr<NetworkPortalDetectorTestImpl, ExperimentalAsh>
       network_portal_detector_ = nullptr;
-  network::TestURLLoaderFactory test_url_loader_factory_;
   std::unique_ptr<base::AutoReset<bool>> branded_build_override_;
 };
 
@@ -1130,6 +1145,21 @@ class WizardControllerDeviceStateTest : public WizardControllerFlowTest {
                                                   "2000-01");
     fake_statistics_provider_.SetVpdStatus(
         system::StatisticsProvider::VpdStatus::kValid);
+    // Simulate disabled kill-switch for unified state determination.
+    test_url_loader_factory_.AddResponse(
+        GURL(kUnifiedStateDeterminationKillSwitchConfigURL).spec(),
+        kUnifiedStateDeterminationKillSwitchConfigResponseBody);
+    // Make all requests to DMServer fail with net::ERR_CONNECTION_REFUSED.
+    test_url_loader_factory_.SetInterceptor(base::BindLambdaForTesting(
+        [&](const network::ResourceRequest& request) {
+          if (request.url.spec().starts_with(kDMServerURLPrefix)) {
+            test_url_loader_factory_.AddResponse(
+                request.url, network::mojom::URLResponseHead::New(),
+                std::string(),
+                network::URLLoaderCompletionStatus(
+                    net::ERR_CONNECTION_REFUSED));
+          }
+        }));
   }
 
   static policy::AutoEnrollmentController* auto_enrollment_controller() {
@@ -1184,6 +1214,23 @@ class WizardControllerDeviceStateTest : public WizardControllerFlowTest {
 };
 
 IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
+                       AutoEnrollmentControllerStartedAfterNetworkScreen) {
+  CheckCurrentScreen(WelcomeView::kScreenId);
+  EXPECT_CALL(*mock_welcome_screen_, HideImpl()).Times(1);
+  EXPECT_CALL(*mock_network_screen_, ShowImpl()).Times(1);
+  mock_welcome_screen_->ExitScreen(WelcomeScreen::Result::NEXT);
+
+  CheckCurrentScreen(NetworkScreenView::kScreenId);
+  EXPECT_CALL(*mock_network_screen_, HideImpl()).Times(1);
+  EXPECT_CALL(*mock_update_screen_, ShowImpl()).Times(1);
+  mock_network_screen_->ExitScreen(NetworkScreen::Result::CONNECTED);
+
+  content::RunAllTasksUntilIdle();
+
+  EXPECT_TRUE(policy::AutoEnrollmentTypeChecker::Initialized());
+}
+
+IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
                        ControlFlowNoForcedReEnrollmentOnFirstBoot) {
   fake_statistics_provider_.ClearMachineStatistic(system::kActivateDateKey);
   EXPECT_NE(policy::AutoEnrollmentState::kNoEnrollment,
@@ -1197,7 +1244,6 @@ IN_PROC_BROWSER_TEST_F(WizardControllerDeviceStateTest,
   CheckCurrentScreen(NetworkScreenView::kScreenId);
   EXPECT_CALL(*mock_network_screen_, HideImpl()).Times(1);
   EXPECT_CALL(*mock_update_screen_, ShowImpl()).Times(1);
-
   mock_network_screen_->ExitScreen(NetworkScreen::Result::CONNECTED);
 
   // Let update screen smooth time process (time = 0ms).
@@ -1679,6 +1725,8 @@ IN_PROC_BROWSER_TEST_F(WizardControllerUnifiedEnrollmentTest, Timeout) {
   EXPECT_EQ(AutoEnrollmentCheckScreenView::kScreenId.AsId(),
             GetErrorScreen()->GetParentScreen());
   test::OobeJS().ExpectHiddenPath(kGuestSessionLink);
+  histogram_tester()->ExpectBucketCount(
+      "Enterprise.AutoEnrollmentControllerTimeout", 3 /*kTimeoutUnified*/, 1);
 }
 
 // Tests that AutoEnrollmentController does not create another
@@ -3028,6 +3076,10 @@ class WizardControllerThemeSelectionTest : public WizardControllerTest {
 
 IN_PROC_BROWSER_TEST_F(WizardControllerThemeSelectionTest,
                        TransitionToMarketingOptIn) {
+  LoginDisplayHost::default_host()
+      ->GetWizardContextForTesting()
+      ->skip_choobe_for_tests = true;
+
   LoginDisplayHost::default_host()->GetWizardContext()->is_branded_build = true;
   login_mixin_.LoginAsNewRegularUser();
   WizardController::default_controller()->AdvanceToScreen(
@@ -3038,9 +3090,23 @@ IN_PROC_BROWSER_TEST_F(WizardControllerThemeSelectionTest,
 
 IN_PROC_BROWSER_TEST_F(WizardControllerThemeSelectionTest,
                        TransitionToThemeSelection) {
+  LoginDisplayHost::default_host()
+      ->GetWizardContextForTesting()
+      ->skip_choobe_for_tests = true;
+
   login_mixin_.LoginAsNewRegularUser();
-  WizardController::default_controller()->AdvanceToScreen(
-      GestureNavigationScreenView::kScreenId);
+  if (features::IsOobeDisplaySizeEnabled()) {
+    WizardController::default_controller()->AdvanceToScreen(
+        DisplaySizeScreenView::kScreenId);
+    test::OobeJS().ClickOnPath({"display-size", "nextButton"});
+  } else if (features::IsOobeTouchpadScrollEnabled()) {
+    WizardController::default_controller()->AdvanceToScreen(
+        TouchpadScrollScreenView::kScreenId);
+    test::OobeJS().ClickOnPath({"touchpad-scroll", "nextButton"});
+  } else {
+    WizardController::default_controller()->AdvanceToScreen(
+        GestureNavigationScreenView::kScreenId);
+  }
   OobeScreenWaiter(ThemeSelectionScreenView::kScreenId).Wait();
 }
 
@@ -3068,6 +3134,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoScreenForEnterpriseEnrollmentTest,
 }
 
 IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionToGaiaInfo) {
+  WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       UserCreationView::kScreenId);
   test::OobeJS().ClickOnPath({"user-creation", "selfButton"});
@@ -3076,6 +3143,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionToGaiaInfo) {
 }
 
 IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionFromGaiaInfo) {
+  WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       GaiaInfoScreenView::kScreenId);
   test::OobeJS().ClickOnPath({"gaia-info", "nextButton"});
@@ -3083,6 +3151,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoTest, TransitionFromGaiaInfo) {
 }
 
 IN_PROC_BROWSER_TEST_F(GaiaInfoTest, SkipGaiaInfoForChildAccountCreation) {
+  WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       UserCreationView::kScreenId);
   test::OobeJS().ClickOnPath({"user-creation", "childButton"});
@@ -3093,6 +3162,7 @@ IN_PROC_BROWSER_TEST_F(GaiaInfoTest, SkipGaiaInfoForChildAccountCreation) {
 }
 
 IN_PROC_BROWSER_TEST_F(GaiaInfoTest, SkipGaiaInfoForChildSignIn) {
+  WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       UserCreationView::kScreenId);
   test::OobeJS().ClickOnPath({"user-creation", "childButton"});
@@ -3111,6 +3181,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerGaiaTest, GoBackToGaiaInfo) {
   LoginDisplayHost::default_host()
       ->GetWizardContext()
       ->is_user_creation_enabled = true;
+  WaitForOobeUI();
   WizardController::default_controller()->AdvanceToScreen(
       GaiaInfoScreenView::kScreenId);
   test::OobeJS().ClickOnPath({"gaia-info", "nextButton"});
@@ -3128,6 +3199,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerGaiaTest,
       ->is_user_creation_enabled = true;
   LoginDisplayHost::default_host()->GetWizardContext()->is_add_person_flow =
       true;
+  WaitForOobeUI();
 
   WizardController::default_controller()->AdvanceToScreen(
       GaiaInfoScreenView::kScreenId);
@@ -3150,6 +3222,8 @@ IN_PROC_BROWSER_TEST_P(GoingBackFromGaiaScreenInChildFlowTest,
 
   WizardController::default_controller()->AdvanceToScreen(
       UserCreationView::kScreenId);
+  OobeScreenWaiter(UserCreationView::kScreenId).Wait();
+
   test::OobeJS().ClickOnPath({"user-creation", "childButton"});
   test::OobeJS().ClickOnPath({"user-creation", "nextButton"});
   test::OobeJS().ClickOnPath({"user-creation", std::get<1>(GetParam())});

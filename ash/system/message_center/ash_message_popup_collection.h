@@ -12,6 +12,8 @@
 #include "ash/public/cpp/tablet_mode_observer.h"
 #include "ash/shelf/shelf_observer.h"
 #include "ash/shell_observer.h"
+#include "ash/system/tray/system_tray_observer.h"
+#include "ash/system/tray/tray_event_filter.h"
 #include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "ui/compositor/throughput_tracker.h"
@@ -25,20 +27,27 @@ namespace display {
 class Screen;
 }
 
+namespace views {
+class Widget;
+}  // namespace views
+
 namespace ash {
 
 class AshMessagePopupCollectionTest;
 class Shelf;
+class TrayBubbleView;
+class TrayEventFilterTest;
 
 // The MessagePopupCollection subclass for Ash. It needs to handle alignment of
 // the shelf and its autohide state.
 class ASH_EXPORT AshMessagePopupCollection
-    : public message_center::MessagePopupCollection,
+    : public display::DisplayObserver,
+      public message_center::MessagePopupCollection,
+      public message_center::MessageView::Observer,
       public ShelfObserver,
+      public SystemTrayObserver,
       public TabletModeObserver,
-      public display::DisplayObserver,
-      public views::WidgetObserver,
-      public message_center::MessageView::Observer {
+      public views::WidgetObserver {
  public:
   // The name that will set for the message popup widget in
   // ConfigureWidgetInitParamsForContainer(), and that can be used to identify a
@@ -75,6 +84,8 @@ class ASH_EXPORT AshMessagePopupCollection
       const message_center::Notification& notification) const override;
   void NotifyPopupAdded(message_center::MessagePopupView* popup) override;
   void NotifyPopupClosed(message_center::MessagePopupView* popup) override;
+  void NotifyPopupCollectionHeightChanged() override;
+  bool AdjustAndEvaluateShouldDisplayPopupItem(const PopupItem& item) override;
   void AnimationStarted() override;
   void AnimationFinished() override;
   message_center::MessagePopupView* CreatePopup(
@@ -83,6 +94,16 @@ class ASH_EXPORT AshMessagePopupCollection
   // TabletModeObserver:
   void OnTabletModeStarted() override;
   void OnTabletModeEnded() override;
+
+  // SystemTrayObserver:
+  void OnFocusLeavingSystemTray(bool reverse) override {}
+  void OnStatusAreaAnchoredBubbleVisibilityChanged(TrayBubbleView* tray_bubble,
+                                                   bool visible) override;
+  void OnTrayBubbleBoundsChanged(TrayBubbleView* tray_bubble) override;
+
+  // Returns true if `widget` is a popup widget belongs to this popup
+  // collection.
+  bool IsWidgetAPopupNotification(views::Widget* widget);
 
   // Sets `animation_idle_closure_`.
   void SetAnimationIdleClosureForTest(base::OnceClosure closure);
@@ -95,6 +116,7 @@ class ASH_EXPORT AshMessagePopupCollection
  private:
   friend class AshMessagePopupCollectionTest;
   friend class NotificationGroupingControllerTest;
+  friend class TrayEventFilterTest;
 
   // message_center::MessageView::Observer:
   void OnSlideOut(const std::string& notification_id) override;
@@ -110,6 +132,10 @@ class ASH_EXPORT AshMessagePopupCollection
 
   // Compute the new work area.
   void UpdateWorkArea();
+
+  // Makes changes to the baseline based on the visibility/bounds change of
+  // the current open tray bubble.
+  void AdjustBaselineBasedOnTrayBubble();
 
   // ShelfObserver:
   void OnShelfWorkAreaInsetsChanged() override;

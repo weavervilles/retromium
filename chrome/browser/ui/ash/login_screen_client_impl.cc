@@ -9,6 +9,7 @@
 #include "ash/public/cpp/child_accounts/parent_access_controller.h"
 #include "ash/public/cpp/login_screen.h"
 #include "ash/public/cpp/login_screen_model.h"
+#include "base/check_is_test.h"
 #include "base/functional/bind.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/ash/login/login_auth_recorder.h"
 #include "chrome/browser/ash/login/login_pref_names.h"
 #include "chrome/browser/ash/login/reauth_stats.h"
+#include "chrome/browser/ash/login/screens/user_selection_screen.h"
 #include "chrome/browser/ash/login/startup_utils.h"
 #include "chrome/browser/ash/login/ui/login_display_host.h"
 #include "chrome/browser/ash/login/ui/login_display_host_webui.h"
@@ -59,9 +61,20 @@ LoginScreenClientImpl::LoginScreenClientImpl()
 
   DCHECK(!g_login_screen_client_instance);
   g_login_screen_client_instance = this;
+
+  if (user_manager::UserManager::IsInitialized()) {
+    user_manager::UserManager::Get()->AddObserver(this);
+  } else {
+    CHECK_IS_TEST();
+  }
 }
 
 LoginScreenClientImpl::~LoginScreenClientImpl() {
+  if (user_manager::UserManager::IsInitialized()) {
+    user_manager::UserManager::Get()->RemoveObserver(this);
+  } else {
+    CHECK_IS_TEST();
+  }
   ash::LoginScreen::Get()->SetClient(nullptr);
   DCHECK_EQ(this, g_login_screen_client_instance);
   g_login_screen_client_instance = nullptr;
@@ -160,11 +173,6 @@ ash::ParentCodeValidationResult LoginScreenClientImpl::ValidateParentAccessCode(
 void LoginScreenClientImpl::OnFocusPod(const AccountId& account_id) {
   if (delegate_)
     delegate_->HandleOnFocusPod(account_id);
-}
-
-void LoginScreenClientImpl::OnNoPodFocused() {
-  if (delegate_)
-    delegate_->HandleOnNoPodFocused();
 }
 
 void LoginScreenClientImpl::FocusLockScreenApps(bool reverse) {
@@ -311,14 +319,6 @@ void LoginScreenClientImpl::OnLoginScreenShown() {
     observer.OnLoginScreenShown();
 }
 
-void LoginScreenClientImpl::LoadWallpaper(const AccountId& account_id) {
-  WallpaperControllerClientImpl::Get()->ShowUserWallpaper(account_id);
-}
-
-void LoginScreenClientImpl::SignOutUser() {
-  ash::ScreenLocker::default_screen_locker()->Signout();
-}
-
 void LoginScreenClientImpl::CancelAddUser() {
   ash::UserAddingScreen::Get()->Cancel();
 }
@@ -383,6 +383,12 @@ views::Widget* LoginScreenClientImpl::GetLoginWindowWidget() {
     return ash::LoginDisplayHost::default_host()->GetLoginWindowWidget();
   }
   return nullptr;
+}
+
+void LoginScreenClientImpl::OnUserImageChanged(const user_manager::User& user) {
+  ash::LoginScreen::Get()->GetModel()->SetAvatarForUser(
+      user.GetAccountId(),
+      ash::UserSelectionScreen::BuildAshUserAvatarForUser(user));
 }
 
 void LoginScreenClientImpl::OnParentAccessValidation(

@@ -19,6 +19,7 @@
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/profiles/profile_manager_observer.h"
+#include "chrome/browser/web_applications/isolated_web_apps/isolated_web_app_url_info.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/proto/web_app_os_integration_state.pb.h"
 #include "chrome/browser/web_applications/scope_extension_info.h"
@@ -49,7 +50,8 @@ enum class WebappInstallSource;
 
 namespace web_app {
 
-class AppRegistrarObserver;
+class IsolatedWebAppUrlInfo;
+class WebAppRegistrarObserver;
 class WebApp;
 class WebAppPolicyManager;
 class WebAppTranslationManager;
@@ -93,6 +95,13 @@ class WebAppRegistrar : public ProfileManagerObserver {
   // Returns an AppId if there exists an app inside the registry that
   // has a specific install_url.
   absl::optional<AppId> LookUpAppIdByInstallUrl(const GURL& install_url) const;
+
+  // Returns a WebApp if there exists an app inside the registry that
+  // has a specific `install_source` with `install_url`.
+  // If there are multiple matches an arbitrary one is returned.
+  const WebApp* LookUpAppByInstallSourceInstallUrl(
+      WebAppManagement::Type install_source,
+      const GURL& install_url) const;
 
   // Returns whether the app with |app_id| is currently listed in the registry.
   // ie. we have data for web app manifest and icons, and this |app_id| can be
@@ -139,6 +148,10 @@ class WebAppRegistrar : public ProfileManagerObserver {
 
   // Returns true if the app was installed by the SubApp API.
   bool WasInstalledBySubApp(const AppId& app_id) const;
+
+  // Returns true if the app exists and is allowed to be uninstalled by the user
+  // e.g. it is not policy installed.
+  bool CanUserUninstallWebApp(const AppId& app_id) const;
 
   // Returns the AppIds and URLs of apps externally installed from
   // |install_source|.
@@ -199,7 +212,7 @@ class WebAppRegistrar : public ProfileManagerObserver {
   absl::optional<SkColor> GetAppDarkModeBackgroundColor(
       const AppId& app_id) const;
   const GURL& GetAppStartUrl(const AppId& app_id) const;
-  absl::optional<std::string> GetAppManifestId(const AppId& app_id) const;
+  ManifestId GetAppManifestId(const AppId& app_id) const;
   const std::string* GetAppLaunchQueryParams(const AppId& app_id) const;
   const apps::ShareTarget* GetAppShareTarget(const AppId& app_id) const;
   const apps::FileHandlers* GetAppFileHandlers(const AppId& app_id) const;
@@ -255,11 +268,6 @@ class WebAppRegistrar : public ProfileManagerObserver {
   std::vector<WebAppShortcutsMenuItemInfo> GetAppShortcutsMenuItemInfos(
       const AppId& app_id) const;
 
-  // Represents which icon sizes we successfully downloaded from the
-  // ShortcutsMenuItemInfos.
-  std::vector<IconSizes> GetAppDownloadedShortcutsMenuIconsSizes(
-      const AppId& app_id) const;
-
   // Returns the Run on OS Login mode and enterprise policy value.
   ValueWithPolicy<RunOnOsLoginMode> GetAppRunOnOsLoginMode(
       const AppId& app_id) const;
@@ -276,6 +284,11 @@ class WebAppRegistrar : public ProfileManagerObserver {
 
   // Gets the IDs for all sub-apps of parent app with id |parent_app_id|.
   std::vector<AppId> GetAllSubAppIds(const AppId& parent_app_id) const;
+
+  // Maps all app IDs to their parent apps' IDs. Maps that do not have a parent
+  // are omitted. This query should only be called with an AllAppsLock since all
+  // apps are queried for their parent.
+  base::flat_map<AppId, AppId> GetSubAppToParentMap() const;
 
   // Returns the "scope" field from the app manifest, or infers a scope from the
   // "start_url" field if unavailable. Returns an invalid GURL iff the |app_id|
@@ -311,6 +324,10 @@ class WebAppRegistrar : public ProfileManagerObserver {
       const GURL& url,
       bool window_only = false) const;
 
+  // Returns true if there is an app that is not locally installed that has
+  // a scope which is a prefix of |url|.
+  bool IsNonLocallyInstalledAppWithUrlInScope(const GURL& url) const;
+
   // Returns whether the app is a shortcut app (as opposed to a PWA).
   bool IsShortcutApp(const AppId& app_id) const;
 
@@ -344,7 +361,7 @@ class WebAppRegistrar : public ProfileManagerObserver {
 
   // Computes and returns the unhashed app id from entries in the web app
   // manifest.
-  std::string GetComputedUnhashedAppId(const AppId& app_id) const;
+  GURL GetComputedManifestId(const AppId& app_id) const;
 
   // Returns whether the app should be opened in tabbed window mode.
   bool IsTabbedWindowModeEnabled(const AppId& app_id) const;
@@ -366,14 +383,23 @@ class WebAppRegistrar : public ProfileManagerObserver {
   GetIsolatedWebAppStoragePartitionConfigs(
       const AppId& isolated_web_app_id) const;
 
+  // Saves a record of the |partition_name| in
+  // |isolated_web_app_in_memory_controlled_frame_partitions_|.
+  // Then returns the StoragePartitionConfig of the in-memory
+  // Controlled Frame partition.
+  absl::optional<content::StoragePartitionConfig>
+  SaveAndGetInMemoryControlledFramePartitionConfig(
+      const IsolatedWebAppUrlInfo& url_info,
+      const std::string& partition_name);
+
 #if BUILDFLAG(IS_MAC)
   bool AlwaysShowToolbarInFullscreen(const AppId& app_id) const;
   void NotifyAlwaysShowToolbarInFullscreenChanged(const AppId& app_id,
                                                   bool show);
 #endif
 
-  void AddObserver(AppRegistrarObserver* observer);
-  void RemoveObserver(AppRegistrarObserver* observer);
+  void AddObserver(WebAppRegistrarObserver* observer);
+  void RemoveObserver(WebAppRegistrarObserver* observer);
 
   void NotifyWebAppProtocolSettingsChanged();
   void NotifyWebAppFileHandlerApprovalStateChanged(const AppId& app_id);
@@ -504,13 +530,13 @@ class WebAppRegistrar : public ProfileManagerObserver {
 
  private:
   const raw_ptr<Profile> profile_;
-  raw_ptr<WebAppPolicyManager, DanglingUntriaged> policy_manager_ = nullptr;
-  raw_ptr<WebAppTranslationManager, DanglingUntriaged> translation_manager_ =
+  raw_ptr<WebAppPolicyManager, DanglingAcrossTasks> policy_manager_ = nullptr;
+  raw_ptr<WebAppTranslationManager, DanglingAcrossTasks> translation_manager_ =
       nullptr;
 
   base::ScopedObservation<ProfileManager, ProfileManagerObserver>
       profile_manager_observation_{this};
-  base::ObserverList<AppRegistrarObserver, /*check_empty=*/true> observers_;
+  base::ObserverList<WebAppRegistrarObserver, /*check_empty=*/true> observers_;
 
   Registry registry_;
 #if DCHECK_IS_ON()
@@ -519,6 +545,12 @@ class WebAppRegistrar : public ProfileManagerObserver {
 
   base::flat_map<AppId, mojom::UserDisplayMode>
       user_display_mode_overrides_for_experiment_;
+
+  // Keeps a record of in-memory (non-persistent) Storage Partitions created by
+  // Isolated Web Apps' Controlled Frames. This table will expire on browser
+  // shutdown same as in-memory Storage Partitions.
+  base::flat_map<AppId, base::flat_set<std::string>>
+      isolated_web_app_in_memory_controlled_frame_partitions_;
 
   base::WeakPtrFactory<WebAppRegistrar> weak_factory_{this};
 };

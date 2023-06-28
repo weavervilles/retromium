@@ -28,14 +28,25 @@
 #include "components/omnibox/browser/vector_icons.h"
 #include "components/site_engagement/content/site_engagement_service.h"
 #include "components/user_education/common/feature_promo_controller.h"
+#include "components/user_education/common/feature_promo_specification.h"
 #include "components/webapps/browser/banners/app_banner_manager.h"
 #include "components/webapps/browser/installable/installable_metrics.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/blink/public/common/manifest/manifest_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/view_class_properties.h"
 
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chrome/browser/metrics/structured/event_logging_features.h"
+#include "components/metrics/structured/structured_events.h"
+#endif
+
 namespace {
+
+#if BUILDFLAG(IS_CHROMEOS)
+namespace cros_events = metrics::structured::events::v2::cr_os_events;
+#endif
 
 // Site engagement score threshold to show In-Product Help.
 // Add x_ prefix so the IPH feature engagement tracker can ignore this.
@@ -85,8 +96,9 @@ void PwaInstallView::OnTabStripModelChanged(
 
 void PwaInstallView::UpdateImpl() {
   content::WebContents* web_contents = GetWebContents();
-  if (!web_contents)
+  if (!web_contents) {
     return;
+  }
 
   if (web_contents->IsCrashed()) {
     SetVisible(false);
@@ -99,14 +111,16 @@ void PwaInstallView::UpdateImpl() {
 
   auto* manager = webapps::AppBannerManager::FromWebContents(web_contents);
   // May not be present e.g. in incognito mode.
-  if (!manager)
+  if (!manager) {
     return;
+  }
 
   bool is_probably_promotable = manager->IsProbablyPromotableWebApp();
-  if (is_probably_promotable && manager->MaybeConsumeInstallAnimation())
+  if (is_probably_promotable && manager->MaybeConsumeInstallAnimation()) {
     AnimateIn(absl::nullopt);
-  else
+  } else {
     ResetSlideAnimation(false);
+  }
 
   SetVisible(is_probably_promotable || PWAConfirmationBubbleView::IsShowing());
 
@@ -116,9 +130,9 @@ void PwaInstallView::UpdateImpl() {
       IsDrawn()) {
     const bool iph_shown = browser_->window()->MaybeShowFeaturePromo(
         feature_engagement::kIPHDesktopPwaInstallFeature,
-        {webapps::AppBannerManager::GetInstallableWebAppName(web_contents)},
         base::BindOnce(&PwaInstallView::OnIphClosed,
-                       weak_ptr_factory_.GetWeakPtr()));
+                       weak_ptr_factory_.GetWeakPtr()),
+        webapps::AppBannerManager::GetInstallableWebAppName(web_contents));
     if (iph_shown) {
       // Reset the iph flag when it's shown again.
       install_icon_clicked_after_iph_shown_ = false;
@@ -132,15 +146,18 @@ void PwaInstallView::OnIphClosed() {
   // IPH is also closed when the install button is clicked. This does not
   // count as an 'ignore'. The button should remain highlighted and will
   // eventually be un-highlighted when PWAConfirmationBubbleView is closed.
-  if (install_icon_clicked_after_iph_shown_)
+  if (install_icon_clicked_after_iph_shown_) {
     return;
+  }
   SetHighlighted(false);
   content::WebContents* web_contents = GetWebContents();
-  if (!web_contents)
+  if (!web_contents) {
     return;
+  }
   auto* manager = webapps::AppBannerManager::FromWebContents(web_contents);
-  if (!manager)
+  if (!manager) {
     return;
+  }
   PrefService* prefs =
       Profile::FromBrowserContext(web_contents->GetBrowserContext())
           ->GetPrefs();
@@ -158,8 +175,17 @@ void PwaInstallView::OnExecuting(PageActionIconView::ExecuteSource source) {
       chrome::PwaInProductHelpState::kNotShown;
   install_icon_clicked_after_iph_shown_ = browser_->window()->CloseFeaturePromo(
       feature_engagement::kIPHDesktopPwaInstallFeature);
-  if (install_icon_clicked_after_iph_shown_)
+  if (install_icon_clicked_after_iph_shown_) {
     iph_state = chrome::PwaInProductHelpState::kShown;
+  }
+
+#if BUILDFLAG(IS_CHROMEOS)
+  if (base::FeatureList::IsEnabled(metrics::structured::kAppDiscoveryLogging)) {
+    cros_events::AppDiscovery_Browser_OmniboxInstallIconClicked()
+        .SetIPHShown(install_icon_clicked_after_iph_shown_)
+        .Record();
+  }
+#endif
 
   web_app::CreateWebAppFromManifest(
       GetWebContents(),
@@ -173,8 +199,9 @@ views::BubbleDialogDelegate* PwaInstallView::GetBubble() const {
   // Only return the active bubble if it's anchored to `this`. (This check takes
   // the more generic approach of verifying that it's the same widget as to
   // avoid depending too heavily on the exact details of how anchoring works.)
-  if (bubble && (bubble->GetAnchorView()->GetWidget() == GetWidget()))
+  if (bubble && (bubble->GetAnchorView()->GetWidget() == GetWidget())) {
     return bubble;
+  }
 
   return nullptr;
 }
@@ -187,6 +214,10 @@ const gfx::VectorIcon& PwaInstallView::GetVectorIcon() const {
 
 bool PwaInstallView::ShouldShowIph(content::WebContents* web_contents,
                                    webapps::AppBannerManager* manager) {
+  if (blink::IsEmptyManifest(manager->manifest()) ||
+      !manager->manifest().id.is_valid()) {
+    return false;
+  }
   web_app::AppId app_id =
       web_app::GenerateAppIdFromManifest(manager->manifest());
 

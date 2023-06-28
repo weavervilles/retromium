@@ -501,17 +501,14 @@ void AutofillManager::OnAskForValuesToFill(
     const FormData& form,
     const FormFieldData& field,
     const gfx::RectF& bounding_box,
-    AutoselectFirstSuggestion autoselect_first_suggestion,
-    FormElementWasClicked form_element_was_clicked) {
+    AutofillSuggestionTriggerSource trigger_source) {
   if (!IsValidFormData(form) || !IsValidFormFieldData(field))
     return;
 
   NotifyObservers(&Observer::OnBeforeAskForValuesToFill, form.global_id(),
                   field.global_id());
   if (!base::FeatureList::IsEnabled(features::kAutofillParseAsync)) {
-    OnAskForValuesToFillImpl(form, field, bounding_box,
-                             autoselect_first_suggestion,
-                             form_element_was_clicked);
+    OnAskForValuesToFillImpl(form, field, bounding_box, trigger_source);
     NotifyObservers(&Observer::OnAfterAskForValuesToFill, form.global_id(),
                     field.global_id());
     return;
@@ -519,8 +516,7 @@ void AutofillManager::OnAskForValuesToFill(
   ParseFormAsync(
       form,
       ParsingCallback(&AutofillManager::OnAskForValuesToFillImpl, field,
-                      bounding_box, autoselect_first_suggestion,
-                      form_element_was_clicked)
+                      bounding_box, trigger_source)
           .Then(NotifyObserversCallback(&Observer::OnAfterAskForValuesToFill,
                                         form.global_id(), field.global_id())));
 }
@@ -556,16 +552,18 @@ void AutofillManager::OnHidePopup() {
   OnHidePopupImpl();
 }
 
-void AutofillManager::OnSelectFieldOptionsDidChange(const FormData& form) {
+void AutofillManager::OnSelectOrSelectMenuFieldOptionsDidChange(
+    const FormData& form) {
   if (!IsValidFormData(form))
     return;
 
   if (!base::FeatureList::IsEnabled(features::kAutofillParseAsync)) {
-    OnSelectFieldOptionsDidChangeImpl(form);
+    OnSelectOrSelectMenuFieldOptionsDidChangeImpl(form);
     return;
   }
   ParseFormAsync(
-      form, ParsingCallback(&AutofillManager::OnSelectFieldOptionsDidChangeImpl)
+      form, ParsingCallback(
+                &AutofillManager::OnSelectOrSelectMenuFieldOptionsDidChangeImpl)
                 .Then(NotifyNoObserversCallback()));
 }
 
@@ -674,10 +672,10 @@ bool AutofillManager::CanShowAutofillUi() const {
   return driver_->CanShowAutofillUi();
 }
 
-void AutofillManager::TriggerReparseInAllFrames(
-    base::OnceCallback<void(bool success)> trigger_reparse_finished_callback) {
-  driver_->TriggerReparseInAllFrames(
-      std::move(trigger_reparse_finished_callback));
+void AutofillManager::TriggerFormExtractionInAllFrames(
+    base::OnceCallback<void(bool success)> form_extraction_finished_callback) {
+  driver_->TriggerFormExtractionInAllFrames(
+      std::move(form_extraction_finished_callback));
 }
 
 void AutofillManager::ParseFormsAsync(

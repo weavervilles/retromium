@@ -22,6 +22,7 @@
 // and text, with rounded corners.
 class OmniboxChipButton : public views::MdTextButton {
  public:
+  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kChipElementId);
   METADATA_HEADER(OmniboxChipButton);
   explicit OmniboxChipButton(PressedCallback callback);
   OmniboxChipButton(const OmniboxChipButton& button) = delete;
@@ -88,6 +89,8 @@ class OmniboxChipButton : public views::MdTextButton {
   SkColor GetTextAndIconColor() const;
 
   SkColor GetBackgroundColor() const;
+
+  int GetCornerRadius() const;
 
   // An animation used for expanding and collapsing the chip.
   std::unique_ptr<gfx::SlideAnimation> animation_;

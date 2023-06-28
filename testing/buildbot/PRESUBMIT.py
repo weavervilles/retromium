@@ -9,7 +9,6 @@ for more details on the presubmit API built into depot_tools.
 """
 
 PRESUBMIT_VERSION = '2.0.0'
-USE_PYTHON3 = True
 
 _IGNORE_FREEZE_FOOTER = 'Ignore-Freeze'
 
@@ -65,22 +64,17 @@ def CheckTests(input_api, output_api):
   else:
     return []
   glob = input_api.os_path.join(input_api.PresubmitLocalPath(), '*test.py')
-  tests = input_api.canned_checks.GetUnitTests(input_api,
-                                               output_api,
-                                               input_api.glob(glob),
-                                               run_on_python2=False,
-                                               run_on_python3=True,
-                                               skip_shebang_check=True)
+  tests = input_api.canned_checks.GetUnitTests(input_api, output_api,
+                                               input_api.glob(glob))
   return input_api.RunTests(tests)
 
 
-def CheckManageJsonFiles(input_api, output_api):
+def CheckJsonFiles(input_api, output_api):
   return input_api.RunTests([
-      input_api.Command(
-          name='manage JSON files',
-          cmd=[input_api.python3_executable, 'manage.py', '--check'],
-          kwargs={},
-          message=output_api.PresubmitError),
+      input_api.Command(name='check JSON files',
+                        cmd=[input_api.python3_executable, 'check.py'],
+                        kwargs={},
+                        message=output_api.PresubmitError),
   ])
 
 

@@ -39,12 +39,6 @@ const char kAllowFailedPolicyFetchForTest[] =
 // allows the user to install from USB to disk.
 const char kAllowOsInstall[] = "allow-os-install";
 
-// Allows remote attestation (RA) in dev mode for testing purpose. Usually RA
-// is disabled in dev mode because it will always fail. However, there are cases
-// in testing where we do want to go through the permission flow even in dev
-// mode. This can be enabled by this flag.
-const char kAllowRAInDevMode[] = "allow-ra-in-dev-mode";
-
 // Override for the URL used for the ChromeOS Almanac API. Used for local
 // testing with a non-production server (e.g.
 // "--almanac-api-url=http://localhost:8000").
@@ -432,6 +426,9 @@ const char kEnableArcVm[] = "enable-arcvm";
 // Enables ARCVM realtime VCPU feature.
 const char kEnableArcVmRtVcpu[] = "enable-arcvm-rt-vcpu";
 
+// Adds ash-browser back to launcher, even if in LacrosOnly mode.
+const char kEnableAshDebugBrowser[] = "enable-ash-debug-browser";
+
 // Enables the Cast Receiver.
 const char kEnableCastReceiver[] = "enable-cast-receiver";
 
@@ -579,10 +576,6 @@ const char kFirstExecAfterBoot[] = "first-exec-after-boot";
 // Forces fetching tokens for Cryptohome Recovery.
 const char kForceCryptohomeRecoveryForTesting[] =
     "force-cryptohome-recovery-for-testing";
-
-// Forces developer tools availability, no matter what values the enterprise
-// policies DeveloperToolsDisabled and DeveloperToolsAvailability are set to.
-const char kForceDevToolsAvailable[] = "force-devtools-available";
 
 // Forces first-run UI to be shown for every login.
 const char kForceFirstRunUI[] = "force-first-run-ui";
@@ -747,6 +740,10 @@ const char kLoginProfile[] = "login-profile";
 // Specifies the user which is already logged in.
 const char kLoginUser[] = "login-user";
 
+// This flag is set if lacros is not allowed. Specifically this flag is set if
+// there are more than two signed in users i.e. inside multi-user session.
+const char kDisallowLacros[] = "disallow-lacros";
+
 // Specifies the user that the browser data migration should happen for.
 const char kBrowserDataMigrationForUser[] = "browser-data-migration-for-user";
 
@@ -905,6 +902,9 @@ const char kShowLoginDevOverlay[] = "show-login-dev-overlay";
 // testing. Limited to ChromeOS-on-linux and test images only.
 const char kShowOobeDevOverlay[] = "show-oobe-dev-overlay";
 
+// Enables the QuickStart debugger in OOBE which mimics an Android phone.
+const char kShowOobeQuickStartDebugger[] = "show-oobe-quick-start-debugger";
+
 // Draws a circle at each touch point, similar to the Android OS developer
 // option "Show taps".
 const char kShowTaps[] = "show-taps";
@@ -975,6 +975,10 @@ const char kUnfilteredBluetoothDevices[] = "unfiltered-bluetooth-devices";
 // for testing the policy behaviour on the DUT.
 const char kUpdateRequiredAueForTest[] = "aue-reached-for-update-required-test";
 
+// Use the fake FakeCrasAudioClient to handle system audio controls.
+const char kUseFakeCrasAudioClientForDBus[] =
+    "use-fake-cras-audio-client-for-dbus";
+
 // Flag that stored MyFiles folder inside the user data directory.
 // $HOME/Downloads is used as MyFiles folder for ease access to local files for
 // debugging when running on Linux. By setting this flag, <cryptohome>/MyFiles
@@ -1033,6 +1037,11 @@ bool ShouldSkipOobePostLogin() {
 bool ShouldShowAccessibilityButtonOnMarketingOptInForTesting() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       kOobeShowAccessibilityButtonOnMarketingOptInForTesting);
+}
+
+bool IsAshDebugBrowserEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kEnableAshDebugBrowser);
 }
 
 bool IsTabletFormFactor() {
@@ -1145,6 +1154,11 @@ bool IsStabilizeTimeDependentViewForTestsEnabled() {
 bool IsCameraEffectsSupportedByHardware() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       kCameraEffectsSupportedByHardware);
+}
+
+bool UseFakeCrasAudioClientForDBus() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kUseFakeCrasAudioClientForDBus);
 }
 
 }  // namespace switches

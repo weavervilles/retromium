@@ -14,10 +14,10 @@
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/values.h"
+#include "chrome/browser/enterprise/connectors/device_trust/attestation/browser/attestation_switches.h"
+#include "chrome/browser/enterprise/connectors/device_trust/attestation/browser/crypto_utility.h"
 #include "chrome/browser/enterprise/connectors/device_trust/attestation/common/attestation_utils.h"
 #include "chrome/browser/enterprise/connectors/device_trust/attestation/common/proto/device_trust_attestation_ca.pb.h"
-#include "chrome/browser/enterprise/connectors/device_trust/attestation/desktop/crypto_utility.h"
-#include "chrome/browser/enterprise/connectors/device_trust/attestation/desktop/desktop_attestation_switches.h"
 #include "chrome/browser/enterprise/connectors/device_trust/common/common_types.h"
 #include "chrome/browser/enterprise/connectors/device_trust/common/metrics_utils.h"
 #include "components/device_signals/core/common/signals_constants.h"
@@ -184,7 +184,7 @@ void DesktopAttestationService::OnChallengeValidated(
 
   // Fill `key_info` out for Chrome Browser.
   KeyInfo key_info;
-  key_info.set_key_type(CBCM);
+  key_info.set_flow_type(CBCM);
   // dm_token contains all of the information required by the server to retrieve
   // the device. device_id is necessary to validate the dm_token.
   key_info.set_dm_token(dm_token.value());

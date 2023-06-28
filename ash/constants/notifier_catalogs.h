@@ -184,7 +184,9 @@ enum class NotificationCatalogName {
   kHotspot = 169,
   kGeolocationSwitch = 170,
   kMultiCaptureOnLogin = 171,
-  kMaxValue = kMultiCaptureOnLogin
+  kFloatingWorkspace = 172,
+  kScalableIphNotification = 173,
+  kMaxValue = kScalableIphNotification
 };
 
 // A living catalog that registers system nudges.
@@ -204,7 +206,15 @@ enum class NudgeCatalogName {
   kClipboardHistoryZeroState = 7,
   kClipboardHistoryOnboarding = 8,
   kDisableDiacritics = 9,
-  kMaxValue = kDisableDiacritics,
+  kClipboardHistoryDuplicateCopy = 10,
+  kVideoConferenceTraySpeakOnMuteDetected = 11,
+  kVideoConferenceTrayMicrophoneUseWhileHWDisabled = 12,
+  kVideoConferenceTrayMicrophoneUseWhileSWDisabled = 13,
+  kVideoConferenceTrayCameraUseWhileHWDisabled = 14,
+  kVideoConferenceTrayCameraUseWhileSWDisabled = 15,
+  kVideoConferenceTraySpeakOnMuteOptIn = 16,
+  kVideoConferenceTraySpeakOnMuteOptInConfirmation = 17,
+  kMaxValue = kVideoConferenceTraySpeakOnMuteOptInConfirmation
 };
 
 // A living catalog that registers toasts.
@@ -252,18 +262,12 @@ enum class ToastCatalogName {
   kEcheTrayCopyPasteNotImplemented = 37,
   kEcheTrayTabletModeNotSupported = 38,
   kNotificationCenterTrayNoNotifications = 39,
-  kCopyToClipboardAction = 40,
-  kVideoConferenceTraySpeakOnMuteDetected = 41,
+  // [Deprecated] kCopyToClipboardAction = 40,
+  // [Deprecated] kVideoConferenceTraySpeakOnMuteDetected = 41,
   kCopyGifToClipboardAction = 42,
-  kVideoConferenceTrayUseWhileDisabled = 43,
-  kMaxValue = kVideoConferenceTrayUseWhileDisabled,
+  // [Deprecated] kVideoConferenceTrayUseWhileDisabled = 43,
+  kMaxValue = kCopyGifToClipboardAction
 };
-
-// A living catalog that registers anchored nudges.
-// Current values should not be renumbered or removed.
-// TODO(b/280309972): Add metrics for AnchoredNudge catalog.
-// To deprecate comment out the entry.
-enum class AnchoredNudgeCatalogName { kTest = 0, kMaxValue = kTest };
 
 }  // namespace ash
 

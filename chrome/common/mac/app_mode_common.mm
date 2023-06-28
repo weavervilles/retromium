@@ -33,6 +33,7 @@ const char kLaunchedByChromeFrameworkDylibPath[] =
 const char kLaunchedForTest[] = "launched-for-test";
 const char kLaunchedAfterRebuild[] = "launched-after-rebuild";
 const char kIsNormalLaunch[] = "is-normal-launch";
+const char kLaunchChromeForTest[] = "launch-chrome-for-test";
 
 NSString* const kCFBundleDocumentTypesKey = @"CFBundleDocumentTypes";
 NSString* const kCFBundleTypeExtensionsKey = @"CFBundleTypeExtensions";
@@ -93,7 +94,7 @@ static_assert(
 // static
 ChromeConnectionConfig ChromeConnectionConfig::GenerateForCurrentProcess() {
   return {
-      .framework_version = version_info::GetVersionNumber(),
+      .framework_version = std::string(version_info::GetVersionNumber()),
       .is_mojo_ipcz_enabled = mojo::core::IsMojoIpczEnabled(),
   };
 }

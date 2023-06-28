@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.ConditionVariable;
@@ -36,6 +37,8 @@ import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 
 import org.chromium.base.Callback;
+import org.chromium.base.ContextUtils;
+import org.chromium.base.FeatureList;
 import org.chromium.base.PackageUtils;
 import org.chromium.base.test.params.ParameterAnnotations.UseMethodParameter;
 import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
@@ -44,13 +47,16 @@ import org.chromium.base.test.params.ParameterSet;
 import org.chromium.base.test.params.ParameterizedRunner;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.JniMocker;
 import org.chromium.blink.mojom.AuthenticatorAttachment;
 import org.chromium.blink.mojom.AuthenticatorStatus;
 import org.chromium.blink.mojom.AuthenticatorTransport;
+import org.chromium.blink.mojom.DevicePublicKeyRequest;
 import org.chromium.blink.mojom.GetAssertionAuthenticatorResponse;
 import org.chromium.blink.mojom.MakeCredentialAuthenticatorResponse;
 import org.chromium.blink.mojom.PaymentOptions;
+import org.chromium.blink.mojom.PrfValues;
 import org.chromium.blink.mojom.PublicKeyCredentialCreationOptions;
 import org.chromium.blink.mojom.PublicKeyCredentialDescriptor;
 import org.chromium.blink.mojom.PublicKeyCredentialParameters;
@@ -62,9 +68,11 @@ import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
 import org.chromium.chrome.test.util.browser.Features;
+import org.chromium.components.payments.PaymentFeatureList;
 import org.chromium.components.webauthn.AuthenticatorImpl;
 import org.chromium.components.webauthn.Fido2Api;
 import org.chromium.components.webauthn.Fido2ApiCallHelper;
+import org.chromium.components.webauthn.Fido2ApiTestHelper;
 import org.chromium.components.webauthn.Fido2CredentialRequest;
 import org.chromium.components.webauthn.InternalAuthenticator;
 import org.chromium.components.webauthn.InternalAuthenticatorJni;
@@ -76,10 +84,10 @@ import org.chromium.content_public.browser.ClientDataRequestType;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebAuthenticationDelegate;
 import org.chromium.content_public.browser.test.mock.MockRenderFrameHost;
-import org.chromium.content_public.browser.test.mock.MockWebContents;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_public.common.ContentFeatures;
 import org.chromium.content_public.common.ContentSwitches;
+import org.chromium.device.DeviceFeatureList;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.url.GURL;
 import org.chromium.url.Origin;
@@ -117,6 +125,7 @@ public class Fido2CredentialRequestTest {
     @Mock
     ClientDataJsonImpl.Natives mClientDataJsonImplMock;
 
+    private Context mContext;
     private MockIntentSender mIntentSender;
     private EmbeddedTestServer mTestServer;
     private MockAuthenticatorRenderFrameHost mFrameHost;
@@ -129,9 +138,8 @@ public class Fido2CredentialRequestTest {
     private PublicKeyCredentialRequestOptions mRequestOptions;
     private static final String GOOGLE_PLAY_SERVICES_PACKAGE = "com.google.android.gms";
     private static final String FILLER_ERROR_MSG = "Error Error";
-    private AuthenticatorCallback mCallback;
+    private Fido2ApiTestHelper.AuthenticatorCallback mCallback;
     private long mStartTimeMs;
-    private MockWebContents mMockWebContents;
 
     /**
      * This class constructs the parameters array that is used for testMakeCredential_with_param and
@@ -235,7 +243,7 @@ public class Fido2CredentialRequestTest {
         private OnSuccessListener<List<WebAuthnCredentialDetails>> mSuccessCallback;
 
         @Override
-        public void invokeFido2GetCredentials(String relyingPartyId, int supportLevel,
+        public void invokeFido2GetCredentials(String relyingPartyId,
                 OnSuccessListener<List<WebAuthnCredentialDetails>> successCallback,
                 OnFailureListener failureCallback) {
             if (mInvokeCallbackImmediately) {
@@ -258,71 +266,10 @@ public class Fido2CredentialRequestTest {
         }
     }
 
-    private static class AuthenticatorCallback {
-        private Integer mStatus;
-        private MakeCredentialAuthenticatorResponse mMakeCredentialResponse;
-        private GetAssertionAuthenticatorResponse mGetAssertionAuthenticatorResponse;
-        private List<byte[]> mGetMatchingCredentialIdsResponse;
-
-        // Signals when request is complete.
-        private final ConditionVariable mDone = new ConditionVariable();
-
-        AuthenticatorCallback() {}
-
-        public void onRegisterResponse(int status, MakeCredentialAuthenticatorResponse response) {
-            assert mStatus == null;
-            mStatus = status;
-            mMakeCredentialResponse = response;
-            unblock();
-        }
-
-        public void onSignResponse(int status, GetAssertionAuthenticatorResponse response) {
-            assert mStatus == null;
-            mStatus = status;
-            mGetAssertionAuthenticatorResponse = response;
-            unblock();
-        }
-
-        public void onGetMatchingCredentialIds(List<byte[]> matchingCredentialIds) {
-            mGetMatchingCredentialIdsResponse = matchingCredentialIds;
-            unblock();
-        }
-
-        public void onError(int status) {
-            assert mStatus == null;
-            mStatus = status;
-            unblock();
-        }
-
-        public Integer getStatus() {
-            return mStatus;
-        }
-
-        public MakeCredentialAuthenticatorResponse getMakeCredentialResponse() {
-            return mMakeCredentialResponse;
-        }
-
-        public GetAssertionAuthenticatorResponse getGetAssertionResponse() {
-            return mGetAssertionAuthenticatorResponse;
-        }
-
-        public List<byte[]> getGetMatchingCredentialIdsResponse() {
-            return mGetMatchingCredentialIdsResponse;
-        }
-
-        public void blockUntilCalled() {
-            mDone.block();
-        }
-
-        private void unblock() {
-            mDone.open();
-        }
-    }
-
     private static class TestAuthenticatorImplJni implements InternalAuthenticator.Natives {
-        private AuthenticatorCallback mCallback;
+        private Fido2ApiTestHelper.AuthenticatorCallback mCallback;
 
-        TestAuthenticatorImplJni(AuthenticatorCallback callback) {
+        TestAuthenticatorImplJni(Fido2ApiTestHelper.AuthenticatorCallback callback) {
             mCallback = callback;
         }
 
@@ -353,16 +300,19 @@ public class Fido2CredentialRequestTest {
     }
 
     private static class MockBrowserBridge extends WebAuthnBrowserBridge {
+        public enum CallbackInvocationType { IMMEDIATE_GET_ASSERTION, IMMEDIATE_HYBRID, DELAYED }
         private byte[] mSelectedCredentialId;
         private List<WebAuthnCredentialDetails> mExpectedCredentialList;
-        private boolean mInvokeCallbackImmediately = true;
-        private Callback<byte[]> mCallback;
+        private CallbackInvocationType mInvokeCallbackImmediately =
+                CallbackInvocationType.IMMEDIATE_GET_ASSERTION;
+        private Callback<byte[]> mGetAssertionCallback;
+        private Runnable mHybridCallback;
         private int mCleanupCalled;
 
         @Override
         public void onCredentialsDetailsListReceived(RenderFrameHost frameHost,
                 List<WebAuthnCredentialDetails> credentialList, boolean isConditionalRequest,
-                Callback<byte[]> callback) {
+                Callback<byte[]> getAssertionCallback, Runnable hybridCallback) {
             Assert.assertEquals(mExpectedCredentialList.size(), credentialList.size());
             for (int i = 0; i < credentialList.size(); i++) {
                 Assert.assertEquals(
@@ -375,10 +325,15 @@ public class Fido2CredentialRequestTest {
                         mExpectedCredentialList.get(0).mUserId, credentialList.get(0).mUserId);
             }
 
-            mCallback = callback;
+            mGetAssertionCallback = getAssertionCallback;
+            mHybridCallback = hybridCallback;
 
-            if (mInvokeCallbackImmediately) {
-                invokeCallback();
+            if (mInvokeCallbackImmediately == CallbackInvocationType.IMMEDIATE_GET_ASSERTION) {
+                invokeGetAssertionCallback();
+            }
+
+            if (mInvokeCallbackImmediately == CallbackInvocationType.IMMEDIATE_HYBRID) {
+                invokeHybridCallback();
             }
         }
 
@@ -396,13 +351,13 @@ public class Fido2CredentialRequestTest {
             mExpectedCredentialList = credentialList;
         }
 
-        public void setInvokeCallbackImmediately(boolean invokeImmediately) {
-            mInvokeCallbackImmediately = invokeImmediately;
+        public void setInvokeCallbackImmediately(CallbackInvocationType type) {
+            mInvokeCallbackImmediately = type;
         }
 
-        public void invokeCallback() {
+        public void invokeGetAssertionCallback() {
             if (mSelectedCredentialId != null) {
-                mCallback.onResult(mSelectedCredentialId);
+                mGetAssertionCallback.onResult(mSelectedCredentialId);
                 return;
             }
 
@@ -412,12 +367,16 @@ public class Fido2CredentialRequestTest {
              * which normally would imply an error response.
              */
             if (mExpectedCredentialList.isEmpty()) {
-                mCallback.onResult(new byte[0]);
+                mGetAssertionCallback.onResult(new byte[0]);
                 return;
             }
 
             /* Return the first ID in the list if one has not been explicitly set. */
-            mCallback.onResult(mExpectedCredentialList.get(0).mCredentialId);
+            mGetAssertionCallback.onResult(mExpectedCredentialList.get(0).mCredentialId);
+        }
+
+        public void invokeHybridCallback() {
+            mHybridCallback.run();
         }
 
         public int getCleanupCalledCount() {
@@ -458,9 +417,10 @@ public class Fido2CredentialRequestTest {
     @Before
     public void setUp() throws Exception {
         Assume.assumeTrue(gmsVersionSupported());
+        mContext = ContextUtils.getApplicationContext();
         mIntentSender = new MockIntentSender();
         mTestServer = sActivityTestRule.getTestServer();
-        mCallback = new AuthenticatorCallback();
+        mCallback = Fido2ApiTestHelper.getAuthenticatorCallback();
         String url = mTestServer.getURLWithHostName(
                 "subdomain.example.test", "/content/test/data/android/authenticator.html");
         GURL gurl = new GURL(url);
@@ -468,8 +428,6 @@ public class Fido2CredentialRequestTest {
         sActivityTestRule.loadUrl(url);
         mFrameHost = new MockAuthenticatorRenderFrameHost();
         mFrameHost.setLastCommittedURL(gurl);
-        mMockWebContents = new MockWebContents();
-        mMockWebContents.renderFrameHost = mFrameHost;
 
         MockitoAnnotations.initMocks(this);
         mTestAuthenticatorImplJni = new TestAuthenticatorImplJni(mCallback);
@@ -477,8 +435,7 @@ public class Fido2CredentialRequestTest {
 
         mCreationOptions = Fido2ApiTestHelper.createDefaultMakeCredentialOptions();
         mRequestOptions = Fido2ApiTestHelper.createDefaultGetAssertionOptions();
-        mRequest = new Fido2CredentialRequest(
-                mIntentSender, WebAuthenticationDelegate.Support.BROWSER);
+        mRequest = new Fido2CredentialRequest(mIntentSender);
         AuthenticatorImpl.overrideFido2CredentialRequestForTesting(mRequest);
 
         mFido2ApiCallHelper = new MockFido2ApiCallHelper();
@@ -489,7 +446,6 @@ public class Fido2CredentialRequestTest {
         mMockBrowserBridge = new MockBrowserBridge();
         mRequest.overrideBrowserBridgeForTesting(mMockBrowserBridge);
 
-        mRequest.setWebContentsForTesting(mMockWebContents);
         mStartTimeMs = SystemClock.elapsedRealtime();
     }
 
@@ -501,11 +457,15 @@ public class Fido2CredentialRequestTest {
                 >= AuthenticatorImpl.GMSCORE_MIN_VERSION;
     }
 
+    private boolean gmsVersionSupportsHybridClient() {
+        return PackageUtils.getPackageVersion(GOOGLE_PLAY_SERVICES_PACKAGE) >= 231206000;
+    }
+
     @Test
     @SmallTest
     public void testConvertOriginToString_defaultPortRemoved() {
         Origin origin = Origin.create(new GURL("https://www.example.com:443"));
-        String parsedOrigin = mRequest.convertOriginToString(origin);
+        String parsedOrigin = Fido2CredentialRequest.convertOriginToString(origin);
         Assert.assertEquals(parsedOrigin, "https://www.example.com/");
     }
 
@@ -515,7 +475,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulMakeCredentialIntent());
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -531,7 +492,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulPasskeyMakeCredentialIntent());
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -550,7 +512,8 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testMakeCredential_unsuccessfulAttemptToShowCancelableIntent() {
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -566,7 +529,8 @@ public class Fido2CredentialRequestTest {
         // An intent missing FIDO2_KEY_RESPONSE_EXTRA.
         mIntentSender.setNextResultIntent(new Intent());
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -582,7 +546,8 @@ public class Fido2CredentialRequestTest {
         // Don't set an intent to be returned at all.
         mIntentSender.setNextResultIntent(null);
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -597,7 +562,8 @@ public class Fido2CredentialRequestTest {
     public void testMakeCredential_resultCanceled() {
         mIntentSender.setNextResult(Activity.RESULT_CANCELED, null);
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -613,7 +579,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResult(Activity.RESULT_FIRST_USER,
                 Fido2ApiTestHelper.createSuccessfulMakeCredentialIntent());
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -632,7 +599,8 @@ public class Fido2CredentialRequestTest {
         parameters.type = PublicKeyCredentialType.PUBLIC_KEY;
         customOptions.publicKeyParameters = new PublicKeyCredentialParameters[] {parameters};
 
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -650,7 +618,8 @@ public class Fido2CredentialRequestTest {
         parameters.type = 10; // Not a valid type.
         customOptions.publicKeyParameters = new PublicKeyCredentialParameters[] {parameters};
 
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -673,7 +642,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulMakeCredentialIntent());
 
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -691,7 +661,8 @@ public class Fido2CredentialRequestTest {
 
         PublicKeyCredentialCreationOptions customOptions = mCreationOptions;
         customOptions.excludeCredentials = null;
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -704,8 +675,8 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testAuthenticatorImplMakeCredential_success() {
-        AuthenticatorImpl authenticator = new AuthenticatorImpl(
-                mIntentSender, mFrameHost, WebAuthenticationDelegate.Support.BROWSER);
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulMakeCredentialIntent());
         TestThreadUtils.runOnUiThreadBlocking(() -> {
@@ -723,8 +694,8 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testAuthenticatorImplMakeCredential_resultCanceled() {
-        AuthenticatorImpl authenticator = new AuthenticatorImpl(
-                mIntentSender, mFrameHost, WebAuthenticationDelegate.Support.BROWSER);
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResult(Activity.RESULT_CANCELED, null);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             authenticator.makeCredential(mCreationOptions,
@@ -741,8 +712,8 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testInternalAuthenticatorMakeCredential_success() {
-        InternalAuthenticator authenticator =
-                InternalAuthenticator.createForTesting(mIntentSender, mFrameHost);
+        InternalAuthenticator authenticator = InternalAuthenticator.createForTesting(
+                mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulMakeCredentialIntent());
         TestThreadUtils.runOnUiThreadBlocking(
@@ -759,8 +730,8 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testInternalAuthenticatorMakeCredential_resultCanceled() {
-        InternalAuthenticator authenticator =
-                InternalAuthenticator.createForTesting(mIntentSender, mFrameHost);
+        InternalAuthenticator authenticator = InternalAuthenticator.createForTesting(
+                mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResult(Activity.RESULT_CANCELED, null);
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { authenticator.makeCredential(mCreationOptions.serialize()); });
@@ -784,7 +755,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulMakeCredentialIntentWithAttestation());
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -819,7 +791,8 @@ public class Fido2CredentialRequestTest {
                 Fido2ApiTestHelper.createDefaultMakeCredentialOptions();
         creationOptions.authenticatorSelection.residentKey = ResidentKeyRequirement.REQUIRED;
 
-        mRequest.handleMakeCredentialRequest(creationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, creationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -853,7 +826,8 @@ public class Fido2CredentialRequestTest {
                 Fido2ApiTestHelper.createDefaultMakeCredentialOptions();
         creationOptions.authenticatorSelection.residentKey = ResidentKeyRequirement.PREFERRED;
 
-        mRequest.handleMakeCredentialRequest(creationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, creationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -885,7 +859,8 @@ public class Fido2CredentialRequestTest {
                 Fido2ApiTestHelper.createDefaultMakeCredentialOptions();
         creationOptions.credProps = true;
 
-        mRequest.handleMakeCredentialRequest(creationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, creationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -902,7 +877,8 @@ public class Fido2CredentialRequestTest {
     public void testGetAssertionWithoutUvmRequested_success() {
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createSuccessfulGetAssertionIntent());
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -917,8 +893,9 @@ public class Fido2CredentialRequestTest {
     public void testGetAssertionWithUvmRequestedWithoutUvmResponded_success() {
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createSuccessfulGetAssertionIntent());
 
-        mRequestOptions.userVerificationMethods = true;
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequestOptions.extensions.userVerificationMethods = true;
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -934,8 +911,9 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithUvm());
 
-        mRequestOptions.userVerificationMethods = true;
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequestOptions.extensions.userVerificationMethods = true;
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -953,7 +931,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithUserId());
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -966,7 +945,8 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testGetAssertion_unsuccessfulAttemptToShowCancelableIntent() {
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -982,7 +962,8 @@ public class Fido2CredentialRequestTest {
         // An intent missing FIDO2_KEY_RESPONSE_EXTRA.
         mIntentSender.setNextResultIntent(new Intent());
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -998,7 +979,8 @@ public class Fido2CredentialRequestTest {
         // Don't set an intent to be returned at all.
         mIntentSender.setNextResultIntent(null);
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1013,7 +995,8 @@ public class Fido2CredentialRequestTest {
     public void testGetAssertion_resultCanceled() {
         mIntentSender.setNextResult(Activity.RESULT_CANCELED, null);
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1029,7 +1012,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResult(Activity.RESULT_FIRST_USER,
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntent());
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1045,7 +1029,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createErrorIntent(
                 Fido2Api.UNKNOWN_ERR, "Low level error 0x6a80"));
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1059,10 +1044,11 @@ public class Fido2CredentialRequestTest {
     @SmallTest
     public void testGetAssertion_appIdUsed() {
         PublicKeyCredentialRequestOptions customOptions = mRequestOptions;
-        customOptions.appid = "www.example.com";
+        customOptions.extensions.appid = "www.example.com";
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createSuccessfulGetAssertionIntent());
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1077,11 +1063,11 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testAuthenticatorImplGetAssertionWithUvmRequestedWithUvmResponded_success() {
-        AuthenticatorImpl authenticator = new AuthenticatorImpl(
-                mIntentSender, mFrameHost, WebAuthenticationDelegate.Support.BROWSER);
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithUvm());
-        mRequestOptions.userVerificationMethods = true;
+        mRequestOptions.extensions.userVerificationMethods = true;
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             authenticator.getAssertion(mRequestOptions,
@@ -1096,9 +1082,57 @@ public class Fido2CredentialRequestTest {
 
     @Test
     @SmallTest
+    public void testAuthenticatorImplGetAssertionWithPrf_success() {
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(mContext, mIntentSender, mFrameHost, mOrigin);
+        mIntentSender.setNextResultIntent(
+                Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithPrf());
+        PrfValues prfValues = new PrfValues();
+        prfValues.first = new byte[] {1, 2, 3, 4, 5, 6};
+        mRequestOptions.extensions.prf = true;
+        mRequestOptions.extensions.prfInputs = new PrfValues[] {
+                prfValues,
+        };
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            authenticator.getAssertion(mRequestOptions,
+                    (status, response,
+                            dom_exception) -> mCallback.onSignResponse(status, response));
+        });
+        mCallback.blockUntilCalled();
+
+        Assert.assertEquals(mCallback.getStatus(), Integer.valueOf(AuthenticatorStatus.SUCCESS));
+        Fido2ApiTestHelper.validatePrfResults(mCallback.getGetAssertionResponse().prfResults);
+        Fido2ApiTestHelper.verifyRespondedBeforeTimeout(mStartTimeMs);
+    }
+
+    @Test
+    @SmallTest
+    public void testAuthenticatorImplGetAssertionWithDevicePubKey_success() {
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(mContext, mIntentSender, mFrameHost, mOrigin);
+        mIntentSender.setNextResultIntent(
+                Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithDevicePubKey());
+        mRequestOptions.extensions.devicePublicKey = new DevicePublicKeyRequest();
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            authenticator.getAssertion(mRequestOptions,
+                    (status, response,
+                            dom_exception) -> mCallback.onSignResponse(status, response));
+        });
+        mCallback.blockUntilCalled();
+
+        Assert.assertEquals(mCallback.getStatus(), Integer.valueOf(AuthenticatorStatus.SUCCESS));
+        Fido2ApiTestHelper.validateDevicePubKey(
+                mCallback.getGetAssertionResponse().devicePublicKey);
+        Fido2ApiTestHelper.verifyRespondedBeforeTimeout(mStartTimeMs);
+    }
+
+    @Test
+    @SmallTest
     public void testAuthenticatorImplGetAssertion_resultCanceled() {
-        AuthenticatorImpl authenticator = new AuthenticatorImpl(
-                mIntentSender, mFrameHost, WebAuthenticationDelegate.Support.BROWSER);
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResult(Activity.RESULT_CANCELED, null);
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             authenticator.getAssertion(mRequestOptions,
@@ -1114,11 +1148,11 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testInternalAuthenticatorGetAssertionWithUvmRequestedWithUvmResponded_success() {
-        InternalAuthenticator authenticator =
-                InternalAuthenticator.createForTesting(mIntentSender, mFrameHost);
+        InternalAuthenticator authenticator = InternalAuthenticator.createForTesting(
+                mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithUvm());
-        mRequestOptions.userVerificationMethods = true;
+        mRequestOptions.extensions.userVerificationMethods = true;
 
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { authenticator.getAssertion(mRequestOptions.serialize()); });
@@ -1131,8 +1165,8 @@ public class Fido2CredentialRequestTest {
     @Test
     @SmallTest
     public void testInternalAuthenticatorGetAssertion_resultCanceled() {
-        InternalAuthenticator authenticator =
-                InternalAuthenticator.createForTesting(mIntentSender, mFrameHost);
+        InternalAuthenticator authenticator = InternalAuthenticator.createForTesting(
+                mContext, mIntentSender, mFrameHost, mOrigin);
         mIntentSender.setNextResult(Activity.RESULT_CANCELED, null);
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { authenticator.getAssertion(mRequestOptions.serialize()); });
@@ -1152,7 +1186,8 @@ public class Fido2CredentialRequestTest {
 
         PublicKeyCredentialCreationOptions customOptions = mCreationOptions;
         customOptions.attestation = org.chromium.blink.mojom.AttestationConveyancePreference.NONE;
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1171,7 +1206,8 @@ public class Fido2CredentialRequestTest {
         PublicKeyCredentialCreationOptions customOptions = mCreationOptions;
         customOptions.attestation =
                 org.chromium.blink.mojom.AttestationConveyancePreference.INDIRECT;
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1189,7 +1225,8 @@ public class Fido2CredentialRequestTest {
 
         PublicKeyCredentialCreationOptions customOptions = mCreationOptions;
         customOptions.attestation = org.chromium.blink.mojom.AttestationConveyancePreference.DIRECT;
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1208,7 +1245,8 @@ public class Fido2CredentialRequestTest {
         PublicKeyCredentialCreationOptions customOptions = mCreationOptions;
         customOptions.attestation =
                 org.chromium.blink.mojom.AttestationConveyancePreference.ENTERPRISE;
-        mRequest.handleMakeCredentialRequest(customOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, customOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1225,7 +1263,8 @@ public class Fido2CredentialRequestTest {
                 Fido2ApiTestHelper.createErrorIntent(Fido2Api.INVALID_STATE_ERR,
                         "One of the excluded credentials exists on the local device"));
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1244,7 +1283,8 @@ public class Fido2CredentialRequestTest {
 
         mCreationOptions.isPaymentCredentialCreation = true;
         Assert.assertFalse(mFrameHost.mIsPaymentCredentialCreation);
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1264,7 +1304,8 @@ public class Fido2CredentialRequestTest {
         // local passkeys available.
         mFido2ApiCallHelper.setReturnedCredentialDetails(new ArrayList<>());
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1289,7 +1330,8 @@ public class Fido2CredentialRequestTest {
         // local passkeys available.
         mFido2ApiCallHelper.setReturnedCredentialDetails(new ArrayList<>());
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1306,7 +1348,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createErrorIntent(
                 Fido2Api.CONSTRAINT_ERR, "The device is not secured with any screen lock"));
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1322,7 +1365,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createErrorIntent(
                 Fido2Api.CONSTRAINT_ERR, "The device is not secured with any screen lock"));
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1339,7 +1383,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createErrorIntent(errorCode, errorMsg));
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1355,7 +1400,8 @@ public class Fido2CredentialRequestTest {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createErrorIntent(errorCode, errorMsg));
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1371,7 +1417,8 @@ public class Fido2CredentialRequestTest {
             Integer errorCode, String errorMsg, Integer status) {
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createErrorIntent(errorCode, null));
 
-        mRequest.handleMakeCredentialRequest(mCreationOptions, mFrameHost, mOrigin,
+        mRequest.handleMakeCredentialRequest(mContext, mCreationOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin,
                 (responseStatus, response)
                         -> mCallback.onRegisterResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1387,7 +1434,8 @@ public class Fido2CredentialRequestTest {
             Integer errorCode, String errorMsg, Integer status) {
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createErrorIntent(errorCode, null));
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1398,11 +1446,11 @@ public class Fido2CredentialRequestTest {
 
     @Test
     @SmallTest
+    @EnableFeatures(PaymentFeatureList.SECURE_PAYMENT_CONFIRMATION)
     public void testGetAssertion_securePaymentConfirmation_canReplaceClientDataJson() {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithUvm());
 
-        Fido2ApiTestHelper.setSecurePaymentConfirmationEnabled(mMocker);
         String clientDataJson = "520";
         Fido2ApiTestHelper.mockClientDataJson(mMocker, clientDataJson);
 
@@ -1410,7 +1458,8 @@ public class Fido2CredentialRequestTest {
 
         PaymentOptions payment = Fido2ApiTestHelper.createPaymentOptions();
         mRequestOptions.challenge = new byte[3];
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, payment,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, payment,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1424,18 +1473,19 @@ public class Fido2CredentialRequestTest {
 
     @Test
     @SmallTest
+    @EnableFeatures(PaymentFeatureList.SECURE_PAYMENT_CONFIRMATION)
     public void testGetAssertion_securePaymentConfirmation_clientDataJsonCannotBeEmpty() {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithUvm());
 
-        Fido2ApiTestHelper.setSecurePaymentConfirmationEnabled(mMocker);
         Fido2ApiTestHelper.mockClientDataJson(mMocker, null);
 
         mFrameHost.setLastCommittedURL(new GURL("https://www.chromium.org/pay"));
 
         PaymentOptions payment = Fido2ApiTestHelper.createPaymentOptions();
         mRequestOptions.challenge = new byte[3];
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, payment,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, payment,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1448,14 +1498,12 @@ public class Fido2CredentialRequestTest {
 
     @Test
     @SmallTest
+    @EnableFeatures(PaymentFeatureList.SECURE_PAYMENT_CONFIRMATION)
     public void testGetAssertion_securePaymentConfirmation_buildClientDataJsonParameters() {
         mIntentSender.setNextResultIntent(
                 Fido2ApiTestHelper.createSuccessfulGetAssertionIntentWithUvm());
 
-        GURL topUrl = new GURL("https://www.chromium.org/pay");
-        mFrameHost.setLastCommittedURL(topUrl);
-
-        Fido2ApiTestHelper.setSecurePaymentConfirmationEnabled(mMocker);
+        Origin topOrigin = Origin.create(new GURL("https://www.chromium.org/pay"));
 
         // ClientDataJsonImplJni is mocked directly instead of using
         // Fido2ApiTestHelper.mockClientDataJson so that it can be used to verify the call arguments
@@ -1464,7 +1512,8 @@ public class Fido2CredentialRequestTest {
 
         PaymentOptions payment = Fido2ApiTestHelper.createPaymentOptions();
         mRequestOptions.challenge = new byte[3];
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, payment,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, topOrigin, payment,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1474,12 +1523,13 @@ public class Fido2CredentialRequestTest {
         ArgumentCaptor<Origin> topOriginCaptor = ArgumentCaptor.forClass(Origin.class);
         Mockito.verify(mClientDataJsonImplMock, Mockito.times(1))
                 .buildClientDataJson(eq(ClientDataRequestType.PAYMENT_GET),
-                        eq(mRequest.convertOriginToString(mOrigin)), eq(mRequestOptions.challenge),
-                        eq(false), eq(payment.serialize()), eq(mRequestOptions.relyingPartyId),
-                        topOriginCaptor.capture());
+                        eq(Fido2CredentialRequest.convertOriginToString(mOrigin)),
+                        eq(mRequestOptions.challenge), eq(false), eq(payment.serialize()),
+                        eq(mRequestOptions.relyingPartyId), topOriginCaptor.capture());
 
-        String topOriginString = mRequest.convertOriginToString(topOriginCaptor.getValue());
-        String expectedTopOriginString = mRequest.convertOriginToString(Origin.create(topUrl));
+        String topOriginString =
+                Fido2CredentialRequest.convertOriginToString(topOriginCaptor.getValue());
+        String expectedTopOriginString = Fido2CredentialRequest.convertOriginToString(topOrigin);
         Assert.assertEquals(expectedTopOriginString, topOriginString);
     }
 
@@ -1493,7 +1543,8 @@ public class Fido2CredentialRequestTest {
 
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1511,7 +1562,8 @@ public class Fido2CredentialRequestTest {
 
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1529,7 +1581,8 @@ public class Fido2CredentialRequestTest {
 
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1550,7 +1603,8 @@ public class Fido2CredentialRequestTest {
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1570,7 +1624,8 @@ public class Fido2CredentialRequestTest {
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1594,7 +1649,8 @@ public class Fido2CredentialRequestTest {
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1613,7 +1669,8 @@ public class Fido2CredentialRequestTest {
 
         mFido2ApiCallHelper.setInvokeCallbackImmediately(false);
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1633,11 +1690,13 @@ public class Fido2CredentialRequestTest {
     public void testGetAssertion_conditionalUi_cancelWhileWaitingForSelection() {
         mMockBrowserBridge.setExpectedCredentialDetailsList(Arrays.asList(
                 new WebAuthnCredentialDetails[] {Fido2ApiTestHelper.getCredentialDetails()}));
-        mMockBrowserBridge.setInvokeCallbackImmediately(false);
+        mMockBrowserBridge.setInvokeCallbackImmediately(
+                MockBrowserBridge.CallbackInvocationType.DELAYED);
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1660,7 +1719,8 @@ public class Fido2CredentialRequestTest {
 
         mIntentSender.setInvokeCallbackImmediately(false);
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1685,7 +1745,8 @@ public class Fido2CredentialRequestTest {
 
         mIntentSender.setInvokeCallbackImmediately(false);
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1708,7 +1769,8 @@ public class Fido2CredentialRequestTest {
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1729,7 +1791,8 @@ public class Fido2CredentialRequestTest {
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1740,7 +1803,7 @@ public class Fido2CredentialRequestTest {
 
         // Select credential again, and provide a success response this time.
         mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createSuccessfulGetAssertionIntent());
-        mMockBrowserBridge.invokeCallback();
+        mMockBrowserBridge.invokeGetAssertionCallback();
         mCallback.blockUntilCalled();
         Assert.assertEquals(Integer.valueOf(AuthenticatorStatus.SUCCESS), mCallback.getStatus());
         Fido2ApiTestHelper.validateGetAssertionResponse(mCallback.getGetAssertionResponse());
@@ -1756,7 +1819,8 @@ public class Fido2CredentialRequestTest {
 
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1780,7 +1844,8 @@ public class Fido2CredentialRequestTest {
         mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[] {descriptor};
         mRequestOptions.isConditional = true;
 
-        mRequest.handleGetAssertionRequest(mRequestOptions, mFrameHost, mOrigin, /*payment=*/null,
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
                 (responseStatus, response)
                         -> mCallback.onSignResponse(responseStatus, response),
                 errorStatus -> mCallback.onError(errorStatus));
@@ -1869,6 +1934,36 @@ public class Fido2CredentialRequestTest {
         mCallback.blockUntilCalled();
         Assert.assertArrayEquals(mCallback.getGetMatchingCredentialIdsResponse().toArray(),
                 new byte[][] {{1, 2, 3}});
+    }
+
+    @Test
+    @SmallTest
+    public void testGetAssertion_conditionalUiHybrid_success() {
+        Assume.assumeTrue(gmsVersionSupportsHybridClient());
+
+        FeatureList.TestValues testValues = new FeatureList.TestValues();
+        testValues.addFeatureFlagOverride(
+                DeviceFeatureList.WEBAUTHN_ANDROID_HYBRID_CLIENT_UI, true);
+        FeatureList.setTestValues(testValues);
+        mIntentSender.setNextResultIntent(Fido2ApiTestHelper.createSuccessfulGetAssertionIntent());
+        mMockBrowserBridge.setExpectedCredentialDetailsList(
+                Arrays.asList(Fido2ApiTestHelper.getCredentialDetails()));
+        mMockBrowserBridge.setInvokeCallbackImmediately(
+                MockBrowserBridge.CallbackInvocationType.IMMEDIATE_HYBRID);
+
+        mRequestOptions.allowCredentials = new PublicKeyCredentialDescriptor[0];
+        mRequestOptions.isConditional = true;
+
+        mRequest.handleGetAssertionRequest(mContext, mRequestOptions, mFrameHost,
+                /*maybeClientDataHash=*/null, mOrigin, mOrigin, /*payment=*/null,
+                (responseStatus, response)
+                        -> mCallback.onSignResponse(responseStatus, response),
+                errorStatus -> mCallback.onError(errorStatus));
+        mCallback.blockUntilCalled();
+        Assert.assertEquals(Integer.valueOf(AuthenticatorStatus.SUCCESS), mCallback.getStatus());
+        Fido2ApiTestHelper.validateGetAssertionResponse(mCallback.getGetAssertionResponse());
+        Fido2ApiTestHelper.verifyRespondedBeforeTimeout(mStartTimeMs);
+        Assert.assertEquals(mMockBrowserBridge.getCleanupCalledCount(), 1);
     }
 
     private static class TestParcelable implements Parcelable {

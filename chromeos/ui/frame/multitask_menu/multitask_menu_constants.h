@@ -17,9 +17,13 @@ constexpr gfx::Insets kMultitaskBaseButtonMargin(4);
 constexpr int kMultitaskBaseButtonBorderRadius = 7;
 constexpr int kButtonBorderSize = 1;
 constexpr int kButtonCornerRadius = 4;
+constexpr SkAlpha kMultitaskDefaultButtonOpacity = SK_AlphaOPAQUE * 0.21;
+constexpr SkAlpha kMultitaskHoverButtonOpacity = SK_AlphaOPAQUE * 0.40;
+constexpr SkAlpha kMultitaskHoverBackgroundOpacity = SK_AlphaOPAQUE * 0.12;
+constexpr SkAlpha kMultitaskDisabledButtonOpacity = SK_AlphaOPAQUE * 0.15;
 
 // Default color for button pattern and border in default state.
-// TODO(shidi): Will replace these once color provider is integrated.
+// TODO(b/288460644): Delete once Jelly is launched.
 constexpr SkColor kMultitaskButtonDefaultColor =
     SkColorSetA(gfx::kGoogleGrey600, SK_AlphaOPAQUE * 0.58);
 

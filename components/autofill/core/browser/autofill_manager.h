@@ -191,17 +191,12 @@ class AutofillManager
   // Invoked when the |form| needs to be autofilled, the |bounding_box| is
   // a window relative value of |field|.
   // |bounding_box| are viewport coordinates.
-  // |form_element_was_clicked| indicates if any of the form fields were
-  // clicked/tapped. Used to understand if the Touch To Fill or the Fast
-  // Checkout surface could be used for showing suggestions. Note that it
-  // doesn't guarantee the given form input field is eligible for autofilling.
   // Virtual for testing.
   virtual void OnAskForValuesToFill(
       const FormData& form,
       const FormFieldData& field,
       const gfx::RectF& bounding_box,
-      AutoselectFirstSuggestion autoselect_first_suggestion,
-      FormElementWasClicked form_element_was_clicked);
+      AutofillSuggestionTriggerSource trigger_source);
 
   // Invoked when |form|'s |field| has focus.
   // |bounding_box| are viewport coordinates.
@@ -256,7 +251,7 @@ class AutofillManager
   void OnHidePopup();
 
   // Invoked when the options of a select element in the |form| changed.
-  void OnSelectFieldOptionsDidChange(const FormData& form);
+  void OnSelectOrSelectMenuFieldOptionsDidChange(const FormData& form);
 
   // Invoked after JavaScript set the value of |field| in |form|. Only called
   // if |field| was in autofilled state. Note that from a renderer's
@@ -318,8 +313,8 @@ class AutofillManager
   virtual bool CanShowAutofillUi() const;
 
   // Forwards call to the same-named `AutofillDriver` function.
-  virtual void TriggerReparseInAllFrames(
-      base::OnceCallback<void(bool success)> trigger_reparse_finished_callback);
+  virtual void TriggerFormExtractionInAllFrames(
+      base::OnceCallback<void(bool success)> form_extraction_finished_callback);
 
   void AddObserver(Observer* observer) { observers_.AddObserver(observer); }
 
@@ -404,8 +399,7 @@ class AutofillManager
       const FormData& form,
       const FormFieldData& field,
       const gfx::RectF& bounding_box,
-      AutoselectFirstSuggestion autoselect_first_suggestion,
-      FormElementWasClicked form_element_was_clicked) = 0;
+      AutofillSuggestionTriggerSource trigger_source) = 0;
 
   virtual void OnFocusOnFormFieldImpl(const FormData& form,
                                       const FormFieldData& field,
@@ -437,7 +431,8 @@ class AutofillManager
 
   virtual void OnHidePopupImpl() = 0;
 
-  virtual void OnSelectFieldOptionsDidChangeImpl(const FormData& form) = 0;
+  virtual void OnSelectOrSelectMenuFieldOptionsDidChangeImpl(
+      const FormData& form) = 0;
 
   virtual void OnJavaScriptChangedAutofilledValueImpl(
       const FormData& form,
@@ -530,7 +525,7 @@ class AutofillManager
 
   // Provides driver-level context to the shared code of the component. Must
   // outlive this object.
-  const raw_ptr<AutofillDriver> driver_;
+  const raw_ptr<AutofillDriver, DanglingUntriaged> driver_;
 
   // Do not access this directly. Instead, please use client() or
   // unsafe_client(). These functions check (or explicitly don't check) that the

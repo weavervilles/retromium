@@ -192,6 +192,13 @@ bool CSSPrimitiveValue::IsPercentage() const {
   return To<CSSMathFunctionValue>(this)->IsPercentage();
 }
 
+bool CSSPrimitiveValue::HasPercentage() const {
+  if (IsNumericLiteralValue()) {
+    return To<CSSNumericLiteralValue>(this)->IsPercentage();
+  }
+  return To<CSSMathFunctionValue>(this)->ExpressionNode()->HasPercentage();
+}
+
 bool CSSPrimitiveValue::IsTime() const {
   if (IsNumericLiteralValue()) {
     return To<CSSNumericLiteralValue>(this)->IsTime();
@@ -326,6 +333,14 @@ double CSSPrimitiveValue::ComputeLength(
     const CSSLengthResolver& length_resolver) const {
   return CSSValueClampingUtils::ClampLength(
       ComputeLengthDouble(length_resolver));
+}
+
+int CSSPrimitiveValue::ComputeInteger(
+    const CSSLengthResolver& length_resolver) const {
+  DCHECK(IsNumber());
+  return IsCalculated()
+             ? To<CSSMathFunctionValue>(this)->ComputeInteger(length_resolver)
+             : To<CSSNumericLiteralValue>(this)->ComputeInteger();
 }
 
 double CSSPrimitiveValue::ComputeLengthDouble(

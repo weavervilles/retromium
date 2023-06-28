@@ -36,6 +36,7 @@ source_set("passwords") {
   ]
   deps = [
     ":infobar_delegates",
+    ":password_checkup_metrics",
     ":store_factory",
     "//base",
     "//base:i18n",
@@ -71,7 +72,6 @@ source_set("passwords") {
     "//ios/chrome/browser/autofill:autofill_shared",
     "//ios/chrome/browser/autofill/bottom_sheet",
     "//ios/chrome/browser/credential_provider_promo:features",
-    "//ios/chrome/browser/flags:system_flags",
     "//ios/chrome/browser/infobars",
     "//ios/chrome/browser/infobars:public",
     "//ios/chrome/browser/safe_browsing",
@@ -81,6 +81,7 @@ source_set("passwords") {
     "//ios/chrome/browser/shared/model/browser_state",
     "//ios/chrome/browser/shared/public/commands",
     "//ios/chrome/browser/shared/public/features",
+    "//ios/chrome/browser/shared/public/features:system_flags",
     "//ios/chrome/browser/shared/ui/elements",
     "//ios/chrome/browser/shared/ui/util",
     "//ios/chrome/browser/signin",
@@ -174,6 +175,7 @@ source_set("infobar_delegates") {
     "//components/strings",
     "//ios/chrome/app/strings",
     "//ios/chrome/app/theme",
+    "//ios/chrome/browser/shared/public/commands",
     "//ios/chrome/browser/signin",
     "//ui/base",
   ]
@@ -226,7 +228,7 @@ source_set("unit_tests") {
     "well_known_change_password_tab_helper_unittest.mm",
   ]
   deps = [
-    ":password_checkup_utils",
+    ":password_checkup_metrics",
     ":passwords",
     "//base",
     "//base/test:test_support",
@@ -286,6 +288,7 @@ source_set("eg2_tests") {
     "//base/test:test_support",
     "//components/password_manager/core/common",
     "//components/strings",
+    "//components/sync/base",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser/signin:fake_system_identity",
     "//ios/chrome/browser/ui/authentication:eg_test_support+eg2",

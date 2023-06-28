@@ -183,6 +183,112 @@ EncoderApp --CTUSize=128 --CbQpOffsetList=3,3,8,9 --CrQpOffsetList=2,4,1,7 \
   --BitstreamFile=bbb_chroma_qp_offset_lists.vvc
 ```
 
+#### bbb_scaling_lists.vvc
+VVC stream generated with VTM that is used to verify scaling list parsing.
+Created with VTM and ffmpeg:
+```
+ffmpeg -i bbb-320x240-2video-2audio.mp4 bbb.y4m
+ffmpeg -i bbb.y4m -vf scale=1920x1080 bbb_1920x1080.yuv
+EncoderApp --CTUSize=128 -c sample_scaling_list.cfg -f 8 \
+  --InputFile=bbb_1920x1080.yuv \
+  --BitstreamFile=bbb_scaling_lists.vvc
+```
+Please be noted sample_scaling_list.cfg is the file with the same name from VTM
+sample configure.
+
+#### bbb_rpl_in_ph_nut.vvc
+VVC stream generated with VTM that is used to verify parsing of complex picture
+header structure in a separate PH NALU.
+Created with VTM and ffmpeg:
+```
+ffmpeg -i bbb-320x240-2video-2audio.mp4 bbb.y4m
+ffmpeg -i bbb.y4m -vf scale=1920x1080 bbb_1920x1080.yuv
+EncoderApp -f 5 --EnablePicPartitioning=1 --CTUSize=128 \
+  --TileColumnWidthArray=5,5,5 --TileRowHeightArray=3,3 --RasterScanSlices=0 \
+  --RectSliceFixedWidth=0 --RectSliceFixedHeight=0 \
+  --RectSlicePositions=0,19,30,34,45,64,75,79,90,109,120,124,5,24,35,39,50,69,\
+80,84,95,114,125,129,10,29,40,44,55,74,85,89,100,119,130,134 \
+  --SliceLevelRpl=0 --SliceLevelDblk=0 --SliceLevelSao=0 --SliceLevelAlf=0 \
+  --SliceLevelDeltaQp=0 --ALF=1 --JointCbCr=1 --SAO=1 --WeightedPredP=1 \
+  --WeightedPredB=1 --WeightedPredMethod=4 --CCALF=1 \
+  --VirtualBoundariesPresentInSPSFlag=0 --SliceLevelWeightedPrediction=0
+```
+
+#### bbb_rpl_in_slice.vvc
+VVC stream generated with VTM that is used to verify slice header which contains
+RPL and pred_weight_table directly in it, instead of the picture header structure
+that is part of slice header.
+Created with VTM and ffmpeg:
+```
+ffmpeg -i bbb-320x240-2video-2audio.mp4 bbb.y4m
+ffmpeg -i bbb.y4m -vf scale=1920x1080 bbb_1920x1080.yuv
+EncoderApp -f 5 --EnablePicPartitioning=1 --CTUSize=128 \
+  --SliceLevelRpl=1 --SliceLevelDblk=1 --SliceLevelSao=1 --SliceLevelAlf=1 \
+  --SliceLevelDeltaQp=1 --ALF=1 --JointCbCr=1 --SAO=1 --WeightedPredP=1 \
+  --WeightedPredB=1 --WeightedPredMethod=4 --CCALF=1 \
+  --VirtualBoundariesPresentInSPSFlag=0 --SliceLevelWeightedPrediction=1 \
+  --InputFile=bbb_1920x1080.yuv --BitstreamFile=bbb_rpl_in_slice.vvc
+```
+
+#### bbb_slice_with_entrypoints.vvc
+VVC stream generated with VTM that is used to verify slices with entrypoints
+specified in slice header, and also with deblocking filter params in it.
+Created with VTM and ffmpeg:
+```
+ffmpeg -i bbb-320x240-2video-2audio.mp4 bbb.y4m
+ffmpeg -i bbb.y4m -vf scale=1920x1080 bbb_1920x1080.yuv
+EncoderApp --EnablePicPartitioning=1 --CTUSize=128 --TileColumnWidthArray=5 \
+  --TileRowHeightArray=3 --RasterScanSlices=1 --RasterSliceSizes=15 \
+  --DisableLoopFilterAcrossTiles=0 --DisableLoopFilterAcrossSlices \
+  --SliceLevelRpl=0 --SliceLevelDblk=0 --SliceLevelSao=0 --SliceLevelAlf=0 \
+  --SliceLevelWeightedPrediction=0 --VirtualBoundariesPresentInSPSFlag=0 \
+  --DeblockingFilterOffsetInPPS=0 --DeblockingFilterDisable=0 \
+  --DeblockingFilterBetaOffset_div2=-2 --DeblockingFilterTcOffset_div2=-2 \
+  --DeblockingFilterCbBetaOffset_div2=-2 --DeblockingFilterCbTcOffset_div2=0 \
+  --DeblockingFilterCrBetaOffset_div2=-2 --DeblockingFilterCrTcOffset_div2=0 \
+  --DeblockingFilterMetric=0 --EntryPointsPresent=1 --WaveFrontSynchro=1 \
+  -f 2 --InputFile=bbb_1920x1080.yuv --BitstreamFile=bbb_slice_with_entrypoints.vvc
+```
+
+#### bbb_2_subpictures_8_slices.vvc
+VVC stream generated with VTM that is used to verify VVC slice parser on stream
+that is with multiple subpictures.
+Created with VTM and ffmpeg:
+```
+ffmpeg -i bbb-320x240-2video-2audio.mp4 bbb.y4m
+ffmpeg -i bbb.y4m -vf scale=1920x1080 bbb_1920x1080.yuv
+EncoderApp --EnablePicPartitioning=1 --CTUSize=128 --TileColumnWidthArray=3,4 \
+ --TileRowHeightArray=3 --RasterScanSlices=0 --RectSliceFixedWidth=0 \
+ --RectSliceFixedHeight=0 --RectSlicePositions=0,17,30,32,45,62,75,77,3,85,90,\
+ 130,11,89,101,134 --DisableLoopFilterAcrossTiles=1 \
+ --DisableLoopFilterAcrossSlices=1 --SubPicInfoPresentFlag=1 --NumSubPics=2 \
+ --SubPicCtuTopLeftX=0,11 --SubPicCtuTopLeftY=0,0 --SubPicWidth=11,4 \
+ --SubPicHeight=9,9 --SubPicTreatedAsPicFlag=1,1 \
+ --LoopFilterAcrossSubpicEnabledFlag=0,0 \
+ --SubPicIdMappingExplicitlySignalledFlag=0 \
+ -f 2 --InputFile=bbb_1920x1080.yuv --BitstreamFile=bbb_2_subpictures_8slices.vvc
+```
+
+#### bbb_poc_msb.vvc
+VVC stream generated with VTM that is modified to limit the POC LSB maximum value
+to 16. This is done by change sps_log2_max_pic_order_cnt_lsb_minus4 to 0 in the
+VTM encoder implementation.
+
+#### bbb_poc_gop8.vvc
+VVC stream generated with VTM that is configured to having a GOP size of 4 and
+IDR interval of 8, to verify the POC difference for IDR frame with HEVC.
+Created with VTM and ffmpeg:
+```
+ffmpeg -i bbb-320x240-2video-2audio.mp4 bbb_320x240.yuv
+EncoderApp --CTUSize=128 --GOPSize=4 --DecodingRefreshType=2 --IntraPeriod=8 \
+  --InputFile=bbb_320x240.yuv --BitstreamFile=bbb__poc_gop8.vvc
+```
+
+#### vvc_frames_with_ltr.vvc
+VVC stream generated manually with modified VTM to enable long term reference
+pictures. The stream is also encoded with multiple slices per AU, and each
+slice is with different reference picture lists.
+
 ### AV1
 
 Unless noted otherwise, the codec string is `av01.0.04M.08` for 8-bit files,
@@ -395,6 +501,23 @@ converted from four-colors.mp4 by ffmpeg.
 #### four-colors-vp9-i420a.webm
 A 960x540 yuva420p vp9 video with 4 color blocks (Y,R,G,B) in every frame. This
 is converted from four-colors.mp4 by adding an opacity of 0.5 using ffmpeg.
+
+
+#### four-colors-av1.mp4
+```
+ffmpeg -y -i four-colors.png -t 2 \
+       -vf "colorspace=bt709:iall=bt709:fast=1,scale=960:540,setsar=1:1" \
+       -c:v libaom-av1 -b:v 2M \
+       -pix_fmt yuv420p -movflags +write_colr four-colors-av1.mp4
+```
+
+#### four-colors-hevc.mp4
+```
+ffmpeg -y -i four-colors.png -t 2 \
+       -vf "colorspace=bt709:iall=bt709:fast=1,scale=960:540,setsar=1:1" \
+       -c:v libx265 -crf 26 \
+       -pix_fmt yuv420p -movflags +write_colr four-colors-hevc.mp4
+```
 
 #### bear-320x180-hi10p.mp4
 #### bear-320x240-vp9_profile2.webm
@@ -1421,3 +1544,5 @@ ffmpeg -i bear2.wav -i bear2.wav -i bear2.wav -ar 48000 -filter_complex 'amerge=
 ffmpeg -i bear6.wav -c:a dtsxS -b:a 160000 -movflags frag_keyframe -y bear_dtsx.mp4
 # truncate to size of moov box (truncate -s)
 ```
+### one_frame_1280x720.mjpeg
+It's a single frame mjpeg data. Resolution: 1280x720, color primary: sRGB, transfer function: BT.709, color matrix: BT.601, color range: full-range.

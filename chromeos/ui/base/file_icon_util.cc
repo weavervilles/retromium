@@ -306,6 +306,7 @@ IconType GetIconTypeForPath(const base::FilePath& filepath) {
           {".PPT", IconType::kPpt},
           {".PPTX", IconType::kPpt},
           {".XLS", IconType::kExcel},
+          {".XLSM", IconType::kExcel},
           {".XLSX", IconType::kExcel},
           {".TINI", IconType::kTini},
       });
@@ -369,6 +370,11 @@ gfx::ImageSkia GetIconForPath(const base::FilePath& filepath,
 gfx::ImageSkia GetChipIconForPath(const base::FilePath& filepath,
                                   bool dark_background) {
   return GetIconForPath(filepath, dark_background);
+}
+
+const gfx::VectorIcon& GetIconFromType(const std::string& icon_type) {
+  return GetIconParamsFromIconType(internal::GetIconTypeFromString(icon_type))
+      .icon;
 }
 
 gfx::ImageSkia GetIconFromType(const std::string& icon_type,

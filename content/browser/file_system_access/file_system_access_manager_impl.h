@@ -195,6 +195,7 @@ class CONTENT_EXPORT FileSystemAccessManagerImpl
       const storage::FileSystemURL& url,
       const storage::FileSystemURL& swap_url,
       scoped_refptr<FileSystemAccessWriteLockManager::WriteLock> lock,
+      scoped_refptr<FileSystemAccessWriteLockManager::WriteLock> swap_lock,
       const SharedHandleState& handle_state,
       bool auto_close);
   // Returns a weak pointer to a newly created FileSystemAccessFileWriterImpl.
@@ -204,6 +205,7 @@ class CONTENT_EXPORT FileSystemAccessManagerImpl
       const storage::FileSystemURL& url,
       const storage::FileSystemURL& swap_url,
       scoped_refptr<FileSystemAccessWriteLockManager::WriteLock> lock,
+      scoped_refptr<FileSystemAccessWriteLockManager::WriteLock> swap_lock,
       const SharedHandleState& handle_state,
       mojo::PendingReceiver<blink::mojom::FileSystemAccessFileWriter> receiver,
       bool has_transient_user_activation,
@@ -543,7 +545,7 @@ class CONTENT_EXPORT FileSystemAccessManagerImpl
   const scoped_refptr<ChromeBlobStorageContext> blob_context_;
   base::SequenceBound<storage::FileSystemOperationRunner> operation_runner_
       GUARDED_BY_CONTEXT(sequence_checker_);
-  raw_ptr<FileSystemAccessPermissionContext, DanglingUntriaged>
+  raw_ptr<FileSystemAccessPermissionContext, DanglingAcrossTasks>
       permission_context_ GUARDED_BY_CONTEXT(sequence_checker_);
 
   // All the mojo receivers for this FileSystemAccessManager itself. Keeps

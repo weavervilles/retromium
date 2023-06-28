@@ -257,6 +257,11 @@ class WebStateList {
   void CloseWebStateAtImpl(int index, int close_flags);
 
   // Closes and destroys all WebStates after `start_index`. The `close_flags`
+  // is a bitwise combination of ClosingFlags values. WebStateList is locked
+  // inside the method.
+  void CloseAllWebStatesAfterIndex(int start_index, int close_flags);
+
+  // Closes and destroys all WebStates after `start_index`. The `close_flags`
   // is a bitwise combination of ClosingFlags values.
   //
   // Assumes that the WebStateList is locked.
@@ -330,6 +335,9 @@ class WebStateList {
 
   // Index of the currently active WebState, kInvalidIndex if no such WebState.
   int active_index_ = kInvalidIndex;
+
+  // Number of pinned tabs. Always in range from 0 to count() inclusive.
+  int pinned_tabs_count_ = 0;
 
   // Lock to prevent observers from mutating or deleting the list while it is
   // mutating. The lock is managed by LockForMutation() method (and released

@@ -21,7 +21,14 @@ namespace blink {
 
 // Note: these must match the values in renderer_preferences.mojom.
 constexpr uint32_t kDefaultActiveSelectionBgColor = 0xFF1967D2;
+#if BUILDFLAG(IS_ANDROID)
+// See crbug.com/1445053, but on Android, the selection background color is
+// not used, and a much lighter shade of blue is used instead. Therefore, the
+// foreground color needs to be dark/black to ensure contrast.
+constexpr uint32_t kDefaultActiveSelectionFgColor = 0xFF000000;
+#else
 constexpr uint32_t kDefaultActiveSelectionFgColor = 0xFFFFFFFF;
+#endif
 constexpr uint32_t kDefaultInactiveSelectionBgColor = 0xFFC8C8C8;
 constexpr uint32_t kDefaultInactiveSelectionFgColor = 0xFF323232;
 
@@ -56,6 +63,7 @@ struct BLINK_COMMON_EXPORT RendererPreferences {
   bool webrtc_allow_legacy_tls_protocols{false};
   UserAgentOverride user_agent_override;
   std::string accept_languages;
+  bool send_subresource_notification{false};
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   std::string system_font_family_name;
 #endif

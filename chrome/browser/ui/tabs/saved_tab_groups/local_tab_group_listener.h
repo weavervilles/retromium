@@ -7,6 +7,7 @@
 
 #include "base/uuid.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_web_contents_listener.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "components/saved_tab_groups/saved_tab_group_model.h"
 #include "components/tab_groups/tab_group_id.h"
 
@@ -39,10 +40,19 @@ class LocalTabGroupListener {
   // CHECKed).
   void ResumeTracking();
 
+  void UpdateVisualDataFromLocal(
+      const TabGroupChange::VisualsChange* visuals_change);
+
   // Updates the saved group with the new tab and tracks it for further changes.
   void AddWebContentsFromLocal(content::WebContents* web_contents,
                                TabStripModel* tab_strip_model,
                                int index);
+
+  // Moves the SavedTab associated with `web_contents` in the TabStripModel to
+  // its new relative position in the SavedTabGroup.
+  void MoveWebContentsFromLocal(TabStripModel* tab_strip_model,
+                                content::WebContents* web_contents,
+                                int tabstrip_index_of_moved_tab);
 
   // Whether the local and saved groups this listener is connecting still exist.
   enum class Liveness {

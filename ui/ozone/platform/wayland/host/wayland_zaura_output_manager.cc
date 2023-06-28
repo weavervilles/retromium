@@ -89,6 +89,22 @@ void WaylandZAuraOutputManager::RemoveOutputMetrics(
   output_metrics_map_.erase(output_id);
 }
 
+void WaylandZAuraOutputManager::DumpState(std::ostream& out) const {
+  out << "AuraOutputManager:" << std::endl;
+  int i = 0;
+  for (const auto& pair : pending_output_metrics_map_) {
+    out << "  pending output metrics[" << i++ << "]:";
+    pair.second.DumpState(out);
+    out << std::endl;
+  }
+  i = 0;
+  for (const auto& pair : output_metrics_map_) {
+    out << "  output metrics[" << i++ << "]:";
+    pair.second.DumpState(out);
+    out << std::endl;
+  }
+}
+
 WaylandOutput::Id WaylandZAuraOutputManager::GetId(wl_output* output) const {
   WaylandOutputManager* output_manager = connection_->wayland_output_manager();
   // The WaylandOutputManager should have been instantiated when the first
@@ -196,8 +212,8 @@ void WaylandZAuraOutputManager::OnDeviceScaleFactor(
     wl_output* output,
     uint32_t scale_as_uint) {
   auto* self = static_cast<WaylandZAuraOutputManager*>(data);
-  float scale = base::bit_cast<float>(scale_as_uint);
-  self->pending_output_metrics_map_[self->GetId(output)].scale_factor = scale;
+  self->pending_output_metrics_map_[self->GetId(output)].scale_factor =
+      base::bit_cast<float>(scale_as_uint);
 }
 
 // static
@@ -264,7 +280,9 @@ void WaylandZAuraOutputManager::OnOverscanInsets(
     int32_t left,
     int32_t bottom,
     int32_t right) {
-  // TODO(crbug.com/1432295): Handle overscan.
+  auto* self = static_cast<WaylandZAuraOutputManager*>(data);
+  self->pending_output_metrics_map_[self->GetId(output)]
+      .physical_overscan_insets = gfx::Insets::TLBR(top, left, bottom, right);
 }
 
 }  // namespace ui

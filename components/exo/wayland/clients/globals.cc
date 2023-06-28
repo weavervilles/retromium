@@ -65,12 +65,13 @@ void RegistryHandler(void* data,
   BIND_VECTOR(wl_output, outputs)
   BIND(zwp_linux_explicit_synchronization_v1, linux_explicit_synchronization)
   BIND(zcr_vsync_feedback_v1, vsync_feedback)
-  BIND(zxdg_shell_v6, xdg_shell_v6)
   BIND(xdg_wm_base, xdg_wm_base)
   BIND(zcr_stylus_v2, stylus)
   BIND(zcr_remote_shell_v1, cr_remote_shell_v1)
   BIND(zcr_remote_shell_v2, cr_remote_shell_v2)
   BIND(surface_augmenter, surface_augmenter)
+  BIND(wp_single_pixel_buffer_manager_v1, wp_single_pixel_buffer_manager_v1)
+  BIND(wp_viewporter, wp_viewporter)
 
 #undef BIND
 #undef BIND_VECTOR

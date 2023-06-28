@@ -751,6 +751,19 @@ void ShimlessRmaService::GetOriginalDramPartNumber(
       state_proto_.update_device_info().original_dram_part_number());
 }
 
+void ShimlessRmaService::GetOriginalFeatureLevel(
+    GetOriginalFeatureLevelCallback callback) {
+  if (state_proto_.state_case() != rmad::RmadState::kUpdateDeviceInfo) {
+    LOG(ERROR) << "GetOriginalFeatureLevel called from incorrect state "
+               << state_proto_.state_case();
+    std::move(callback).Run(
+        rmad::UpdateDeviceInfoState::RMAD_FEATURE_LEVEL_UNSUPPORTED);
+    return;
+  }
+  std::move(callback).Run(
+      state_proto_.update_device_info().original_feature_level());
+}
+
 void ShimlessRmaService::SetDeviceInformation(
     const std::string& serial_number,
     int32_t region_index,
@@ -932,8 +945,7 @@ void ShimlessRmaService::GetLog(GetLogCallback callback) {
 }
 
 void ShimlessRmaService::SaveLog(SaveLogCallback callback) {
-  if (features::IsLogControllerForDiagnosticsAppEnabled() &&
-      diagnostics::DiagnosticsLogController::IsInitialized()) {
+  if (diagnostics::DiagnosticsLogController::IsInitialized()) {
     task_runner_->PostTaskAndReplyWithResult(
         FROM_HERE,
         base::BindOnce(

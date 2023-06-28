@@ -93,6 +93,7 @@
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/resource_scheduler/resource_scheduler_client.h"
 #include "services/network/sec_header_helpers.h"
+#include "services/network/shared_dictionary/shared_dictionary_access_checker.h"
 #include "services/network/throttling/scoped_throttling_token.h"
 #include "services/network/trust_tokens/trust_token_request_helper.h"
 #include "services/network/url_loader_factory.h"
@@ -273,6 +274,13 @@ bool ShouldNotifyAboutCookie(net::CookieInclusionStatus status) {
   // for purposes of cookie UI --- as well those carrying warnings pertaining to
   // SameSite features and cookies with non-ASCII domain attributes, in order to
   // issue a deprecation warning for them.
+
+  // Filter out tentative secure source scheme warnings. They're used for netlog
+  // debugging and not something we want to inform cookie observers about.
+  status.RemoveWarningReason(
+      net::CookieInclusionStatus::
+          WARN_TENTATIVELY_ALLOWING_SECURE_SOURCE_SCHEME);
+
   return status.IsInclude() || status.ShouldWarn() ||
          status.HasExclusionReason(
              net::CookieInclusionStatus::EXCLUDE_USER_PREFERENCES) ||
@@ -466,6 +474,11 @@ mojom::URLLoaderClient* URLLoader::MaybeSyncURLLoaderClient::Get() {
   return nullptr;
 }
 
+URLLoader::PartialLoadInfo::PartialLoadInfo(net::LoadStateWithParam load_state,
+                                            net::UploadProgress upload_progress)
+    : load_state(std::move(load_state)),
+      upload_progress(std::move(upload_progress)) {}
+
 URLLoader::URLLoader(
     URLLoaderContext& context,
     DeleteCallback delete_callback,
@@ -479,6 +492,7 @@ URLLoader::URLLoader(
     int keepalive_request_size,
     base::WeakPtr<KeepaliveStatisticsRecorder> keepalive_statistics_recorder,
     std::unique_ptr<TrustTokenRequestHelperFactory> trust_token_helper_factory,
+    std::unique_ptr<SharedDictionaryAccessChecker> shared_dictionary_checker,
     mojo::PendingRemote<mojom::CookieAccessObserver> cookie_observer,
     mojo::PendingRemote<mojom::TrustTokenAccessObserver> trust_token_observer,
     mojo::PendingRemote<mojom::URLLoaderNetworkServiceObserver>
@@ -527,6 +541,7 @@ URLLoader::URLLoader(
           factory_params_->client_security_state.get(),
           options_),
       trust_token_helper_factory_(std::move(trust_token_helper_factory)),
+      shared_dictionary_checker_(std::move(shared_dictionary_checker)),
       attribution_request_helper_(std::move(attribution_request_helper)),
       origin_access_list_(context.GetOriginAccessList()),
       cookie_observer_remote_(std::move(cookie_observer)),
@@ -599,8 +614,9 @@ URLLoader::URLLoader(
   if (isolation_info)
     url_request_->set_isolation_info(isolation_info.value());
 
-  if (context.ShouldRequireNetworkIsolationKey())
+  if (context.ShouldRequireIsolationInfo()) {
     DCHECK(!url_request_->isolation_info().IsEmpty());
+  }
 
   if (ShouldForceIgnoreTopFramePartyForCookies())
     url_request_->set_force_ignore_top_frame_party_for_cookies(true);
@@ -710,12 +726,22 @@ URLLoader::URLLoader(
     }
   }
 
+  // Need to check Access-Control-Allow-Origin response header for no-cors
+  // requests before using shared dictionaries.
+  if (request_mode_ == mojom::RequestMode::kNoCors) {
+    request_load_flags |= net::LOAD_SHARED_DICTIONARY_ORIGIN_CHECK_REQUIRED;
+  }
+
   url_request_->SetLoadFlags(request_load_flags);
   url_request_->SetPriorityIncremental(request.priority_incremental);
   SetRequestCredentials(request.url);
 
   url_request_->SetRequestHeadersCallback(base::BindRepeating(
       &URLLoader::SetRawRequestHeadersAndNotify, base::Unretained(this)));
+  if (shared_dictionary_checker_) {
+    url_request_->SetIsSharedDictionaryReadAllowedCallback(base::BindRepeating(
+        &URLLoader::IsSharedDictionaryReadAllowed, base::Unretained(this)));
+  }
 
   if (devtools_request_id()) {
     url_request_->SetResponseHeadersCallback(base::BindRepeating(
@@ -1097,8 +1123,7 @@ URLLoader::~URLLoader() {
         *factory_params_->top_frame_id, keepalive_request_size_);
   }
 
-  if (base::FeatureList::IsEnabled(features::kLessChattyNetworkService) &&
-      !cookie_access_details_.empty()) {
+  if (!cookie_access_details_.empty()) {
     // In case the response wasn't received successfully sent the call now.
     // Note `cookie_observer_` is guaranteed non-null since
     // `cookie_access_details_` is only appended to when it is valid.
@@ -1719,15 +1744,19 @@ void URLLoader::ContinueOnResponseStarted() {
     return;
   }
 
-  // Enforce FLEDGE auction-only signals -- the renderer process isn't allowed
-  // to read auction-only signals for FLEDGE auctions; only the browser process
+  // Enforce ad-auction-only signals -- the renderer process isn't allowed
+  // to read auction-only signals for ad auctions; only the browser process
   // is allowed to read those, and only the browser process can issue trusted
   // requests.
-  std::string fledge_auction_only_signals;
+  std::string auction_only;
+  // TODO(crbug.com/1448564): Remove old names once API users have migrated to
+  // new names.
   if (!factory_params_->is_trusted && response_->headers &&
-      response_->headers->GetNormalizedHeader("X-FLEDGE-Auction-Only",
-                                              &fledge_auction_only_signals) &&
-      base::EqualsCaseInsensitiveASCII(fledge_auction_only_signals, "true")) {
+      (response_->headers->GetNormalizedHeader("Ad-Auction-Only",
+                                               &auction_only) ||
+       response_->headers->GetNormalizedHeader("X-FLEDGE-Auction-Only",
+                                               &auction_only)) &&
+      base::EqualsCaseInsensitiveASCII(auction_only, "true")) {
     CompleteBlockedResponse(net::ERR_BLOCKED_BY_RESPONSE, false);
     url_request_->AbortAndCloseConnection();
     DeleteSelf();
@@ -1976,17 +2005,18 @@ int URLLoader::OnHeadersReceived(
   return net::OK;
 }
 
-mojom::LoadInfoPtr URLLoader::CreateLoadInfo() {
-  auto load_info = mojom::LoadInfo::New();
-  load_info->timestamp = base::TimeTicks::Now();
-  load_info->host = url_request_->url().host();
-  auto load_state = url_request_->GetLoadState();
-  load_info->load_state = static_cast<uint32_t>(load_state.state);
-  load_info->state_param = std::move(load_state.param);
-  auto upload_progress = url_request_->GetUploadProgress();
-  load_info->upload_size = upload_progress.size();
-  load_info->upload_position = upload_progress.position();
-  return load_info;
+URLLoader::PartialLoadInfo URLLoader::GetPartialLoadInfo() const {
+  return PartialLoadInfo(url_request_->GetLoadState(),
+                         url_request_->GetUploadProgress());
+}
+
+mojom::LoadInfoPtr URLLoader::CreateLoadInfo(
+    const PartialLoadInfo& partial_load_info) {
+  return mojom::LoadInfo::New(
+      base::TimeTicks::Now(), url_request_->url().host(),
+      partial_load_info.load_state.state, partial_load_info.load_state.param,
+      partial_load_info.upload_progress.position(),
+      partial_load_info.upload_progress.size());
 }
 
 net::LoadState URLLoader::GetLoadState() const {
@@ -2081,20 +2111,16 @@ void URLLoader::NotifyCompleted(int error_code) {
 
   auto total_received = url_request_->GetTotalReceivedBytes();
   auto total_sent = url_request_->GetTotalSentBytes();
-  if (base::FeatureList::IsEnabled(features::kLessChattyNetworkService)) {
-    if (total_received > 0) {
-      base::UmaHistogramCustomCounts("DataUse.BytesReceived3.Delegate",
-                                     total_received, 50, 10 * 1000 * 1000, 50);
-    }
+  if (total_received > 0) {
+    base::UmaHistogramCustomCounts("DataUse.BytesReceived3.Delegate",
+                                   total_received, 50, 10 * 1000 * 1000, 50);
+  }
 
-    if (total_sent > 0) {
-      UMA_HISTOGRAM_COUNTS_1M("DataUse.BytesSent3.Delegate", total_sent);
-    }
+  if (total_sent > 0) {
+    UMA_HISTOGRAM_COUNTS_1M("DataUse.BytesSent3.Delegate", total_sent);
   }
   if ((total_received > 0 || total_sent > 0)) {
-    if (url_loader_network_observer_ &&
-        (!base::FeatureList::IsEnabled(features::kLessChattyNetworkService) ||
-         provide_data_use_updates_)) {
+    if (url_loader_network_observer_ && provide_data_use_updates_) {
       url_loader_network_observer_->OnDataUseUpdate(
           url_request_->traffic_annotation().unique_id_hash_code,
           total_received, total_sent);
@@ -2259,11 +2285,14 @@ void URLLoader::SetRawRequestHeadersAndNotify(
           mojom::CookieAccessDetails::Type::kRead, url_request_->url(),
           url_request_->site_for_cookies(), std::move(reported_cookies),
           devtools_request_id()));
-      if (!base::FeatureList::IsEnabled(features::kLessChattyNetworkService)) {
-        cookie_observer_->OnCookiesAccessed(std::move(cookie_access_details_));
-      }
     }
   }
+}
+
+bool URLLoader::IsSharedDictionaryReadAllowed() {
+  return shared_dictionary_checker_->IsAllowedToRead(
+      url_request_->url(), url_request_->site_for_cookies(),
+      url_request_->isolation_info());
 }
 
 void URLLoader::DispatchOnRawRequest(
@@ -2607,8 +2636,7 @@ void URLLoader::ReportFlaggedResponseCookies(bool call_cookie_observer) {
         mojom::CookieAccessDetails::Type::kChange, url_request_->url(),
         url_request_->site_for_cookies(), std::move(reported_cookies),
         devtools_request_id()));
-    if (!base::FeatureList::IsEnabled(features::kLessChattyNetworkService) ||
-        call_cookie_observer) {
+    if (call_cookie_observer) {
       cookie_observer_->OnCookiesAccessed(std::move(cookie_access_details_));
     }
   }

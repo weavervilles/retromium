@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/webapps/browser/features.h"
 #include "components/webapps/browser/installable/installable_data.h"
 #include "components/webapps/browser/installable/installable_manager.h"
@@ -16,9 +18,9 @@
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/test_simple_task_runner.h"
 #include "chrome/browser/banners/app_banner_manager_desktop.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -70,27 +72,10 @@ InstallableParams GetPrimaryIconParams() {
   return params;
 }
 
-InstallableParams GetPrimaryIconAndSplashIconParams() {
-  InstallableParams params = GetManifestParams();
-  params.valid_primary_icon = true;
-  params.valid_splash_icon = true;
-  params.wait_for_worker = true;
-  return params;
-}
-
 InstallableParams GetPrimaryIconPreferMaskableParams() {
   InstallableParams params = GetManifestParams();
   params.valid_primary_icon = true;
   params.prefer_maskable_icon = true;
-  params.wait_for_worker = true;
-  return params;
-}
-
-InstallableParams GetPreferMaskablePrimaryAndSplashIconParams() {
-  InstallableParams params = GetManifestParams();
-  params.valid_primary_icon = true;
-  params.prefer_maskable_icon = true;
-  params.valid_splash_icon = true;
   params.wait_for_worker = true;
   return params;
 }
@@ -144,8 +129,10 @@ class ResetDataInstallableManager : public InstallableManager {
 
 class CallbackTester {
  public:
-  explicit CallbackTester(base::RepeatingClosure quit_closure)
-      : quit_closure_(quit_closure) {}
+  CallbackTester(base::RepeatingClosure quit_closure,
+                 scoped_refptr<base::SequencedTaskRunner> test_task_runner =
+                     base::SequencedTaskRunner::GetCurrentDefault())
+      : quit_closure_(quit_closure), test_task_runner_(test_task_runner) {}
 
   void OnDidFinishInstallableCheck(const InstallableData& data) {
     errors_ = data.errors;
@@ -155,15 +142,10 @@ class CallbackTester {
     if (data.primary_icon)
       primary_icon_ = std::make_unique<SkBitmap>(*data.primary_icon);
     has_maskable_primary_icon_ = data.has_maskable_primary_icon;
-    splash_icon_url_ = *data.splash_icon_url;
-    if (data.splash_icon)
-      splash_icon_ = std::make_unique<SkBitmap>(*data.splash_icon);
-    has_maskable_splash_icon_ = data.has_maskable_splash_icon;
     valid_manifest_ = data.valid_manifest;
     worker_check_passed_ = data.worker_check_passed;
     screenshots_ = *data.screenshots;
-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
-                                                             quit_closure_);
+    test_task_runner_->PostTask(FROM_HERE, quit_closure_);
   }
 
   const std::vector<InstallableStatusCode>& errors() const { return errors_; }
@@ -175,27 +157,22 @@ class CallbackTester {
   const GURL& primary_icon_url() const { return primary_icon_url_; }
   const SkBitmap* primary_icon() const { return primary_icon_.get(); }
   bool has_maskable_primary_icon() const { return has_maskable_primary_icon_; }
-  const GURL& splash_icon_url() const { return splash_icon_url_; }
-  bool has_maskable_splash_icon() const { return has_maskable_splash_icon_; }
-  const SkBitmap* splash_icon() const { return splash_icon_.get(); }
   const std::vector<Screenshot>& screenshots() const { return screenshots_; }
   bool valid_manifest() const { return valid_manifest_; }
   bool worker_check_passed() const { return worker_check_passed_; }
 
  private:
-  base::RepeatingClosure quit_closure_;
   std::vector<InstallableStatusCode> errors_;
   GURL manifest_url_;
   blink::mojom::ManifestPtr manifest_ = blink::mojom::Manifest::New();
   GURL primary_icon_url_;
   std::unique_ptr<SkBitmap> primary_icon_;
   bool has_maskable_primary_icon_;
-  GURL splash_icon_url_;
-  std::unique_ptr<SkBitmap> splash_icon_;
   std::vector<Screenshot> screenshots_;
-  bool has_maskable_splash_icon_;
   bool valid_manifest_;
   bool worker_check_passed_;
+  base::RepeatingClosure quit_closure_;
+  scoped_refptr<base::SequencedTaskRunner> test_task_runner_;
 };
 
 class NestedCallbackTester {
@@ -263,10 +240,7 @@ class InstallableManagerBrowserTest : public InProcessBrowserTest {
  public:
   InstallableManagerBrowserTest()
       : disable_banner_trigger_(&test::g_disable_banner_triggering_for_testing,
-                                true) {
-    scoped_feature_list_.InitAndEnableFeature(
-        webapps::features::kDesktopPWAsDetailedInstallDialog);
-  }
+                                true) {}
 
   void SetUpOnMainThread() override {
     embedded_test_server()->ServeFilesFromSourceDirectory(
@@ -351,8 +325,6 @@ class InstallableManagerBrowserTest : public InProcessBrowserTest {
  private:
   // Disable the banners in the browser so it won't interfere with the test.
   base::AutoReset<bool> disable_banner_trigger_;
-
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 class InstallableManagerAllowlistOriginBrowserTest
@@ -527,9 +499,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckNoManifest) {
   EXPECT_FALSE(tester->has_maskable_primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
-  EXPECT_FALSE(tester->has_maskable_splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{NO_MANIFEST}, tester->errors());
 }
 
@@ -553,9 +522,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifest404) {
   EXPECT_FALSE(tester->has_maskable_primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
-  EXPECT_FALSE(tester->has_maskable_splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{MANIFEST_EMPTY},
             tester->errors());
 }
@@ -578,9 +544,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestOnly) {
   EXPECT_FALSE(tester->has_maskable_primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
-  EXPECT_FALSE(tester->has_maskable_splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
 }
 
@@ -605,9 +568,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_FALSE(tester->has_maskable_primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
-  EXPECT_FALSE(tester->has_maskable_splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
 }
 
@@ -633,15 +593,13 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_EQ(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{NO_ACCEPTABLE_ICON},
               tester->errors());
   }
 
-  // Ask for everything except splash icon. This should fail with
-  // NO_ACCEPTABLE_ICON - the primary icon fetch has already failed, so that
-  // cached error stops the installable check from being performed.
+  // Ask for everything. This should fail with NO_ACCEPTABLE_ICON - the primary
+  // icon fetch has already failed, so that cached error stops the installable
+  // check from being performed.
   {
     base::RunLoop run_loop;
     std::unique_ptr<CallbackTester> tester(
@@ -657,34 +615,8 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_EQ(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_FALSE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{NO_ACCEPTABLE_ICON},
               tester->errors());
-  }
-
-  // Ask for a splash icon. This should fail to get a splash icon but not record
-  // an error.
-  {
-    base::RunLoop run_loop;
-    std::unique_ptr<CallbackTester> tester(
-        new CallbackTester(run_loop.QuitClosure()));
-
-    InstallableParams params = GetPrimaryIconAndSplashIconParams();
-    params.valid_primary_icon = false;
-    RunInstallableManager(browser(), tester.get(), params);
-    run_loop.Run();
-
-    EXPECT_FALSE(blink::IsEmptyManifest(tester->manifest()));
-    EXPECT_FALSE(tester->manifest_url().is_empty());
-
-    EXPECT_TRUE(tester->primary_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->primary_icon());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
-    EXPECT_FALSE(tester->valid_manifest());
-    EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
   }
 }
 
@@ -711,8 +643,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_EQ(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
   }
 
@@ -734,15 +664,13 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_EQ(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{NO_ACCEPTABLE_ICON},
               tester->errors());
   }
 
-  // Ask for everything except splash icon. This should fail with
-  // NO_ACCEPTABLE_ICON - the primary icon fetch has already failed, so that
-  // cached error stops the installable check from being performed.
+  // Ask for everything. This should fail with NO_ACCEPTABLE_ICON - the primary
+  // icon fetch has already failed, so that cached error stops the installable
+  // check from being performed.
   {
     base::RunLoop run_loop;
     std::unique_ptr<CallbackTester> tester(
@@ -760,8 +688,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_EQ(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_FALSE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{NO_ACCEPTABLE_ICON},
               tester->errors());
   }
@@ -784,8 +710,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     EXPECT_TRUE(tester->primary_icon_url().is_empty());
     EXPECT_EQ(nullptr, tester->primary_icon());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_FALSE(tester->worker_check_passed());
     EXPECT_EQ(
@@ -815,43 +739,17 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestAndIcon) {
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
-    EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
-  }
-
-  // Add to homescreen checks for manifest + primary icon + splash icon.
-  {
-    base::RunLoop run_loop;
-    std::unique_ptr<CallbackTester> tester(
-        new CallbackTester(run_loop.QuitClosure()));
-
-    RunInstallableManager(browser(), tester.get(),
-                          GetPrimaryIconAndSplashIconParams());
-    run_loop.Run();
-
-    EXPECT_FALSE(blink::IsEmptyManifest(tester->manifest()));
-    EXPECT_FALSE(tester->manifest_url().is_empty());
-
-    EXPECT_FALSE(tester->primary_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->primary_icon());
-    EXPECT_FALSE(tester->has_maskable_primary_icon());
-    EXPECT_FALSE(tester->valid_manifest());
-    EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_FALSE(tester->has_maskable_splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
   }
 
   // Navigate to a page with a good maskable icon and a bad any
-  // icon. The maskable icon is fetched for both primary and splash icon.
+  // icon. The maskable icon is fetched for primary icon.
   {
     base::RunLoop run_loop;
     std::unique_ptr<CallbackTester> tester(
         new CallbackTester(run_loop.QuitClosure()));
     NavigateAndRunInstallableManager(
-        browser(), tester.get(), GetPreferMaskablePrimaryAndSplashIconParams(),
+        browser(), tester.get(), GetPrimaryIconPreferMaskableParams(),
         GetURLOfPageWithServiceWorkerAndManifest(
             "/banners/manifest_bad_non_maskable_icon.json"));
     run_loop.Run();
@@ -860,9 +758,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestAndIcon) {
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->has_maskable_primary_icon());
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_TRUE(tester->has_maskable_splash_icon());
 
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
@@ -872,7 +767,7 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckManifestAndIcon) {
 
 IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
                        CheckWebapp) {
-  // Request everything except splash icon.
+  // Request everything.
   {
     base::HistogramTester histograms;
     base::RunLoop run_loop;
@@ -890,8 +785,6 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->valid_manifest());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     CheckServiceWorkerForTester(tester.get());
 
     // Verify that the returned state matches manager internal state.
@@ -912,8 +805,7 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
     CheckServiceWorkerForInstallableManager(manager);
   }
 
-  // Request everything except splash icon again without navigating away. This
-  // should work fine.
+  // Request everything again without navigating away. This should work fine.
   {
     base::RunLoop run_loop;
     std::unique_ptr<CallbackTester> tester(
@@ -929,8 +821,6 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->valid_manifest());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     CheckServiceWorkerForTester(tester.get());
 
     // Verify that the returned state matches manager internal state.
@@ -977,10 +867,10 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
     std::unique_ptr<CallbackTester> tester(
         new CallbackTester(run_loop.QuitClosure()));
 
-    NavigateAndRunInstallableManager(
-        browser(), tester.get(), GetPreferMaskablePrimaryAndSplashIconParams(),
-        GetURLOfPageWithServiceWorkerAndManifest(
-            "/banners/manifest_maskable.json"));
+    NavigateAndRunInstallableManager(browser(), tester.get(),
+                                     GetPrimaryIconPreferMaskableParams(),
+                                     GetURLOfPageWithServiceWorkerAndManifest(
+                                         "/banners/manifest_maskable.json"));
 
     run_loop.Run();
 
@@ -990,10 +880,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->has_maskable_primary_icon());
-
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_TRUE(tester->has_maskable_splash_icon());
 
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
@@ -1008,7 +894,7 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
         new CallbackTester(run_loop.QuitClosure()));
 
     NavigateAndRunInstallableManager(browser(), tester.get(),
-                                     GetPrimaryIconAndSplashIconParams(),
+                                     GetPrimaryIconParams(),
                                      GetURLOfPageWithServiceWorkerAndManifest(
                                          "/banners/manifest_maskable.json"));
 
@@ -1020,10 +906,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->has_maskable_primary_icon());
-
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_FALSE(tester->has_maskable_splash_icon());
 
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
@@ -1037,9 +919,9 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
     std::unique_ptr<CallbackTester> tester(
         new CallbackTester(run_loop.QuitClosure()));
 
-    NavigateAndRunInstallableManager(
-        browser(), tester.get(), GetPreferMaskablePrimaryAndSplashIconParams(),
-        "/banners/manifest_test_page.html");
+    NavigateAndRunInstallableManager(browser(), tester.get(),
+                                     GetPrimaryIconPreferMaskableParams(),
+                                     "/banners/manifest_test_page.html");
 
     run_loop.Run();
 
@@ -1049,10 +931,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->has_maskable_primary_icon());
-
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_FALSE(tester->has_maskable_splash_icon());
 
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
@@ -1067,7 +945,7 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
         new CallbackTester(run_loop.QuitClosure()));
 
     NavigateAndRunInstallableManager(
-        browser(), tester.get(), GetPreferMaskablePrimaryAndSplashIconParams(),
+        browser(), tester.get(), GetPrimaryIconPreferMaskableParams(),
         GetURLOfPageWithServiceWorkerAndManifest(
             "/banners/manifest_bad_maskable.json"));
 
@@ -1079,10 +957,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckMaskableIcon) {
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->has_maskable_primary_icon());
-
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_FALSE(tester->has_maskable_splash_icon());
 
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
@@ -1159,8 +1033,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckWebappInIframe) {
   EXPECT_EQ(nullptr, tester->primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_FALSE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{NO_MANIFEST}, tester->errors());
 }
 
@@ -1184,8 +1056,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_EQ(nullptr, tester->primary_icon());
     EXPECT_FALSE(tester->valid_manifest());
     EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
   }
 
@@ -1207,8 +1077,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->valid_manifest());
     EXPECT_FALSE(tester->worker_check_passed());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{NO_MATCHING_SERVICE_WORKER},
               tester->errors());
   }
@@ -1274,22 +1142,19 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
     EXPECT_NE(nullptr, nested_tester->primary_icon());
     EXPECT_TRUE(nested_tester->valid_manifest());
     EXPECT_TRUE(nested_tester->worker_check_passed());
-    EXPECT_TRUE(nested_tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, nested_tester->splash_icon());
     EXPECT_EQ(std::vector<InstallableStatusCode>{}, nested_tester->errors());
   }
 
   // Load the service worker.
   if (IsServiceWorkerOfflineSupported()) {
-    EXPECT_TRUE(content::ExecuteScript(
-        web_contents,
-        "navigator.serviceWorker.register('service_worker.js');"
-    ));
+    EXPECT_TRUE(content::ExecJs(
+        web_contents, "navigator.serviceWorker.register('service_worker.js');",
+        content::EXECUTE_SCRIPT_NO_RESOLVE_PROMISES));
   } else {
-    EXPECT_TRUE(content::ExecuteScript(
-        web_contents,
-        "navigator.serviceWorker.register("
-          "'service_worker_empty_fetch_handler.js');"));
+    EXPECT_TRUE(content::ExecJs(web_contents,
+                                "navigator.serviceWorker.register("
+                                "'service_worker_empty_fetch_handler.js');",
+                                content::EXECUTE_SCRIPT_NO_RESOLVE_PROMISES));
   }
   tester_run_loop.Run();
 
@@ -1299,8 +1164,6 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
   EXPECT_FALSE(tester->primary_icon_url().is_empty());
   EXPECT_NE(nullptr, tester->primary_icon());
   EXPECT_TRUE(tester->valid_manifest());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   CheckServiceWorkerForTester(tester.get());
 
   // Verify internal state.
@@ -1346,9 +1209,10 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_TRUE(!manager->task_queue_.paused_tasks_.empty());
 
   // Load the service worker with no fetch handler.
-  EXPECT_TRUE(content::ExecuteScript(web_contents,
-                                     "navigator.serviceWorker.register('"
-                                     "service_worker_no_fetch_handler.js');"));
+  EXPECT_TRUE(content::ExecJs(web_contents,
+                              "navigator.serviceWorker.register('"
+                              "service_worker_no_fetch_handler.js');",
+                              content::EXECUTE_SCRIPT_NO_RESOLVE_PROMISES));
   tester_run_loop.Run();
 
   // We should fail the check.
@@ -1358,8 +1222,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_NE(nullptr, tester->primary_icon());
   EXPECT_TRUE(tester->valid_manifest());
   EXPECT_FALSE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{NOT_OFFLINE_CAPABLE},
             tester->errors());
 }
@@ -1409,14 +1271,15 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
     sw_run_loop.Run();
 
     if (IsServiceWorkerOfflineSupported()) {
-      EXPECT_TRUE(content::ExecuteScript(
+      EXPECT_TRUE(content::ExecJs(
           web_contents,
-          "navigator.serviceWorker.register('service_worker.js');"));
+          "navigator.serviceWorker.register('service_worker.js');",
+          content::EXECUTE_SCRIPT_NO_RESOLVE_PROMISES));
     } else {
-      EXPECT_TRUE(content::ExecuteScript(
-          web_contents,
-          "navigator.serviceWorker.register("
-            "'service_worker_empty_fetch_handler.js');"));
+      EXPECT_TRUE(content::ExecJs(web_contents,
+                                  "navigator.serviceWorker.register("
+                                  "'service_worker_empty_fetch_handler.js');",
+                                  content::EXECUTE_SCRIPT_NO_RESOLVE_PROMISES));
     }
     tester_run_loop.Run();
 
@@ -1447,8 +1310,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_NE(nullptr, tester->primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_FALSE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{NOT_OFFLINE_CAPABLE},
             tester->errors());
 }
@@ -1474,8 +1335,6 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
   EXPECT_FALSE(tester->primary_icon_url().is_empty());
   EXPECT_NE(nullptr, tester->primary_icon());
   EXPECT_TRUE(tester->valid_manifest());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   CheckServiceWorkerForTester(tester.get());
 }
 
@@ -1498,8 +1357,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckDataUrlIcon) {
   EXPECT_EQ(144, tester->primary_icon()->width());
   EXPECT_TRUE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
 }
 
@@ -1523,8 +1380,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_EQ(nullptr, tester->primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{NO_ICON_AVAILABLE},
             tester->errors());
 }
@@ -1547,8 +1402,6 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->valid_manifest());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     CheckServiceWorkerForTester(tester.get());
   }
 
@@ -1569,8 +1422,6 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
     EXPECT_FALSE(tester->primary_icon_url().is_empty());
     EXPECT_NE(nullptr, tester->primary_icon());
     EXPECT_TRUE(tester->valid_manifest());
-    EXPECT_TRUE(tester->splash_icon_url().is_empty());
-    EXPECT_EQ(nullptr, tester->splash_icon());
     CheckServiceWorkerForTester(tester.get());
   }
 }
@@ -1604,8 +1455,6 @@ IN_PROC_BROWSER_TEST_P(InstallableManagerOfflineCapabilityBrowserTest,
   EXPECT_FALSE(tester->primary_icon_url().is_empty());
   EXPECT_NE(nullptr, tester->primary_icon());
   EXPECT_TRUE(tester->valid_manifest());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   CheckServiceWorkerForTester(tester.get());
 
   InstallableManager* manager = GetManager(browser());
@@ -1669,7 +1518,7 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
     // Injecting a manifest URL but not navigating should flush the state.
     base::RunLoop run_loop;
     manager->SetQuitClosure(run_loop.QuitClosure());
-    EXPECT_TRUE(content::ExecuteScript(web_contents, "addManifestLinkTag()"));
+    EXPECT_TRUE(content::ExecJs(web_contents, "addManifestLinkTag()"));
     run_loop.Run();
 
     EXPECT_TRUE(blink::IsEmptyManifest(manager->manifest()));
@@ -1702,7 +1551,7 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
     GURL manifest_url = embedded_test_server()->GetURL(
         "/banners/manifest_short_name_only.json");
-    EXPECT_TRUE(content::ExecuteScript(
+    EXPECT_TRUE(content::ExecJs(
         web_contents, "changeManifestUrl('" + manifest_url.spec() + "');"));
     run_loop.Run();
 
@@ -1801,9 +1650,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
-  EXPECT_FALSE(tester->has_maskable_splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{NO_ACCEPTABLE_ICON},
             tester->errors());
 }
@@ -1873,66 +1719,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, NarrowServiceWorker) {
 
   EXPECT_EQ(std::vector<InstallableStatusCode>({NO_MATCHING_SERVICE_WORKER}),
             tester->errors());
-}
-
-IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckSplashIcon) {
-  // Checks that InstallableManager chooses the correct splash icon.
-
-  // Test page has a manifest with only one icon, primary icon and splash icon
-  // should be the same one.
-  {
-    base::RunLoop run_loop;
-    std::unique_ptr<CallbackTester> tester(
-        new CallbackTester(run_loop.QuitClosure()));
-
-    NavigateAndRunInstallableManager(browser(), tester.get(),
-                                     GetPrimaryIconAndSplashIconParams(),
-                                     GetURLOfPageWithServiceWorkerAndManifest(
-                                         "/banners/manifest_one_icon.json"));
-
-    run_loop.Run();
-
-    EXPECT_FALSE(blink::IsEmptyManifest(tester->manifest()));
-    EXPECT_FALSE(tester->manifest_url().is_empty());
-
-    EXPECT_FALSE(tester->primary_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->primary_icon());
-    EXPECT_FALSE(tester->valid_manifest());
-    EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
-
-    EXPECT_EQ(tester->primary_icon_url(), tester->splash_icon_url());
-  }
-
-  // Test page has a manifest with only one maskable icon. This should fail to
-  // get a splash icon but not record an error.
-  {
-    base::RunLoop run_loop;
-    std::unique_ptr<CallbackTester> tester(
-        new CallbackTester(run_loop.QuitClosure()));
-
-    NavigateAndRunInstallableManager(
-        browser(), tester.get(), GetPreferMaskablePrimaryAndSplashIconParams(),
-        GetURLOfPageWithServiceWorkerAndManifest(
-            "/banners/manifest_one_maskable.json"));
-
-    run_loop.Run();
-
-    EXPECT_FALSE(blink::IsEmptyManifest(tester->manifest()));
-    EXPECT_FALSE(tester->manifest_url().is_empty());
-
-    EXPECT_FALSE(tester->primary_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->primary_icon());
-    EXPECT_TRUE(tester->has_maskable_primary_icon());
-    EXPECT_FALSE(tester->valid_manifest());
-    EXPECT_TRUE(tester->worker_check_passed());
-    EXPECT_FALSE(tester->splash_icon_url().is_empty());
-    EXPECT_NE(nullptr, tester->splash_icon());
-    EXPECT_TRUE(tester->has_maskable_splash_icon());
-    EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
-  }
 }
 
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest, CheckScreenshots) {
@@ -2055,18 +1841,28 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
 IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
                        ManifestLinkChangeReportsError) {
   InstallableManager* manager = GetManager(browser());
+  scoped_refptr<base::TestSimpleTaskRunner> test_task_runner =
+      base::MakeRefCounted<base::TestSimpleTaskRunner>();
+  manager->SetSequencedTaskRunnerForTesting(test_task_runner);
 
   base::RunLoop run_loop;
   std::unique_ptr<CallbackTester> tester(
-      new CallbackTester(run_loop.QuitClosure()));
+      new CallbackTester(run_loop.QuitClosure(), test_task_runner));
 
   NavigateAndRunInstallableManager(browser(), tester.get(), GetManifestParams(),
                                    "/banners/manifest_test_page.html");
+
   // Simulate a manifest URL update by just calling the observer function.
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   static_cast<content::WebContentsObserver*>(manager)->DidUpdateWebManifestURL(
       web_contents->GetPrimaryMainFrame(), GURL());
+
+  // This will run all tasks currently pending on the task runner. This includes
+  // any changes that could have been caused by calling DidUpdateWebManifestURL,
+  // which should synchronously modify the data to be passed to the tester
+  // callback.
+  test_task_runner->RunPendingTasks();
   run_loop.Run();
 
   ASSERT_EQ(tester->errors().size(), 1u);
@@ -2098,9 +1894,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_FALSE(tester->has_maskable_primary_icon());
   EXPECT_FALSE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
-  EXPECT_FALSE(tester->has_maskable_splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
 }
 
@@ -2154,8 +1947,6 @@ IN_PROC_BROWSER_TEST_F(InstallableManagerBrowserTest,
   EXPECT_EQ(144, tester->primary_icon()->width());
   EXPECT_TRUE(tester->valid_manifest());
   EXPECT_TRUE(tester->worker_check_passed());
-  EXPECT_TRUE(tester->splash_icon_url().is_empty());
-  EXPECT_EQ(nullptr, tester->splash_icon());
   EXPECT_EQ(std::vector<InstallableStatusCode>{}, tester->errors());
 }
 

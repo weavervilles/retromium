@@ -122,6 +122,13 @@ struct Metric {
 };
 
 const Metric kAllocatorDumpNamesForMetrics[] = {
+    {"accessibility/ax_platform_node",
+     "AXPlatformNodeCount",
+     MetricSize::kCustom,
+     MemoryAllocatorDump::kNameObjectCount,
+     EmitTo::kSizeInUmaOnly,
+     /*ukm_setter=*/nullptr,
+     {1, 1000000}},
     {"blink_gc", "BlinkGC", MetricSize::kLarge, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetBlinkGC},
     {"blink_gc", "BlinkGC.AllocatedObjects", MetricSize::kLarge,
@@ -523,6 +530,20 @@ const Metric kAllocatorDumpNamesForMetrics[] = {
      "V8.Main.Heap.ReadOnlySpace.AllocatedObjects", MetricSize::kLarge,
      kAllocatedObjectsSize, EmitTo::kSizeInUkmAndUma,
      &Memory_Experimental::SetV8_Main_Heap_ReadOnlySpace_AllocatedObjects},
+    {"v8/main/heap/large_object_space", "V8.Main.Heap.SharedLargeObjectSpace",
+     MetricSize::kLarge, kEffectiveSize, EmitTo::kSizeInUkmAndUma,
+     &Memory_Experimental::SetV8_Main_Heap_SharedLargeObjectSpace},
+    {"v8/main/heap/large_object_space",
+     "V8.Main.Heap.SharedLargeObjectSpace.AllocatedObjects", MetricSize::kLarge,
+     kAllocatedObjectsSize, EmitTo::kSizeInUkmAndUma,
+     &Memory_Experimental::
+         SetV8_Main_Heap_SharedLargeObjectSpace_AllocatedObjects},
+    {"v8/main/heap/shared_space", "V8.Main.Heap.SharedSpace",
+     MetricSize::kLarge, kEffectiveSize, EmitTo::kSizeInUkmAndUma,
+     &Memory_Experimental::SetV8_Main_Heap_SharedSpace},
+    {"v8/main/heap/shared_space", "V8.Main.Heap.SharedSpace.AllocatedObjects",
+     MetricSize::kLarge, kAllocatedObjectsSize, EmitTo::kSizeInUkmAndUma,
+     &Memory_Experimental::SetV8_Main_Heap_SharedSpace_AllocatedObjects},
     {"v8/main/malloc", "V8.Main.Malloc", MetricSize::kLarge, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetV8_Main_Malloc},
     {"v8/workers", "V8.Workers", MetricSize::kLarge, kEffectiveSize,
@@ -619,14 +640,14 @@ const Metric kPartitionAllocAddressSpaceMetrics[] = {
     },
     Metric{
         .uma_name = "PartitionAlloc.AddressSpace."
-                    "PkeyPoolLargestAvailableReservation",
+                    "ThreadIsolatedPoolLargestAvailableReservation",
         .metric_size = MetricSize::kLarge,
-        .metric = "pkey_pool_largest_reservation",
+        .metric = "thread_isolated_pool_largest_reservation",
     },
     Metric{
-        .uma_name = "PartitionAlloc.AddressSpace.PkeyPoolUsage",
+        .uma_name = "PartitionAlloc.AddressSpace.ThreadIsolatedPoolUsage",
         .metric_size = MetricSize::kLarge,
-        .metric = "pkey_pool_usage",
+        .metric = "thread_isolated_pool_usage",
     },
 };
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)

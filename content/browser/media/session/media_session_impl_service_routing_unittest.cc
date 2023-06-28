@@ -61,7 +61,6 @@ class MockMediaSessionPlayerObserver : public MediaSessionPlayerObserver {
   MOCK_METHOD2(OnSetVolumeMultiplier,
                void(int player_id, double volume_multiplier));
   MOCK_METHOD1(OnEnterPictureInPicture, void(int player_id));
-  MOCK_METHOD1(OnExitPictureInPicture, void(int player_id));
   MOCK_METHOD2(OnSetAudioSinkId,
                void(int player_id, const std::string& raw_device_id));
   MOCK_METHOD2(OnSetMute, void(int player_id, bool mute));
@@ -226,8 +225,8 @@ class MediaSessionImplServiceRoutingTest
     return empty_metadata_.source_title;
   }
 
-  raw_ptr<TestRenderFrameHost> main_frame_;
-  raw_ptr<TestRenderFrameHost> sub_frame_;
+  raw_ptr<TestRenderFrameHost, DanglingUntriaged> main_frame_;
+  raw_ptr<TestRenderFrameHost, DanglingUntriaged> sub_frame_;
 
   using ServiceMap = std::map<TestRenderFrameHost*,
                               std::unique_ptr<MockMediaSessionServiceImpl>>;
@@ -1243,8 +1242,8 @@ class MediaSessionImplServiceRoutingFencedFrameTest
   }
 
  protected:
-  raw_ptr<TestRenderFrameHost> fenced_frame_;
-  raw_ptr<TestRenderFrameHost> inner_fenced_frame_;
+  raw_ptr<TestRenderFrameHost, DanglingUntriaged> fenced_frame_;
+  raw_ptr<TestRenderFrameHost, DanglingUntriaged> inner_fenced_frame_;
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;

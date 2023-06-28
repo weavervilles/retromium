@@ -15,7 +15,7 @@
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/functional/callback_forward.h"
-#include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -26,7 +26,6 @@
 #include "content/browser/attribution_reporting/attribution_report.h"
 #include "content/browser/attribution_reporting/attribution_report_sender.h"
 #include "content/browser/attribution_reporting/attribution_reporting.mojom-forward.h"
-#include "content/browser/attribution_reporting/destination_throttler.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/storage_partition.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -140,9 +139,11 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
       const attribution_reporting::SuitableOrigin& reporting_origin,
       attribution_reporting::mojom::SourceType,
       attribution_reporting::mojom::SourceRegistrationError) override;
+  void SetDebugMode(absl::optional<bool> enabled,
+                    base::OnceClosure done) override;
 
   void GetAllDataKeys(
-      base::OnceCallback<void(std::vector<DataKey>)> callback) override;
+      base::OnceCallback<void(std::set<DataKey>)> callback) override;
 
   void RemoveAttributionDataByDataKey(const DataKey& data_key,
                                       base::OnceClosure callback) override;
@@ -235,17 +236,17 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
   void AddPendingAggregatableReportTiming(const AttributionReport&);
   void RecordPendingAggregatableReportsTimings();
 
+  void OnUserVisibleTaskStarted();
+  void OnUserVisibleTaskComplete();
+
   void OnClearDataComplete();
 
   void ProcessNextOsEvent();
-  void OnOsRegistration(const OsRegistration&,
-                        bool is_debug_key_allowed,
+  void OnOsRegistration(bool is_debug_key_allowed,
+                        const OsRegistration&,
                         bool success);
 
-  DestinationThrottler throttler_;
-
-  // Never null.
-  const raw_ptr<StoragePartitionImpl> storage_partition_;
+  const raw_ref<StoragePartitionImpl> storage_partition_;
 
   // Holds pending sources and triggers in the order they were received by the
   // browser. For the time being, they must be processed in this order in order
@@ -260,13 +261,13 @@ class CONTENT_EXPORT AttributionManagerImpl : public AttributionManager {
 
   // The task runner for all attribution reporting storage operations.
   // Updateable to allow for priority to be temporarily increased to
-  // `USER_VISIBLE` when a clear data task is queued or running. Otherwise
-  // `BEST_EFFORT` is used.
+  // `USER_VISIBLE` when a user-visible storage task is queued or running.
+  // Otherwise `BEST_EFFORT` is used.
   scoped_refptr<base::UpdateableSequencedTaskRunner> storage_task_runner_;
 
-  // How many clear data storage tasks are queued or running currently, i.e.
-  // have been posted but the reply has not been run.
-  int num_pending_clear_data_tasks_ = 0;
+  // How many user-visible storage tasks are queued or running currently,
+  // i.e. have been posted but the reply has not been run.
+  int num_pending_user_visible_tasks_ = 0;
 
   base::SequenceBound<AttributionStorage> attribution_storage_;
 

@@ -359,6 +359,7 @@ export abstract class PdfViewerBaseElement extends PolymerElement {
     this.documentDimensions = documentDimensions;
     this.isUserInitiatedEvent = false;
     this.viewport_!.setDocumentDimensions(this.documentDimensions);
+    this.paramsParser!.setPageCount(documentDimensions.pageDimensions.length);
     this.paramsParser!.setViewportDimensions(this.viewport_!.size);
     this.isUserInitiatedEvent = true;
   }
@@ -446,6 +447,7 @@ export abstract class PdfViewerBaseElement extends PolymerElement {
         boundingBox: params.boundingBox,
         page: params.page || 0,
         viewPosition: params.viewPosition,
+        fitToWidth: params.view === FittingType.FIT_TO_BOUNDING_BOX_WIDTH,
       };
       this.viewport_.setFittingType(params.view, fittingTypeParams);
       this.forceFit(params.view);

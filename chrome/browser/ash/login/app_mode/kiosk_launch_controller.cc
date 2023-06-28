@@ -9,11 +9,9 @@
 #include "ash/constants/ash_switches.h"
 #include "ash/public/cpp/login_accelerators.h"
 #include "base/check_is_test.h"
-#include "base/debug/stack_trace.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
-#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
@@ -28,6 +26,7 @@
 #include "chrome/browser/ash/app_mode/kiosk_app_launcher.h"
 #include "chrome/browser/ash/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/ash/app_mode/kiosk_app_types.h"
+#include "chrome/browser/ash/app_mode/lacros_launcher.h"
 #include "chrome/browser/ash/app_mode/startup_app_launcher.h"
 #include "chrome/browser/ash/app_mode/web_app/web_kiosk_app_launcher.h"
 #include "chrome/browser/ash/app_mode/web_app/web_kiosk_app_manager.h"
@@ -168,7 +167,7 @@ std::unique_ptr<KioskAppLauncher> BuildKioskAppLauncher(
           profile, kiosk_app_id.app_id.value(), /*should_skip_install=*/false,
           network_delegate);
     case KioskAppType::kWebApp:
-      // TODO(b/242023891): |WebKioskAppServiceLauncher| does not support
+      // TODO(b/242023891): `WebKioskAppServiceLauncher` does not support
       // Lacros until App Service installation API is available.
       if (base::FeatureList::IsEnabled(features::kKioskEnableAppService) &&
           !crosapi::browser_util::IsLacrosEnabled()) {
@@ -211,6 +210,50 @@ void DeleteSoon(std::unique_ptr<T> pointer) {
       FROM_HERE, std::move(pointer));
 }
 
+// Returns network name by service path.
+std::string ServicePathToNetworkName(const std::string& service_path) {
+  const ash::NetworkState* network =
+      ash::NetworkHandler::Get()->network_state_handler()->GetNetworkState(
+          service_path);
+  if (!network) {
+    return std::string();
+  }
+  return network->name();
+}
+
+class DefaultNetworkMonitor : public NetworkUiController::NetworkMonitor {
+ public:
+  using State = NetworkStateInformer::State;
+  using Observer = NetworkStateInformer::NetworkStateInformerObserver;
+
+  DefaultNetworkMonitor()
+      : network_state_informer_(base::MakeRefCounted<NetworkStateInformer>()) {
+    network_state_informer_->Init();
+  }
+
+  DefaultNetworkMonitor(const DefaultNetworkMonitor&) = delete;
+  DefaultNetworkMonitor& operator=(const DefaultNetworkMonitor&) = delete;
+  ~DefaultNetworkMonitor() override = default;
+
+  void AddObserver(Observer* observer) override {
+    network_state_informer_->AddObserver(observer);
+  }
+
+  void RemoveObserver(Observer* observer) override {
+    network_state_informer_->RemoveObserver(observer);
+  }
+
+  State GetState() const override { return network_state_informer_->state(); }
+
+  std::string GetNetworkName() const override {
+    return ::ash::ServicePathToNetworkName(
+        network_state_informer_->network_path());
+  }
+
+ private:
+  scoped_refptr<NetworkStateInformer> network_state_informer_;
+};
+
 }  // namespace
 
 using NetworkUIState = NetworkUiController::NetworkUIState;
@@ -242,23 +285,24 @@ void SetKioskLaunchStateCrashKey(KioskLaunchState state) {
 KioskLaunchController::KioskLaunchController(OobeUI* oobe_ui)
     : KioskLaunchController(LoginDisplayHost::default_host(),
                             oobe_ui->GetView<AppLaunchSplashScreenHandler>(),
-                            base::BindRepeating(&BuildKioskAppLauncher)) {}
+                            base::BindRepeating(&BuildKioskAppLauncher),
+                            std::make_unique<DefaultNetworkMonitor>()) {}
 
 KioskLaunchController::KioskLaunchController(
     LoginDisplayHost* host,
     AppLaunchSplashScreenView* splash_screen,
-    KioskAppLauncherFactory app_launcher_factory)
+    KioskAppLauncherFactory app_launcher_factory,
+    std::unique_ptr<NetworkUiController::NetworkMonitor> network_monitor)
     : host_(host),
       splash_screen_view_(splash_screen),
       app_launcher_factory_(std::move(app_launcher_factory)),
       network_ui_controller_(
-          std::make_unique<NetworkUiController>(*this, host, splash_screen)) {}
+          std::make_unique<NetworkUiController>(*this,
+                                                host_,
+                                                splash_screen_view_,
+                                                std::move(network_monitor))) {}
 
-KioskLaunchController::~KioskLaunchController() {
-  if (splash_screen_view_) {
-    splash_screen_view_->SetDelegate(nullptr);
-  }
-}
+KioskLaunchController::~KioskLaunchController() = default;
 
 void KioskLaunchController::Start(const KioskAppId& kiosk_app_id,
                                   bool auto_launch) {
@@ -285,7 +329,8 @@ void KioskLaunchController::Start(const KioskAppId& kiosk_app_id,
     }
   }
 
-  splash_screen_view_->SetDelegate(network_ui_controller_.get());
+  network_ui_controller_->Start();
+
   splash_screen_view_->Show(GetAppData());
 
   splash_wait_timer_.Start(FROM_HERE, GetSplashScreenMinTime(),
@@ -362,12 +407,7 @@ void KioskLaunchController::OnProfileLoaded(Profile* profile) {
   network_ui_controller_->SetProfile(profile);
 
   InitializeKeyboard();
-
-  if (network_ui_controller_->ShouldShowNetworkConfig()) {
-    network_ui_controller_->UserRequestedNetworkConfig();
-  } else {
-    InitializeLauncher();
-  }
+  LaunchLacros();
 }
 
 void KioskLaunchController::InitializeKeyboard() {
@@ -377,6 +417,22 @@ void KioskLaunchController::InitializeKeyboard() {
     // Make keyboard config sync with the `VirtualKeyboardFeatures`
     // policy.
     ChromeKeyboardControllerClient::Get()->SetKeyboardConfigFromPref(true);
+  }
+}
+
+void KioskLaunchController::LaunchLacros() {
+  app_state_ = kLaunchingLacros;
+  lacros_launcher_ = std::make_unique<app_mode::LacrosLauncher>();
+  lacros_launcher_->Start(
+      base::BindOnce(&KioskLaunchController::OnLacrosLaunchComplete,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void KioskLaunchController::OnLacrosLaunchComplete() {
+  if (network_ui_controller_->ShouldShowNetworkConfig()) {
+    network_ui_controller_->UserRequestedNetworkConfig();
+  } else {
+    InitializeLauncher();
   }
 }
 
@@ -453,11 +509,8 @@ void KioskLaunchController::CleanUp() {
 
   app_launcher_observation_.Reset();
 
-  // Deleting the local objects later so they
-  DeleteSoon(std::move(kiosk_profile_loader_));
-  DeleteSoon(std::move(force_install_observer_));
-  DeleteSoon(std::move(app_launcher_));
-  DeleteSoon(std::move(network_ui_controller_));
+  app_launcher_.reset();
+  network_ui_controller_.reset();
 
   // Can be null in tests.
   if (host_) {
@@ -509,18 +562,7 @@ void KioskLaunchController::OnAppPrepared() {
     return;
   }
 
-  if (network_ui_controller_->IsShowingNetworkConfigScreen()) {
-    return;
-  }
-
   app_state_ = AppState::kInstallingExtensions;
-
-  // Initialize and start Lacros for preparing force-installed extensions.
-  if (crosapi::browser_util::IsLacrosEnabledInWebKioskSession() &&
-      !crosapi::BrowserManager::Get()->IsRunningOrWillRun()) {
-    SYSLOG(INFO) << "Launching lacros for web kiosk";
-    crosapi::BrowserManager::Get()->InitializeAndStartIfNeeded();
-  }
 
   splash_screen_view_->UpdateAppLaunchState(
       AppLaunchSplashScreenView::AppLaunchState::kInstallingExtension);
@@ -643,7 +685,7 @@ void KioskLaunchController::OnAppWindowCreated(
 
   SetKioskLaunchStateCrashKey(KioskLaunchState::kAppWindowCreated);
 
-  CreateAppSession(kiosk_app_id_, profile_, app_name);
+  CreateKioskSystemSession(kiosk_app_id_, profile_, app_name);
   // If timer is running, do not remove splash screen for a few
   // more seconds to give the user ability to exit kiosk session.
   if (splash_wait_timer_.IsRunning()) {

@@ -86,8 +86,7 @@ class POLICY_EXPORT EncryptedReportingJobConfiguration
       DMAuth auth_data,
       const std::string& server_url,
       base::Value::Dict merging_payload,
-      const std::string& dm_token,
-      const std::string& client_id,
+      CloudPolicyClient* cloud_policy_client,
       UploadCompleteCallback complete_cb);
   ~EncryptedReportingJobConfiguration() override;
 
@@ -130,6 +129,7 @@ class POLICY_EXPORT EncryptedReportingJobConfiguration
 
  private:
   std::set<std::string> GetTopLevelKeyAllowList();
+  const bool is_device_managed_;
 
   // Parameters populated from the payload_.
   ::reporting::Priority priority_;

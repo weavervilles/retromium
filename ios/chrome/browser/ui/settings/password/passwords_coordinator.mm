@@ -22,6 +22,7 @@
 #import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/signin/chrome_account_manager_service_factory.h"
 #import "ios/chrome/browser/signin/identity_manager_factory.h"
 #import "ios/chrome/browser/sync/sync_service_factory.h"
 #import "ios/chrome/browser/sync/sync_setup_service_factory.h"
@@ -151,9 +152,11 @@ using password_manager::WarningType;
                                        browserState)];
   self.reauthModule = [[ReauthenticationModule alloc]
       initWithSuccessfulReauthTimeAccessor:self.mediator];
-
-  self.passwordsViewController =
-      [[PasswordManagerViewController alloc] initWithBrowser:self.browser];
+  ChromeAccountManagerService* accountManagerService =
+      ChromeAccountManagerServiceFactory::GetForBrowserState(browserState);
+  self.passwordsViewController = [[PasswordManagerViewController alloc]
+      initWithChromeAccountManagerService:accountManagerService
+                              prefService:browserState->GetPrefs()];
 
   self.passwordsViewController.handler = self;
   self.passwordsViewController.delegate = self.mediator;
@@ -233,7 +236,7 @@ using password_manager::WarningType;
                                browser:self.browser
                             credential:credential
                           reauthModule:self.reauthModule
-                               context:DetailsContext::kGeneral];
+                               context:DetailsContext::kPasswordSettings];
   self.passwordDetailsCoordinator.delegate = self;
   [self.passwordDetailsCoordinator start];
 }
@@ -246,7 +249,7 @@ using password_manager::WarningType;
                                browser:self.browser
                        affiliatedGroup:affiliatedGroup
                           reauthModule:self.reauthModule
-                               context:DetailsContext::kGeneral];
+                               context:DetailsContext::kPasswordSettings];
   self.passwordDetailsCoordinator.delegate = self;
   [self.passwordDetailsCoordinator start];
 }

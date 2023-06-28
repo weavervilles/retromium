@@ -27,6 +27,9 @@
 #include "components/content_settings/core/browser/content_settings_info.h"
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_pattern_parser.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/privacy_sandbox/canonical_topic.h"
@@ -125,6 +128,7 @@ class WebContentsHandler
 
   // Notifies all registered |SiteDataObserver|s.
   void NotifySiteDataObservers(const AccessDetails& access_details);
+  void NotifyStatefulBounceObservers();
 
   // Queues update sent while the navigation is still in progress. The update
   // is run after the navigation completes (DidFinishNavigation).
@@ -408,6 +412,12 @@ void WebContentsHandler::NotifySiteDataObservers(
     const AccessDetails& access_details) {
   for (SiteDataObserver& observer : observer_list_)
     observer.OnSiteDataAccessed(access_details);
+}
+
+void WebContentsHandler::NotifyStatefulBounceObservers() {
+  for (SiteDataObserver& observer : observer_list_) {
+    observer.OnStatefulBounceDetected();
+  }
 }
 
 void WebContentsHandler::AddPendingCommitUpdate(
@@ -699,11 +709,7 @@ bool PageSpecificContentSettings::IsContentAllowed(
 std::map<net::SchemefulSite, /*is_allowed*/ bool>
 PageSpecificContentSettings::GetTwoSiteRequests(
     ContentSettingsType content_type) {
-  std::map<net::SchemefulSite, /*is_allowed*/ bool> result;
-  for (const auto& entry : content_settings_two_site_requests_[content_type]) {
-    result[entry.first] = entry.second.allowed;
-  }
-  return result;
+  return content_settings_two_site_requests_[content_type];
 }
 
 void PageSpecificContentSettings::OnContentBlocked(ContentSettingsType type) {
@@ -783,19 +789,39 @@ void PageSpecificContentSettings::OnContentAllowed(ContentSettingsType type) {
   }
 }
 
-void PageSpecificContentSettings::OnTwoSitePermissionRequested(
+void PageSpecificContentSettings::OnTwoSitePermissionChanged(
     ContentSettingsType type,
     net::SchemefulSite requesting_site,
-    bool is_allowed) {
-  ContentSettingsStatus& status =
-      content_settings_two_site_requests_[type][requesting_site];
-  if (is_allowed) {
-    status.allowed = true;
-  } else {
-    status.blocked = true;
+    ContentSetting content_setting) {
+  bool access_changed = false;
+
+  auto& site_map = content_settings_two_site_requests_[type];
+
+  switch (content_setting) {
+    case CONTENT_SETTING_ASK:
+    case CONTENT_SETTING_DEFAULT:
+      if (site_map.contains(requesting_site)) {
+        site_map.erase(requesting_site);
+        access_changed = true;
+      }
+      break;
+    case CONTENT_SETTING_ALLOW:
+    case CONTENT_SETTING_BLOCK: {
+      bool is_allowed = content_setting == CONTENT_SETTING_ALLOW;
+      if (!site_map.contains(requesting_site) ||
+          site_map[requesting_site] != is_allowed) {
+        site_map[requesting_site] = is_allowed;
+        access_changed = true;
+      }
+      break;
+    }
+    default:
+      NOTREACHED() << content_setting;
   }
 
-  MaybeUpdateLocationBar();
+  if (access_changed) {
+    MaybeUpdateLocationBar();
+  }
 }
 
 namespace {
@@ -850,8 +876,6 @@ void PageSpecificContentSettings::OnStorageAccessed(
     OnContentBlocked(ContentSettingsType::COOKIES);
   } else {
     AddToContainer(allowed_local_shared_objects_, storage_type, url);
-    NotifyDelegate(&Delegate::OnStorageAccessAllowed, storage_type,
-                   url::Origin::Create(url), std::ref(*originating_page));
     OnContentAllowed(ContentSettingsType::COOKIES);
   }
 
@@ -877,8 +901,6 @@ void PageSpecificContentSettings::OnCookiesAccessed(
   } else {
     allowed_local_shared_objects_.cookies()->AddCookies(details);
     OnContentAllowed(ContentSettingsType::COOKIES);
-    NotifyDelegate(&Delegate::OnCookieAccessAllowed, details.cookie_list,
-                   std::ref(*originating_page));
   }
 
   MaybeUpdateParent(&PageSpecificContentSettings::OnCookiesAccessed, details,
@@ -903,8 +925,6 @@ void PageSpecificContentSettings::OnServiceWorkerAccessed(
   if (allowed) {
     allowed_local_shared_objects_.service_workers()->Add(
         url::Origin::Create(scope));
-    NotifyDelegate(&Delegate::OnServiceWorkerAccessAllowed,
-                   url::Origin::Create(scope), std::ref(*originating_page));
   } else {
     blocked_local_shared_objects_.service_workers()->Add(
         url::Origin::Create(scope));
@@ -948,12 +968,14 @@ void PageSpecificContentSettings::OnInterestGroupJoined(
     const url::Origin& api_origin,
     bool blocked_by_policy) {
   if (blocked_by_policy) {
+    // TODO(crbug.com/1456641): Report the COOKIES content setting type as
+    // having been blocked when the UI is updated to better reflect site data.
     blocked_interest_group_api_.push_back(api_origin);
-    OnContentBlocked(ContentSettingsType::COOKIES);
   } else {
     allowed_interest_group_api_.push_back(api_origin);
     OnContentAllowed(ContentSettingsType::COOKIES);
   }
+
   MaybeUpdateParent(&PageSpecificContentSettings::OnInterestGroupJoined,
                     api_origin, blocked_by_policy);
 
@@ -977,25 +999,8 @@ void PageSpecificContentSettings::OnTopicAccessed(
 void PageSpecificContentSettings::OnTrustTokenAccessed(
     const url::Origin& api_origin,
     bool blocked) {
-  // The size isn't relevant here and won't be displayed in the UI.
-  const int kTrustTokenSize = 0;
-  auto& model =
-      blocked ? blocked_browsing_data_model_ : allowed_browsing_data_model_;
-  model->AddBrowsingData(api_origin,
-                         BrowsingDataModel::StorageType::kTrustTokens,
-                         kTrustTokenSize);
-  if (blocked) {
-    OnContentBlocked(ContentSettingsType::COOKIES);
-  } else {
-    OnContentAllowed(ContentSettingsType::COOKIES);
-  }
-  MaybeUpdateParent(&PageSpecificContentSettings::OnTrustTokenAccessed,
-                    api_origin, blocked);
-
-  AccessDetails access_details{SiteDataType::kTrustToken, AccessType::kUnknown,
-                               api_origin.GetURL(), blocked, nullptr};
-
-  MaybeNotifySiteDataObservers(access_details);
+  OnBrowsingDataAccessed(api_origin,
+                         BrowsingDataModel::StorageType::kTrustTokens, blocked);
 }
 
 void PageSpecificContentSettings::OnBrowsingDataAccessed(
@@ -1007,8 +1012,22 @@ void PageSpecificContentSettings::OnBrowsingDataAccessed(
 
   // The size isn't relevant here and won't be displayed in the UI.
   model->AddBrowsingData(data_key, storage_type, /*storage_size=*/0);
+
   if (blocked) {
-    OnContentBlocked(ContentSettingsType::COOKIES);
+    // TODO(crbug.com/1456641): When the COOKIES content setting Omnibox entry
+    // correctly reflects site data, stop ignoring these types.
+    constexpr base::EnumSet<BrowsingDataModel::StorageType,
+                            BrowsingDataModel::StorageType::kFirstType,
+                            BrowsingDataModel::StorageType::kLastType>
+        ignored_types_for_block = {
+            BrowsingDataModel::StorageType::kTrustTokens,
+            BrowsingDataModel::StorageType::kSharedStorage,
+            BrowsingDataModel::StorageType::kInterestGroup,
+            BrowsingDataModel::StorageType::kAttributionReporting,
+        };
+    if (!ignored_types_for_block.Has(storage_type)) {
+      OnContentBlocked(ContentSettingsType::COOKIES);
+    }
   } else {
     OnContentAllowed(ContentSettingsType::COOKIES);
   }
@@ -1129,6 +1148,12 @@ void PageSpecificContentSettings::OnAudioBlocked() {
   OnContentBlocked(ContentSettingsType::SOUND);
 }
 
+void PageSpecificContentSettings::IncrementStatefulBounceCount() {
+  stateful_bounce_count_++;
+  WebContentsHandler::FromWebContents(GetWebContents())
+      ->NotifyStatefulBounceObservers();
+}
+
 void PageSpecificContentSettings::OnContentSettingChanged(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
@@ -1137,8 +1162,14 @@ void PageSpecificContentSettings::OnContentSettingChanged(
     return;
 
   const GURL current_url = page().GetMainDocument().GetLastCommittedURL();
-  if (!primary_pattern.Matches(current_url)) {
-    return;
+  if (content_type == ContentSettingsType::STORAGE_ACCESS) {
+    if (!secondary_pattern.Matches(current_url)) {
+      return;
+    }
+  } else {
+    if (!primary_pattern.Matches(current_url)) {
+      return;
+    }
   }
 
   ContentSettingsStatus& status = content_settings_status_[content_type];
@@ -1193,6 +1224,23 @@ void PageSpecificContentSettings::OnContentSettingChanged(
         status.allowed = false;
         OnContentAllowed(content_type);
       }
+      break;
+    }
+    case ContentSettingsType::STORAGE_ACCESS: {
+      GURL requesting_url = primary_pattern.ToRepresentativeUrl();
+      if (!requesting_url.is_valid()) {
+        return;
+      }
+      // Only forward updates for sites which we are already tracking.
+      net::SchemefulSite requesting_site(requesting_url);
+      if (!content_settings_two_site_requests_[content_type].contains(
+              requesting_site)) {
+        return;
+      }
+
+      ContentSetting setting =
+          map_->GetContentSetting(requesting_url, current_url, content_type);
+      OnTwoSitePermissionChanged(content_type, requesting_site, setting);
       break;
     }
     default:

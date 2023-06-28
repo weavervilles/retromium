@@ -30,7 +30,7 @@
 #include "cc/paint/paint_op_buffer.h"
 #include "cc/paint/transfer_cache_deserialize_helper.h"
 #include "cc/paint/transfer_cache_entry.h"
-#include "components/viz/common/resources/resource_format_utils.h"
+#include "components/viz/common/resources/shared_image_format_utils.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/common/command_buffer_id.h"
 #include "gpu/command_buffer/common/constants.h"
@@ -57,7 +57,7 @@
 #include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_factory.h"
-#include "gpu/command_buffer/service/shared_image/shared_image_format_utils.h"
+#include "gpu/command_buffer/service/shared_image/shared_image_format_service_utils.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 #include "gpu/command_buffer/service/shared_image/wrapped_sk_image_backing_factory.h"
 #include "gpu/command_buffer/service/skia_utils.h"
@@ -68,15 +68,19 @@
 #include "third_party/libyuv/include/libyuv/planar_functions.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
-#include "third_party/skia/include/core/SkPromiseImageTexture.h"
+#include "third_party/skia/include/core/SkGraphics.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/core/SkSurfaceProps.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/core/SkYUVAInfo.h"
+#include "third_party/skia/include/core/SkYUVAPixmaps.h"
 #include "third_party/skia/include/gpu/GrBackendSemaphore.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
 #include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "third_party/skia/include/gpu/GrYUVABackendTextures.h"
+#include "third_party/skia/include/gpu/ganesh/SkSurfaceGanesh.h"
+#include "third_party/skia/include/gpu/graphite/Context.h"
+#include "third_party/skia/include/private/chromium/GrPromiseImageTexture.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/geometry/skia_conversions.h"
@@ -290,14 +294,32 @@ class RasterCommandsCompletedQuery : public QueryManager::Query {
     AddToPendingQueue(submit_count);
     finished_ = false;
 
-    auto* gr_context = shared_context_state_->gr_context();
-    GrFlushInfo info;
-    info.fFinishedProc = RasterCommandsCompletedQuery::FinishedProc;
-    auto weak_ptr = weak_ptr_factory_.GetWeakPtr();
-    info.fFinishedContext =
-        new base::WeakPtr<RasterCommandsCompletedQuery>(weak_ptr);
-    gr_context->flush(info);
-    gr_context->submit();
+    if (auto* gr_context = shared_context_state_->gr_context()) {
+      GrFlushInfo info;
+      info.fFinishedProc = RasterCommandsCompletedQuery::FinishedProc;
+      auto weak_ptr = weak_ptr_factory_.GetWeakPtr();
+      info.fFinishedContext =
+          new base::WeakPtr<RasterCommandsCompletedQuery>(weak_ptr);
+      gr_context->flush(info);
+      gr_context->submit();
+    } else {
+      CHECK(shared_context_state_->graphite_context());
+      auto recording =
+          shared_context_state_->gpu_main_graphite_recorder()->snap();
+      if (recording) {
+        skgpu::graphite::InsertRecordingInfo info = {};
+        info.fRecording = recording.get();
+        info.fFinishedProc = [](void* context, skgpu::CallbackResult result) {
+          RasterCommandsCompletedQuery::FinishedProc(context);
+        };
+        info.fFinishedContext = new base::WeakPtr<RasterCommandsCompletedQuery>(
+            weak_ptr_factory_.GetWeakPtr());
+        shared_context_state_->graphite_context()->insertRecording(info);
+        shared_context_state_->graphite_context()->submit();
+      } else {
+        finished_ = true;
+      }
+    }
   }
 
   void QueryCounter(base::subtle::Atomic32 submit_count) override {
@@ -352,7 +374,8 @@ class RasterQueryManager : public QueryManager {
                      scoped_refptr<gpu::Buffer> buffer,
                      QuerySync* sync) override {
     if (target == GL_COMMANDS_COMPLETED_CHROMIUM &&
-        shared_context_state_->gr_context()) {
+        (shared_context_state_->gr_context() ||
+         shared_context_state_->graphite_context())) {
       auto query = base::MakeRefCounted<RasterCommandsCompletedQuery>(
           shared_context_state_, this, target, std::move(buffer), sync);
       std::pair<QueryMap::iterator, bool> result =
@@ -367,6 +390,20 @@ class RasterQueryManager : public QueryManager {
  private:
   const scoped_refptr<SharedContextState> shared_context_state_;
 };
+
+SkYUVAPixmapInfo::DataType ToSkYUVADataType(viz::SharedImageFormat format) {
+  switch (format.channel_format()) {
+    case viz::SharedImageFormat::ChannelFormat::k8:
+      return SkYUVAPixmapInfo::DataType::kUnorm8;
+    case viz::SharedImageFormat::ChannelFormat::k10:
+      return SkYUVAPixmapInfo::DataType::kUnorm10_Unorm2;
+    case viz::SharedImageFormat::ChannelFormat::k16:
+      return SkYUVAPixmapInfo::DataType::kUnorm16;
+    case viz::SharedImageFormat::ChannelFormat::k16F:
+      return SkYUVAPixmapInfo::DataType::kFloat16;
+  }
+  NOTREACHED_NORETURN();
+}
 
 }  // namespace
 
@@ -467,16 +504,6 @@ class RasterDecoderImpl final : public RasterDecoder,
                           int* entries_processed) override;
   base::StringPiece GetLogPrefix() override;
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE)
-  void AttachImageToTextureWithDecoderBinding(uint32_t client_texture_id,
-                                              uint32_t texture_target,
-                                              gl::GLImage* image) override;
-#elif !BUILDFLAG(IS_ANDROID)
-  void AttachImageToTextureWithClientBinding(uint32_t client_texture_id,
-                                             uint32_t texture_target,
-                                             gl::GLImage* image) override;
-#endif
-
   gles2::ContextGroup* GetContextGroup() override;
   gles2::ErrorState* GetErrorState() override;
 #if !BUILDFLAG(IS_ANDROID)
@@ -558,6 +585,9 @@ class RasterDecoderImpl final : public RasterDecoder,
   GrDirectContext* gr_context() const {
     return shared_context_state_->gr_context();
   }
+  skgpu::graphite::Context* graphite_context() const {
+    return shared_context_state_->graphite_context();
+  }
   skgpu::graphite::Recorder* graphite_recorder() const {
     return shared_context_state_->gpu_main_graphite_recorder();
   }
@@ -581,8 +611,11 @@ class RasterDecoderImpl final : public RasterDecoder,
     // The workaround is not needed for arm based macs (because they don't have
     // the bug).
 #if BUILDFLAG(IS_MAC) && !defined(ARCH_CPU_ARM64)
-    if (!shared_context_state_->GrContextIsGL())
+    // The workaround is also not needed for Graphite, which always uses Metal
+    // drivers (via Dawn).
+    if (!shared_context_state_->GrContextIsGL()) {
       return;
+    }
     // This function does aggressive flushes to work around crashes in the
     // macOS OpenGL driver.
     // https://crbug.com/906453
@@ -639,6 +672,21 @@ class RasterDecoderImpl final : public RasterDecoder,
                              GLuint shm_offset,
                              GLuint shm_size,
                              const volatile GLbyte* mailbox);
+  void DoWritePixelsYUVINTERNAL(GLuint src_width,
+                                GLuint src_height,
+                                GLuint src_row_bytes_plane1,
+                                GLuint src_row_bytes_plane2,
+                                GLuint src_row_bytes_plane3,
+                                GLuint src_row_bytes_plane4,
+                                GLuint src_yuv_plane_config,
+                                GLuint src_yuv_subsampling,
+                                GLuint src_yuv_color_space,
+                                GLint shm_id,
+                                GLuint shm_offset,
+                                GLuint plane2_offset,
+                                GLuint plane3_offset,
+                                GLuint plane4_offset,
+                                const volatile GLbyte* mailbox);
   bool DoWritePixelsINTERNALDirectTextureUpload(
       SkiaImageRepresentation* dest_shared_image,
       const SkImageInfo& src_info,
@@ -712,6 +760,24 @@ class RasterDecoderImpl final : public RasterDecoder,
       const volatile GLuint* paint_cache_ids);
   void DoClearPaintCacheINTERNAL();
 
+  void GraphiteFlushAndSubmitWithRecording(
+      std::unique_ptr<skgpu::graphite::Recording> recording,
+      skgpu::graphite::SyncToCpu sync_to_cpu =
+          skgpu::graphite::SyncToCpu::kNo) {
+    if (recording) {
+      skgpu::graphite::InsertRecordingInfo info = {};
+      info.fRecording = recording.get();
+      graphite_context()->insertRecording(info);
+    }
+    graphite_context()->submit(sync_to_cpu);
+  }
+
+  void GraphiteFlushAndSubmit(skgpu::graphite::SyncToCpu sync_to_cpu =
+                                  skgpu::graphite::SyncToCpu::kNo) {
+    GraphiteFlushAndSubmitWithRecording(graphite_recorder()->snap(),
+                                        sync_to_cpu);
+  }
+
   void FlushSurface(SkiaImageRepresentation::ScopedWriteAccess* access) {
     static int flush_count = 0;
     const base::TimeTicks start = base::TimeTicks::Now();
@@ -719,9 +785,17 @@ class RasterDecoderImpl final : public RasterDecoder,
     for (int plane_index = 0; plane_index < num_planes; plane_index++) {
       auto* surface = access->surface(plane_index);
       DCHECK(surface);
-      surface->flush();
+      skgpu::ganesh::Flush(surface);
     }
     access->ApplyBackendSurfaceEndState();
+
+    if (graphite_context()) {
+      // SkSurface::flush doesn't flush GPU work, so it's necessary to snap and
+      // insert a recording here. It's also necessary to submit before dropping
+      // the scoped access since we want the Dawn texture to be alive on submit.
+      GraphiteFlushAndSubmit();
+    }
+
     if (flush_count < 100) {
       ++flush_count;
       base::UmaHistogramCustomMicrosecondsTimes(
@@ -736,6 +810,9 @@ class RasterDecoderImpl final : public RasterDecoder,
     // This will ensure that vulkan memory allocated on gpu main thread will be
     // cleaned up.
     if (!signal_semaphores.empty() || is_drdc_enabled_) {
+      // NOTE: The Graphite SharedImage representation does not set semaphores,
+      // and we are not enabling DrDC with Graphite.
+      CHECK(gr_context());
       GrFlushInfo flush_info = {
           .fNumSemaphores = signal_semaphores.size(),
           .fSignalSemaphores = signal_semaphores.data(),
@@ -760,8 +837,13 @@ class RasterDecoderImpl final : public RasterDecoder,
     const bool need_submit =
         sync_cpu || !signal_semaphores.empty() || is_drdc_enabled_;
 
-    if (need_submit)
+    if (need_submit) {
+      // NOTE: Graphite uses Metal (via Dawn), the Graphite SharedImage
+      // representation does not set semaphores, and we are not enabling DrDC
+      // with Graphite.
+      CHECK(gr_context());
       gr_context()->submit(sync_cpu);
+    }
   }
 
 #if defined(NDEBUG)
@@ -1061,7 +1143,7 @@ ContextResult RasterDecoderImpl::Initialize(
       return ContextResult::kFatalFailure;
     }
 
-    DCHECK(gr_context());
+    DCHECK(gr_context() || graphite_context());
     use_gpu_raster_ = true;
     paint_cache_ = std::make_unique<cc::ServicePaintCache>();
   }
@@ -1151,24 +1233,12 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
   caps.texture_rg = feature_info()->feature_flags().ext_texture_rg;
   caps.supports_scanout_shared_images =
       SharedImageManager::SupportsScanoutImages();
-  // TODO(piman): have a consistent limit in shared image backings.
-  // https://crbug.com/960588
-  if (shared_context_state_->GrContextIsGL()) {
-    api()->glGetIntegervFn(GL_MAX_TEXTURE_SIZE, &caps.max_texture_size);
-  } else if (shared_context_state_->GrContextIsVulkan()) {
-#if BUILDFLAG(ENABLE_VULKAN)
-    caps.max_texture_size = shared_context_state_->vk_context_provider()
-                                ->GetDeviceQueue()
-                                ->vk_physical_device_properties()
-                                .limits.maxImageDimension2D;
-#else
-    NOTREACHED();
-#endif
-  } else {
-    // TODO(crbug.com/1090476): Query Dawn for this value once an API exists for
-    // capabilities.
-    caps.max_texture_size = 8192;
-  }
+  caps.supports_luminance_shared_images =
+      !feature_info()->gl_version_info().is_angle_metal;
+  caps.max_texture_size = shared_context_state_->GetMaxTextureSize();
+  caps.using_vulkan_context =
+      shared_context_state_->GrContextIsVulkan() ? true : false;
+
   if (feature_info()->workarounds().webgl_or_caps_max_texture_size) {
     caps.max_texture_size =
         std::min(caps.max_texture_size,
@@ -1200,6 +1270,10 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
         gr_context()->colorTypeSupportedAsImage(kA16_unorm_SkColorType);
     caps.texture_half_float_linear =
         gr_context()->colorTypeSupportedAsImage(kA16_float_SkColorType);
+  } else if (graphite_context()) {
+    // TODO(b/281151641): Determine if there are checks to be made here.
+    caps.texture_norm16 = true;
+    caps.texture_half_float_linear = true;
   } else {
     caps.texture_norm16 = feature_info()->feature_flags().ext_texture_norm16;
     caps.texture_half_float_linear =
@@ -1211,7 +1285,9 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
   caps.shared_image_swap_chain = D3DImageBackingFactory::IsSwapChainSupported();
 #endif  // BUILDFLAG(IS_WIN)
   caps.disable_legacy_mailbox = disable_legacy_mailbox_;
-  caps.supports_yuv_rgb_conversion = true;
+  // TODO(crbug.com/1450879): Support YUV rendering and readback for Graphite.
+  caps.supports_yuv_rgb_conversion = !graphite_context();
+  caps.supports_yuv_readback = !graphite_context();
   return caps;
 }
 
@@ -1315,8 +1391,11 @@ bool RasterDecoderImpl::HasPendingQueries() const {
 
 void RasterDecoderImpl::ProcessPendingQueries(bool did_finish) {
   if (query_manager_) {
-    if (auto* gr_context = shared_context_state_->gr_context())
-      gr_context->checkAsyncWorkCompletion();
+    if (gr_context()) {
+      gr_context()->checkAsyncWorkCompletion();
+    } else if (graphite_context()) {
+      graphite_context()->checkAsyncWorkCompletion();
+    }
     query_manager_->ProcessPendingQueries(did_finish);
   }
 }
@@ -1540,22 +1619,6 @@ base::StringPiece RasterDecoderImpl::GetLogPrefix() {
   return logger_.GetLogPrefix();
 }
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE)
-void RasterDecoderImpl::AttachImageToTextureWithDecoderBinding(
-    uint32_t client_texture_id,
-    uint32_t texture_target,
-    gl::GLImage* image) {
-  NOTIMPLEMENTED();
-}
-#elif !BUILDFLAG(IS_ANDROID)
-void RasterDecoderImpl::AttachImageToTextureWithClientBinding(
-    uint32_t client_texture_id,
-    uint32_t texture_target,
-    gl::GLImage* image) {
-  NOTIMPLEMENTED();
-}
-#endif
-
 gles2::ContextGroup* RasterDecoderImpl::GetContextGroup() {
   return nullptr;
 }
@@ -1635,7 +1698,7 @@ void RasterDecoderImpl::SetUpForRasterCHROMIUMForTest() {
   auto info = SkImageInfo::MakeN32(10, 10, kPremul_SkAlphaType,
                                    SkColorSpace::MakeSRGB());
   SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
-  sk_surface_for_testing_ = SkSurface::MakeRaster(info, &props);
+  sk_surface_for_testing_ = SkSurfaces::Raster(info, &props);
   sk_surface_ = sk_surface_for_testing_.get();
   raster_canvas_ = sk_surface_->getCanvas();
 }
@@ -1803,15 +1866,19 @@ error::Error RasterDecoderImpl::HandleQueryCounterEXT(
 }
 
 void RasterDecoderImpl::DoFinish() {
-  if (auto* gr_context = shared_context_state_->gr_context()) {
-    gr_context->flushAndSubmit(/*syncCpu=*/true);
+  if (gr_context()) {
+    gr_context()->flushAndSubmit(/*syncCpu=*/true);
+  } else if (graphite_context()) {
+    GraphiteFlushAndSubmit(skgpu::graphite::SyncToCpu::kYes);
   }
   ProcessPendingQueries(/*did_finish=*/true);
 }
 
 void RasterDecoderImpl::DoFlush() {
-  if (auto* gr_context = shared_context_state_->gr_context()) {
-    gr_context->flushAndSubmit(/*syncCpu=*/false);
+  if (gr_context()) {
+    gr_context()->flushAndSubmit(/*syncCpu=*/false);
+  } else if (graphite_context()) {
+    GraphiteFlushAndSubmit();
   }
   ProcessPendingQueries(/*did_finish=*/false);
 }
@@ -2035,6 +2102,10 @@ void RasterDecoderImpl::DoWritePixelsINTERNAL(GLint x_offset,
       DoWritePixelsINTERNALDirectTextureUpload(dest_shared_image.get(),
                                                src_info, plane_index,
                                                pixel_data, row_bytes)) {
+    if (!dest_shared_image->IsCleared()) {
+      dest_shared_image->SetClearedRect(
+          gfx::Rect(src_info.width(), src_info.height()));
+    }
     return;
   }
 
@@ -2074,13 +2145,224 @@ void RasterDecoderImpl::DoWritePixelsINTERNAL(GLint x_offset,
                        "Failed to write pixels to SkCanvas");
   }
 
-  surface->flush();
-  dest_scoped_access->ApplyBackendSurfaceEndState();
-  SubmitIfNecessary(std::move(end_semaphores));
+  if (graphite_context()) {
+    GraphiteFlushAndSubmit();
+  } else {
+    skgpu::ganesh::Flush(surface);
+    dest_scoped_access->ApplyBackendSurfaceEndState();
+    SubmitIfNecessary(std::move(end_semaphores));
+  }
 
   if (!dest_shared_image->IsCleared()) {
     dest_shared_image->SetClearedRect(
         gfx::Rect(x_offset, y_offset, src_width, src_height));
+  }
+}
+
+void RasterDecoderImpl::DoWritePixelsYUVINTERNAL(
+    GLuint src_width,
+    GLuint src_height,
+    GLuint src_row_bytes_plane1,
+    GLuint src_row_bytes_plane2,
+    GLuint src_row_bytes_plane3,
+    GLuint src_row_bytes_plane4,
+    GLuint src_yuv_plane_config,
+    GLuint src_yuv_subsampling,
+    GLuint src_yuv_datatype,
+    GLint shm_id,
+    GLuint shm_offset,
+    GLuint plane2_offset,
+    GLuint plane3_offset,
+    GLuint plane4_offset,
+    const volatile GLbyte* mailbox) {
+  TRACE_EVENT0("gpu", "RasterDecoderImpl::DoWritePixelsYUVINTERNAL");
+  if (src_yuv_plane_config < 0 ||
+      src_yuv_plane_config > static_cast<int>(SkYUVAInfo::PlaneConfig::kLast)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, "WritePixelsYUV",
+                       "src_yuv_plane_config must be a valid PlaneConfig");
+    return;
+  }
+  if (src_yuv_subsampling < 0 ||
+      src_yuv_subsampling > static_cast<int>(SkYUVAInfo::Subsampling::kLast)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, "WritePixelsYUV",
+                       "src_yuv_subsampling must be a valid Subsampling");
+    return;
+  }
+  if (src_yuv_datatype < 0 ||
+      src_yuv_datatype > static_cast<int>(SkYUVAPixmapInfo::DataType::kLast)) {
+    LOCAL_SET_GL_ERROR(
+        GL_INVALID_ENUM, "WritePixelsYUV",
+        "src_yuv_datatype must be a valid SkYUVAPixmapInfo::DataType");
+    return;
+  }
+
+  Mailbox dest_mailbox = Mailbox::FromVolatile(
+      *reinterpret_cast<const volatile Mailbox*>(mailbox));
+  DLOG_IF(ERROR, !dest_mailbox.Verify())
+      << "WritePixelsYUV was passed an invalid mailbox";
+  auto dest_shared_image = shared_image_representation_factory_.ProduceSkia(
+      dest_mailbox, shared_context_state_);
+  if (!dest_shared_image) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                       "Attempting to write to unknown mailbox.");
+    return;
+  }
+
+  SkYUVAInfo::PlaneConfig src_plane_config =
+      static_cast<SkYUVAInfo::PlaneConfig>(src_yuv_plane_config);
+  SkYUVAInfo::Subsampling src_subsampling =
+      static_cast<SkYUVAInfo::Subsampling>(src_yuv_subsampling);
+  SkYUVAPixmapInfo::DataType src_datatype =
+      static_cast<SkYUVAPixmapInfo::DataType>(src_yuv_datatype);
+  viz::SharedImageFormat dest_format = dest_shared_image->format();
+  if (!dest_format.is_multi_plane()) {
+    LOCAL_SET_GL_ERROR(
+        GL_INVALID_OPERATION, "glWritePixelsYUV",
+        "dest_format must be a valid multiplanar SharedImageFormat.");
+    return;
+  }
+  if (src_plane_config != ToSkYUVAPlaneConfig(dest_format)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                       "PlaneConfig mismatch between source texture format and "
+                       "the destination shared image format");
+    return;
+  }
+  if (src_subsampling != ToSkYUVASubsampling(dest_format)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                       "Subsampling mismatch between source texture format and "
+                       "the destination shared image format");
+    return;
+  }
+  if (src_datatype != ToSkYUVADataType(dest_format)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                       "ChannelFormat mismatch between source texture format "
+                       "and the destination shared image format");
+    return;
+  }
+
+  SkYUVAInfo yuv_info(SkISize::Make(src_width, src_height), src_plane_config,
+                      src_subsampling,
+                      SkYUVColorSpace::kIdentity_SkYUVColorSpace);
+  if (yuv_info.numPlanes() != dest_format.NumberOfPlanes()) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                       "Planes mismatch between source texture format and the "
+                       "destination shared image format");
+    return;
+  }
+
+  if (gfx::Size(src_width, src_height) != dest_shared_image->size()) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                       "Unexpected size for multiplanar shared image");
+    return;
+  }
+
+  std::vector<GrBackendSemaphore> begin_semaphores;
+  std::vector<GrBackendSemaphore> end_semaphores;
+
+  // Allow uncleared access, as we manually handle clear tracking.
+  std::unique_ptr<SkiaImageRepresentation::ScopedWriteAccess>
+      dest_scoped_access = dest_shared_image->BeginScopedWriteAccess(
+          &begin_semaphores, &end_semaphores,
+          SharedImageRepresentation::AllowUnclearedAccess::kYes,
+          /*use_sk_surface=*/false);
+  if (!dest_scoped_access) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                       "Failed to begin scoped write access.");
+    return;
+  }
+  if (!begin_semaphores.empty()) {
+    // The Graphite SharedImage representation does not set semaphores.
+    CHECK(gr_context());
+    bool result =
+        gr_context()->wait(begin_semaphores.size(), begin_semaphores.data(),
+                           /*deleteSemaphoresAfterWait=*/false);
+    CHECK(result);
+  }
+
+  size_t row_bytes[SkYUVAInfo::kMaxPlanes];
+  row_bytes[0] = src_row_bytes_plane1;
+  row_bytes[1] = src_row_bytes_plane2;
+  row_bytes[2] = src_row_bytes_plane3;
+  row_bytes[3] = src_row_bytes_plane4;
+
+  size_t plane_offsets[SkYUVAInfo::kMaxPlanes];
+  plane_offsets[0] = 0;
+  plane_offsets[1] = plane2_offset;
+  plane_offsets[2] = plane3_offset;
+  plane_offsets[3] = plane4_offset;
+
+  for (int plane = 0; plane < yuv_info.numPlanes(); plane++) {
+    auto color_type = viz::ToClosestSkColorType(true, dest_format, plane);
+    auto plane_size =
+        dest_format.GetPlaneSize(plane, gfx::Size(src_width, src_height));
+    SkImageInfo src_info =
+        SkImageInfo::Make(gfx::SizeToSkISize(plane_size), color_type,
+                          SkAlphaType::kPremul_SkAlphaType, nullptr);
+
+    if (row_bytes[plane] < src_info.minRowBytes()) {
+      LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glWritePixelsYUV",
+                         "row_bytes must be >= "
+                         "SkImageInfo::minRowBytes() for source image.");
+      return;
+    }
+
+    size_t byte_size = src_info.computeByteSize(row_bytes[plane]);
+    if (byte_size > UINT32_MAX) {
+      LOCAL_SET_GL_ERROR(
+          GL_INVALID_VALUE, "glWritePixelsYUV",
+          "Cannot request a memory chunk larger than UINT32_MAX bytes");
+      return;
+    }
+    if (plane > 0 &&
+        plane_offsets[plane] < plane_offsets[plane - 1] + byte_size) {
+      LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glWritePixelsYUV",
+                         "plane_offsets[plane] must be >= plane_offsets[plane "
+                         "- 1] + byte_size");
+      return;
+    }
+
+    // The pixels are stored contiguously for all the planes one after another
+    // with padding.
+    void* pixel_data = GetSharedMemoryAs<void*>(
+        shm_id, shm_offset + plane_offsets[plane], byte_size);
+    if (!pixel_data) {
+      LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                         "Couldn't retrieve pixel data.");
+      return;
+    }
+
+    // Try a direct texture upload without using SkSurface.
+    SkPixmap pixmap(src_info, pixel_data, row_bytes[plane]);
+    bool written = false;
+    if (gr_context()) {
+      written = gr_context()->updateBackendTexture(
+          dest_scoped_access->promise_image_texture(plane)->backendTexture(),
+          &pixmap,
+          /*numLevels=*/1, dest_shared_image->surface_origin(), nullptr,
+          nullptr);
+    } else {
+      CHECK(graphite_context());
+      written = graphite_recorder()->updateBackendTexture(
+          dest_scoped_access->graphite_texture(plane), &pixmap,
+          /*numLevels=*/1);
+    }
+    if (!written) {
+      LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glWritePixelsYUV",
+                         "Failed to upload pixels to dest shared image");
+      return;
+    }
+  }
+
+  if (gr_context()) {
+    dest_scoped_access->ApplyBackendSurfaceEndState();
+    SubmitIfNecessary(std::move(end_semaphores));
+  } else {
+    auto recording = graphite_recorder()->snap();
+    GraphiteFlushAndSubmitWithRecording(std::move(recording));
+  }
+
+  if (!dest_shared_image->IsCleared()) {
+    dest_shared_image->SetClearedRect(gfx::Rect(src_width, src_height));
   }
 }
 
@@ -2098,30 +2380,42 @@ bool RasterDecoderImpl::DoWritePixelsINTERNALDirectTextureUpload(
       dest_scoped_access = dest_shared_image->BeginScopedWriteAccess(
           &begin_semaphores, &end_semaphores,
           SharedImageRepresentation::AllowUnclearedAccess::kYes,
-          false /*use_sk_surface*/);
+          /*use_sk_surface=*/false);
   if (!dest_scoped_access) {
     return false;
   }
   if (!begin_semaphores.empty()) {
-    bool result = shared_context_state_->gr_context()->wait(
-        begin_semaphores.size(), begin_semaphores.data(),
-        /*deleteSemaphoresAfterWait=*/false);
+    // The Graphite SharedImage representation does not set semaphores.
+    CHECK(gr_context());
+    bool result =
+        gr_context()->wait(begin_semaphores.size(), begin_semaphores.data(),
+                           /*deleteSemaphoresAfterWait=*/false);
     DCHECK(result);
   }
 
   SkPixmap pixmap(src_info, pixel_data, row_bytes);
-  bool written = gr_context()->updateBackendTexture(
-      dest_scoped_access->promise_image_texture(plane_index)->backendTexture(),
-      &pixmap,
-      /*levels=*/1, dest_shared_image->surface_origin(), nullptr, nullptr);
-
-  dest_scoped_access->ApplyBackendSurfaceEndState();
+  bool written = false;
+  if (gr_context()) {
+    written = gr_context()->updateBackendTexture(
+        dest_scoped_access->promise_image_texture(plane_index)
+            ->backendTexture(),
+        &pixmap,
+        /*numLevels=*/1, dest_shared_image->surface_origin(), nullptr, nullptr);
+    dest_scoped_access->ApplyBackendSurfaceEndState();
+  } else {
+    CHECK(graphite_context());
+    written = graphite_recorder()->updateBackendTexture(
+        dest_scoped_access->graphite_texture(plane_index), &pixmap,
+        /*numLevels=*/1);
+    auto recording = graphite_recorder()->snap();
+    if (!recording) {
+      DLOG(ERROR) << "Failed to snap Graphite recording";
+      return false;
+    }
+    GraphiteFlushAndSubmitWithRecording(std::move(recording));
+  }
 
   SubmitIfNecessary(std::move(end_semaphores));
-  if (written && !dest_shared_image->IsCleared()) {
-    dest_shared_image->SetClearedRect(
-        gfx::Rect(src_info.width(), src_info.height()));
-  }
   return written;
 }
 
@@ -2328,9 +2622,10 @@ void RasterDecoderImpl::DoReadbackYUVImagePixelsINTERNAL(
           &begin_semaphores, &end_semaphores);
 
   if (!begin_semaphores.empty()) {
-    bool result = shared_context_state_->gr_context()->wait(
-        begin_semaphores.size(), begin_semaphores.data(),
-        /*deleteSemaphoresAfterWait=*/false);
+    CHECK(gr_context());
+    bool result =
+        gr_context()->wait(begin_semaphores.size(), begin_semaphores.data(),
+                           /*deleteSemaphoresAfterWait=*/false);
     DCHECK(result);
   }
 
@@ -2439,20 +2734,20 @@ void RasterDecoderImpl::DoReadbackYUVImagePixelsINTERNAL(
 
   source_scoped_access->ApplyBackendSurfaceEndState();
   if (!end_semaphores.empty()) {
+    CHECK(gr_context());
     GrFlushInfo flush_info = {
         .fNumSemaphores = end_semaphores.size(),
         .fSignalSemaphores = end_semaphores.data(),
     };
     AddVulkanCleanupTaskForSkiaFlush(
         shared_context_state_->vk_context_provider(), &flush_info);
-    auto flush_result = shared_context_state_->gr_context()->flush(flush_info);
-    DCHECK(flush_result == GrSemaphoresSubmitted::kYes);
+    gr_context()->flush(flush_info);
   }
 
   // TODO(crbug.com/1023262): Eventually we should make this function truly
   // asynchronous by removing this flush and implementing a query that can
   // signal back to client process.
-  gr_context()->flushAndSubmit(true);
+  DoFinish();
 
   // The call above will sync up gpu and CPU, resulting in callback being run
   // during flushAndSubmit. To prevent UAF make sure it indeed happened.
@@ -2653,11 +2948,20 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(GLfloat r,
       flags = 0;
       break;
     case kMSAA:
+      // Graphite operates as in the kDMSAA case below.
+      if (graphite_context()) {
+        final_msaa_count = 1;
+        flags = SkSurfaceProps::kDynamicMSAA_Flag;
+        break;
+      }
+
       // If we can't match requested MSAA samples, don't use MSAA.
       final_msaa_count = std::max(static_cast<int>(msaa_sample_count), 0);
-      if (final_msaa_count >
-          gr_context()->maxSurfaceSampleCountForColorType(sk_color_type))
+      if (gr_context() &&
+          final_msaa_count >
+              gr_context()->maxSurfaceSampleCountForColorType(sk_color_type)) {
         final_msaa_count = 0;
+      }
       flags = 0;
       break;
     case kDMSAA:
@@ -2904,13 +3208,15 @@ void RasterDecoderImpl::DoEndRasterCHROMIUM() {
   // Unlock all font handles. This needs to be deferred until
   // SkSurface::flush since that flushes batched Gr operations
   // in skia that access the glyph data.
-  // TODO(khushalsagar): We just unlocked a bunch of handles, do we need to
-  // give a call to skia to attempt to purge any unlocked handles?
   if (!font_manager_->Unlock(locked_handles_)) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glRasterCHROMIUM",
                        "Invalid font discardable handle.");
   }
   locked_handles_.clear();
+
+  // We just unlocked a bunch of handles. Give a call to skia to
+  // attempt to purge any unlocked handles.
+  SkGraphics::PurgePinnedFontCache();
 
   // We just flushed a tile's worth of GPU work from the SkSurface in
   // flush above. Yield to the Scheduler to allow pre-emption before
@@ -2932,8 +3238,8 @@ void RasterDecoderImpl::DoCreateTransferCacheEntryINTERNAL(
         "Attempt to use OOP transfer cache on a context without OOP raster.");
     return;
   }
-  DCHECK(gr_context());
-  DCHECK(transfer_cache());
+  CHECK(gr_context() || graphite_recorder());
+  CHECK(transfer_cache());
 
   // Validate the type we are about to create.
   cc::TransferCacheEntryType entry_type;

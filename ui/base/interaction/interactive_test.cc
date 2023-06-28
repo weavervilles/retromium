@@ -11,6 +11,7 @@
 #include "base/functional/callback_helpers.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_run_loop_timeout.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/interaction/element_test_util.h"
 #include "ui/base/interaction/interaction_sequence.h"
@@ -233,45 +234,36 @@ InteractionSequence::StepBuilder InteractiveTestApi::WaitForEvent(
 
 // static
 InteractiveTestApi::MultiStep InteractiveTestApi::EnsureNotPresent(
-    ElementIdentifier element_to_check,
-    bool in_any_context) {
+    ElementIdentifier element_to_check) {
   return internal::InteractiveTestPrivate::PostTask(
-      base::StringPrintf("EnsureNotPresent( %s, %d )",
-                         element_to_check.GetName().c_str(), in_any_context),
+      base::StringPrintf("EnsureNotPresent( %s )",
+                         element_to_check.GetName().c_str()),
       base::BindOnce(
-          [](ElementIdentifier element_to_check, bool in_any_context,
-             InteractionSequence* seq, TrackedElement* reference) {
-            auto* const element =
-                in_any_context
-                    ? ElementTracker::GetElementTracker()
-                          ->GetElementInAnyContext(element_to_check)
-                    : ElementTracker::GetElementTracker()
-                          ->GetFirstMatchingElement(element_to_check,
-                                                    reference->context());
+          [](ElementIdentifier id, InteractionSequence* seq,
+             TrackedElement* reference) {
+            auto* const tracker = ElementTracker::GetElementTracker();
+            auto* const element = seq->IsCurrentStepInAnyContextForTesting()
+                                      ? tracker->GetElementInAnyContext(id)
+                                      : tracker->GetFirstMatchingElement(
+                                            id, reference->context());
             if (element) {
-              LOG(ERROR) << "Expected element " << element_to_check
+              LOG(ERROR) << "Expected element " << element->ToString()
                          << " not to be present but it was present.";
               seq->FailForTesting();
             }
           },
-          element_to_check, in_any_context));
+          element_to_check));
 }
 
 // static
 InteractiveTestApi::MultiStep InteractiveTestApi::EnsurePresent(
-    ElementSpecifier element_to_check,
-    bool in_any_context) {
+    ElementSpecifier element_to_check) {
   return Steps(
       FlushEvents(),
-      std::move(
-          WithElement(element_to_check, base::DoNothing())
-              .SetDescription(base::StringPrintf(
-                  "EnsurePresent( %s, %d )",
-                  internal::DescribeElement(element_to_check).c_str(),
-                  in_any_context))
-              .SetContext(in_any_context
-                              ? InteractionSequence::ContextMode::kAny
-                              : InteractionSequence::ContextMode::kInitial)));
+      std::move(WithElement(element_to_check, base::DoNothing())
+                    .SetDescription(base::StringPrintf(
+                        "EnsurePresent( %s )",
+                        internal::DescribeElement(element_to_check).c_str()))));
 }
 
 // static
@@ -342,7 +334,28 @@ bool InteractiveTestApi::RunTestSequenceImpl(
       base::BindOnce(&internal::InteractiveTestPrivate::OnSequenceAborted,
                      base::Unretained(private_test_impl_.get())));
   auto sequence = builder.Build();
-  sequence->RunSynchronouslyForTesting();
+
+  {
+    base::test::ScopedRunLoopTimeout timeout(
+        FROM_HERE, absl::nullopt,
+        base::BindRepeating(
+            [](base::WeakPtr<InteractionSequence> sequence) {
+              std::ostringstream oss;
+              if (sequence) {
+                oss << internal::kInteractiveTestFailedMessagePrefix
+                    << sequence->BuildAbortedData(
+                           InteractionSequence::AbortedReason::
+                               kSequenceTimedOut);
+              } else {
+                oss << "Interactive test: timeout after test sequence "
+                       "destroyed; a failure message may already have been "
+                       "logged.";
+              }
+              return oss.str();
+            },
+            sequence->AsWeakPtr()));
+    sequence->RunSynchronouslyForTesting();
+  }
 
   private_test_impl_->Cleanup();
 

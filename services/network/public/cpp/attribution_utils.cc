@@ -4,24 +4,9 @@
 
 #include "services/network/public/cpp/attribution_utils.h"
 
-#include "base/strings/string_piece.h"
 #include "services/network/public/mojom/attribution.mojom.h"
 
 namespace network {
-
-base::StringPiece GetAttributionSupportHeader(
-    mojom::AttributionSupport attribution_support) {
-  switch (attribution_support) {
-    case mojom::AttributionSupport::kWeb:
-      return "web";
-    case mojom::AttributionSupport::kWebAndOs:
-      return "os, web";
-    case mojom::AttributionSupport::kOs:
-      return "os";
-    case mojom::AttributionSupport::kNone:
-      return "";
-  }
-}
 
 bool HasAttributionOsSupport(mojom::AttributionSupport attribution_support) {
   switch (attribution_support) {

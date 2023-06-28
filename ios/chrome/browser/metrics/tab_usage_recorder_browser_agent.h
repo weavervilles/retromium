@@ -54,12 +54,10 @@ class TabUsageRecorderBrowserAgent
                          web::WebState* new_web_state);
 
   // Called when the Browser which the user is primarily interacting with has
-  // changed. The `active_web_state` is the active tab of the browser's
-  // webStateList. If the user began interacting with `active_web_state`,
+  // changed. If the user began interacting with `active_web_state`,
   // `primary_browser` should be true. If the user stopped interacting with
   // `active_web_state`, `primary_browser` should be false.
-  void RecordPrimaryBrowserChange(bool primary_browser,
-                                  web::WebState* active_web_state);
+  void RecordPrimaryBrowserChange(bool primary_browser);
 
   // Called when a page load begins, to keep track of how many page loads
   // happen before an evicted tab is seen.
@@ -154,17 +152,9 @@ class TabUsageRecorderBrowserAgent
   void WebStateDestroyed(web::WebState* web_state) override;
 
   // WebStateListObserver implementation.
-  void WebStateInsertedAt(WebStateList* web_state_list,
-                          web::WebState* web_state,
-                          int index,
-                          bool activating) override;
-  void WebStateReplacedAt(WebStateList* web_state_list,
-                          web::WebState* old_web_state,
-                          web::WebState* new_web_state,
-                          int index) override;
-  void WebStateDetachedAt(WebStateList* web_state_list,
-                          web::WebState* web_state,
-                          int index) override;
+  void WebStateListDidChange(WebStateList* web_state_list,
+                             const WebStateListChange& change,
+                             const WebStateSelection& selection) override;
   void WebStateActivatedAt(WebStateList* web_state_list,
                            web::WebState* old_web_state,
                            web::WebState* new_web_state,

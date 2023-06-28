@@ -26,11 +26,11 @@
 #include "base/metrics/ranges_manager.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/single_thread_task_runner.h"
-#include "base/task/task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
+#include "components/metrics/metrics_features.h"
+#include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/persistent_histograms.h"
@@ -92,20 +92,6 @@ void DeleteFileWhenPossible(const base::FilePath& path) {
   // of the delete task.
   base::File file(path, base::File::FLAG_OPEN | base::File::FLAG_READ |
                             base::File::FLAG_DELETE_ON_CLOSE);
-}
-
-// A task runner to use for testing.
-base::TaskRunner* g_task_runner_for_testing = nullptr;
-
-// Returns a task runner appropriate for running background tasks that perform
-// file I/O.
-scoped_refptr<base::TaskRunner> CreateBackgroundTaskRunner() {
-  if (g_task_runner_for_testing)
-    return scoped_refptr<base::TaskRunner>(g_task_runner_for_testing);
-
-  return base::ThreadPool::CreateTaskRunner(
-      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 }
 
 }  // namespace
@@ -194,15 +180,15 @@ FileMetricsProvider::Params::Params(const base::FilePath& path,
                                     base::StringPiece prefs_key)
     : path(path), type(type), association(association), prefs_key(prefs_key) {}
 
-FileMetricsProvider::Params::~Params() {}
+FileMetricsProvider::Params::~Params() = default;
 
 FileMetricsProvider::FileMetricsProvider(PrefService* local_state)
-    : task_runner_(CreateBackgroundTaskRunner()), pref_service_(local_state) {
+    : pref_service_(local_state) {
   base::StatisticsRecorder::RegisterHistogramProvider(
       weak_factory_.GetWeakPtr());
 }
 
-FileMetricsProvider::~FileMetricsProvider() {}
+FileMetricsProvider::~FileMetricsProvider() = default;
 
 void FileMetricsProvider::RegisterSource(const Params& params) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -244,13 +230,6 @@ void FileMetricsProvider::RegisterSourcePrefs(
 //  static
 void FileMetricsProvider::RegisterPrefs(PrefRegistrySimple* prefs) {
   prefs->RegisterListPref(metrics::prefs::kMetricsFileMetricsMetadata);
-}
-
-// static
-void FileMetricsProvider::SetTaskRunnerForTesting(
-    const scoped_refptr<base::TaskRunner>& task_runner) {
-  DCHECK(!g_task_runner_for_testing || !task_runner);
-  g_task_runner_for_testing = task_runner.get();
 }
 
 // static
@@ -683,8 +662,11 @@ FileMetricsProvider::AccessResult FileMetricsProvider::HandleFilterSource(
 /* static */
 bool FileMetricsProvider::ProvideIndependentMetricsOnTaskRunner(
     SourceInfo* source,
-    SystemProfileProto* system_profile_proto,
+    ChromeUserMetricsExtension* uma_proto,
     base::HistogramSnapshotManager* snapshot_manager) {
+  SystemProfileProto* system_profile_proto =
+      uma_proto->mutable_system_profile();
+
   if (PersistentSystemProfile::GetSystemProfile(
           *source->allocator->memory_allocator(), system_profile_proto)) {
     // Pass a custom RangesManager so that we do not register the BucketRanges
@@ -695,6 +677,24 @@ bool FileMetricsProvider::ProvideIndependentMetricsOnTaskRunner(
     RecordHistogramSnapshotsFromSource(
         snapshot_manager, source,
         /*required_flags=*/base::HistogramBase::kUmaTargetedHistogramFlag);
+
+    if (base::FeatureList::IsEnabled(
+            features::kRestoreUmaClientIdIndependentLogs)) {
+      // NOTE: If you are adding anything here, consider also changing
+      // MetricsStateManager::ProvidePreviousSessionData().
+
+      // Use the client UUID stored in the system profile (if there is one) as
+      // the independent log's client ID. Usually, this has no effect, but there
+      // are scenarios where the log may have come from a session that had a
+      // different client ID than the one currently in use (e.g., client ID was
+      // reset due to being detected as a cloned install), so make sure to
+      // associate it with the proper one.
+      const std::string& client_uuid = system_profile_proto->client_uuid();
+      if (!client_uuid.empty()) {
+        uma_proto->set_client_id(MetricsLog::Hash(client_uuid));
+      }
+    }
+
     return true;
   }
 
@@ -734,8 +734,14 @@ void FileMetricsProvider::ScheduleSourcesCheck() {
   // because that must complete before the reply runs.
   SourceInfoList* check_list = new SourceInfoList();
   std::swap(sources_to_check_, *check_list);
-  task_runner_->PostTaskAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       // SKIP_ON_SHUTDOWN because the task must be run to completion once
+       // started. Since the task may merge metrics from files on disk, the task
+       // should be completed so that those files are deleted (to prevent
+       // re-merging them in another session, which would cause duplication).
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(
           &FileMetricsProvider::CheckAndMergeMetricSourcesOnTaskRunner,
           base::Unretained(check_list)),
@@ -785,8 +791,16 @@ void FileMetricsProvider::RecordSourcesChecked(
 }
 
 void FileMetricsProvider::DeleteFileAsync(const base::FilePath& path) {
-  task_runner_->PostTask(FROM_HERE,
-                         base::BindOnce(DeleteFileWhenPossible, path));
+  base::ThreadPool::PostTask(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       // CONTINUE_ON_SHUTDOWN because files that are scheduled to be deleted
+       // asynchronously are not guaranteed to be deleted this session anyway,
+       // so no need to block shutdown if the task has already started running.
+       // Further, for such files, there are different ways to ensure they won't
+       // be consumed again (i.e., prefs).
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
+      base::BindOnce(DeleteFileWhenPossible, path));
 }
 
 void FileMetricsProvider::RecordSourceAsRead(SourceInfo* source) {
@@ -829,8 +843,6 @@ void FileMetricsProvider::ProvideIndependentMetrics(
     base::OnceCallback<void(bool)> done_callback,
     ChromeUserMetricsExtension* uma_proto,
     base::HistogramSnapshotManager* snapshot_manager) {
-  SystemProfileProto* system_profile_proto =
-      uma_proto->mutable_system_profile();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (sources_with_profile_.empty()) {
@@ -845,11 +857,16 @@ void FileMetricsProvider::ProvideIndependentMetrics(
   DCHECK(source->allocator);
 
   // Do the actual work as a background task.
-  task_runner_->PostTaskAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       // CONTINUE_ON_SHUTDOWN because the work done is only useful once the
+       // reply task is run (and there are no side effects). So, no need to
+       // block shutdown since the reply task won't be run anyway.
+       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(
           &FileMetricsProvider::ProvideIndependentMetricsOnTaskRunner,
-          source_ptr, system_profile_proto, snapshot_manager),
+          source_ptr, uma_proto, snapshot_manager),
       base::BindOnce(&FileMetricsProvider::ProvideIndependentMetricsCleanup,
                      weak_factory_.GetWeakPtr(), std::move(done_callback),
                      std::move(source)));
@@ -951,12 +968,15 @@ void FileMetricsProvider::RecordInitialHistogramSnapshots(
   }
 }
 
-void FileMetricsProvider::MergeHistogramDeltas() {
+void FileMetricsProvider::MergeHistogramDeltas(
+    bool async,
+    base::OnceClosure done_callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
+  // TODO(crbug.com/1293026): Consider if this work can be done asynchronously.
   for (std::unique_ptr<SourceInfo>& source : sources_mapped_) {
     MergeHistogramDeltasFromSource(source.get());
   }
+  std::move(done_callback).Run();
 }
 
 bool FileMetricsProvider::SimulateIndependentMetrics() {

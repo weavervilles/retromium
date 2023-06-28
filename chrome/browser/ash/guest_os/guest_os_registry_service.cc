@@ -8,6 +8,7 @@
 
 #include "ash/constants/ash_features.h"
 #include "ash/public/cpp/app_list/app_list_config.h"
+#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -23,14 +24,18 @@
 #include "chrome/browser/apps/app_service/app_icon/dip_px_util.h"
 #include "chrome/browser/ash/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ash/app_list/app_list_syncable_service_factory.h"
+#include "chrome/browser/ash/borealis/borealis_app_launcher.h"
 #include "chrome/browser/ash/borealis/borealis_features.h"
 #include "chrome/browser/ash/borealis/borealis_service.h"
+#include "chrome/browser/ash/borealis/borealis_util.h"
 #include "chrome/browser/ash/bruschetta/bruschetta_util.h"
 #include "chrome/browser/ash/crostini/crostini_features.h"
 #include "chrome/browser/ash/crostini/crostini_manager.h"
 #include "chrome/browser/ash/guest_os/guest_os_pref_names.h"
 #include "chrome/browser/ash/guest_os/guest_os_shelf_utils.h"
+#include "chrome/browser/ash/guest_os/public/types.h"
 #include "chrome/browser/ash/plugin_vm/plugin_vm_features.h"
+#include "chrome/browser/ash/plugin_vm/plugin_vm_files.h"
 #include "chrome/browser/ash/plugin_vm/plugin_vm_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/icon_transcoder/svg_icon_transcoder.h"
@@ -45,7 +50,7 @@
 #include "components/services/app_service/public/cpp/icon_types.h"
 #include "extensions/browser/api/file_handlers/mime_util.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/layout.h"
+#include "ui/base/resource/resource_scale_factor.h"
 #include "ui/gfx/image/image_skia_operations.h"
 
 using vm_tools::apps::App;
@@ -53,6 +58,47 @@ using vm_tools::apps::App;
 namespace guest_os {
 
 namespace {
+
+void Launch(vm_tools::apps::VmType vm_type,
+            std::string app_id,
+            Profile* profile,
+            const GURL& url) {
+  switch (vm_type) {
+    case VmType::TERMINA:
+      crostini::LaunchCrostiniApp(profile, app_id, display::kInvalidDisplayId,
+                                  {url.spec()}, base::DoNothing());
+      break;
+
+    case VmType::PLUGIN_VM:
+      plugin_vm::LaunchPluginVmApp(profile, app_id, {url.spec()},
+                                   base::DoNothing());
+      break;
+
+    case VmType::BOREALIS:
+      borealis::BorealisService::GetForProfile(profile)->AppLauncher().Launch(
+          app_id, {url.spec()}, base::DoNothing());
+      break;
+
+    default:
+      // Usual best practice is to exhaustively handle all enum cases, in order
+      // to trigger a compiler warning if a newly-added enum case isn't handled.
+      // However, this enum is generated, and the source proto lives in the CrOS
+      // platform2 repo. If we attempted to exhaustively handle all cases,
+      // adding a new enum entry would unavoidably break Chromium's build (since
+      // warnings are treated as errors). So instead we have this default case,
+      // and log unexpected values.
+      LOG(ERROR) << "Unsupported VmType: " << static_cast<int>(VmType());
+  }
+}
+
+bool AppHandlesProtocol(const GuestOsRegistryService::Registration& app,
+                        const GURL& url) {
+  if (app.VmType() == VmType::BOREALIS &&
+      !borealis::IsExternalURLAllowed(url)) {
+    return false;
+  }
+  return base::Contains(app.MimeTypes(), "x-scheme-handler/" + url.scheme());
+}
 
 // This prefix is used when generating the crostini app list id.
 constexpr char kCrostiniAppIdPrefix[] = "crostini:";
@@ -145,6 +191,8 @@ void PopulatePrefRegistrationFromApp(base::Value::Dict& pref_registration,
                         LocaleStringsProtoToDictionary(app.keywords()));
   pref_registration.Set(guest_os::prefs::kAppNoDisplayKey,
                         base::Value(app.no_display()));
+  pref_registration.Set(guest_os::prefs::kAppTerminalKey,
+                        base::Value(app.terminal()));
   pref_registration.Set(guest_os::prefs::kAppStartupWMClassKey,
                         base::Value(app.startup_wm_class()));
   pref_registration.Set(guest_os::prefs::kAppStartupNotifyKey,
@@ -245,6 +293,7 @@ static std::string ToString(const vm_tools::apps::App& app) {
          ", comment: " + ToString(app.comment()) +
          ", mime_types: " + ToString(app.mime_types()) +
          ", no_display: " + ToString(app.no_display()) +
+         ", terminal: " + ToString(app.terminal()) +
          ", startup_wm_class: " + ToString(app.startup_wm_class()) +
          ", startup_notify: " + ToString(app.startup_notify()) +
          ", keywords: " + ToString(app.keywords()) +
@@ -359,6 +408,9 @@ bool GuestOsRegistryService::Registration::NoDisplay() const {
   return GetBool(guest_os::prefs::kAppNoDisplayKey);
 }
 
+bool GuestOsRegistryService::Registration::Terminal() const {
+  return GetBool(guest_os::prefs::kAppTerminalKey);
+}
 std::string GuestOsRegistryService::Registration::PackageId() const {
   return GetString(guest_os::prefs::kAppPackageIdKey);
 }
@@ -568,6 +620,37 @@ GuestOsRegistryService::GetRegistration(const std::string& app_id) const {
   }
   return absl::make_optional<Registration>(
       app_id, base::Value(pref_registration->Clone()));
+}
+
+void GuestOsRegistryService::RegisterTransientUrlHandler(
+    GuestOsUrlHandler handler,
+    CanHandleUrlCallback canHandleCallback) {
+  url_handlers_.emplace_back(handler, canHandleCallback);
+}
+
+absl::optional<GuestOsUrlHandler> GuestOsRegistryService::GetHandler(
+    const GURL& url) const {
+  // Transient URL handlers are system-installed, so always take priority.
+  for (const auto& handler : url_handlers_) {
+    if (handler.second.Run(url)) {
+      return handler.first;
+    }
+  }
+
+  std::map<std::string, Registration> apps = GetEnabledApps();
+  const Registration* result = nullptr;
+  for (auto& [unused, registration] : apps) {
+    if (AppHandlesProtocol(registration, url) &&
+        (!result || registration.LastLaunchTime() > result->LastLaunchTime())) {
+      result = &registration;
+    }
+  }
+  if (!result) {
+    return absl::nullopt;
+  }
+  return absl::make_optional<GuestOsUrlHandler>(
+      result->Name(),
+      base::BindRepeating(Launch, result->VmType(), result->app_id()));
 }
 
 base::FilePath GuestOsRegistryService::GetAppPath(

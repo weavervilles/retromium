@@ -22,6 +22,8 @@
 #include "base/types/expected.h"
 #include "base/values.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolated_web_app_location.h"
+#include "chrome/browser/web_applications/test/fake_web_app_provider.h"
+#include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "chrome/browser/web_applications/test/web_app_test.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/browser/web_applications/web_app_command_scheduler.h"
@@ -49,8 +51,8 @@ void DescribeOptionalLocation(::testing::MatchResultListener* result_listener,
                               MaybeIwaLocation arg) {
   if (arg.has_value()) {
     if (arg.value().has_value()) {
-      *result_listener
-          << WebApp::IsolationData(arg.value().value()).AsDebugValue();
+      *result_listener << IsolatedWebAppLocationAsDebugValue(
+          arg.value().value());
     } else {
       *result_listener << "nullopt";
     }
@@ -118,6 +120,7 @@ class FakeWebAppCommandScheduler : public WebAppCommandScheduler {
   void InstallIsolatedWebApp(
       const IsolatedWebAppUrlInfo& url_info,
       const IsolatedWebAppLocation& location,
+      const absl::optional<base::Version>& expected_version,
       std::unique_ptr<ScopedKeepAlive> keep_alive,
       std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive,
       WebAppCommandScheduler::InstallIsolatedWebAppCallback callback,
@@ -177,6 +180,18 @@ class InstallIsolatedWebAppFromCommandLineFlagTest : public WebAppTest {
     return profile()->GetTestingPrefService();
   }
 
+  IsolatedWebAppCommandLineInstallManager& SetUpManagerForTesting() {
+    FakeWebAppProvider* provider = FakeWebAppProvider::Get(profile());
+    auto manager =
+        std::make_unique<IsolatedWebAppCommandLineInstallManager>(*profile());
+    IsolatedWebAppCommandLineInstallManager& manager_ref = *manager;
+    provider->SetIsolatedWebAppCommandLineInstallManager(std::move(manager));
+    provider->SetScheduler(
+        std::make_unique<FakeWebAppCommandScheduler>(*profile(), provider));
+    test::AwaitStartWebAppProviderAndSubsystems(profile());
+    return manager_ref;
+  }
+
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
 };
@@ -189,11 +204,8 @@ TEST_F(InstallIsolatedWebAppFromCommandLineFlagTest,
   base::test::RepeatingTestFuture<
       base::expected<InstallIsolatedWebAppCommandSuccess, std::string>>
       future;
-  auto manager = IsolatedWebAppCommandLineInstallManager(*profile());
-  FakeWebAppCommandScheduler fake_command_scheduler(*profile(), nullptr);
+  IsolatedWebAppCommandLineInstallManager& manager = SetUpManagerForTesting();
   manager.OnReportInstallationResultForTesting(future.GetCallback());
-  manager.SetSubsystems(&fake_command_scheduler);
-  manager.Start();
 
   auto keep_alive = std::make_unique<ScopedKeepAlive>(
       KeepAliveOrigin::ISOLATED_WEB_APP_INSTALL,
@@ -216,11 +228,8 @@ TEST_F(InstallIsolatedWebAppFromCommandLineFlagTest,
   base::test::RepeatingTestFuture<
       base::expected<InstallIsolatedWebAppCommandSuccess, std::string>>
       future;
-  auto manager = IsolatedWebAppCommandLineInstallManager(*profile());
-  FakeWebAppCommandScheduler fake_command_scheduler(*profile(), nullptr);
+  IsolatedWebAppCommandLineInstallManager& manager = SetUpManagerForTesting();
   manager.OnReportInstallationResultForTesting(future.GetCallback());
-  manager.SetSubsystems(&fake_command_scheduler);
-  manager.Start();
 
   auto keep_alive = std::make_unique<ScopedKeepAlive>(
       KeepAliveOrigin::ISOLATED_WEB_APP_INSTALL,
@@ -245,11 +254,8 @@ TEST_F(InstallIsolatedWebAppFromCommandLineFlagTest,
   base::test::RepeatingTestFuture<
       base::expected<InstallIsolatedWebAppCommandSuccess, std::string>>
       future;
-  auto manager = IsolatedWebAppCommandLineInstallManager(*profile());
-  FakeWebAppCommandScheduler fake_command_scheduler(*profile(), nullptr);
+  IsolatedWebAppCommandLineInstallManager& manager = SetUpManagerForTesting();
   manager.OnReportInstallationResultForTesting(future.GetCallback());
-  manager.SetSubsystems(&fake_command_scheduler);
-  manager.Start();
 
   auto keep_alive = std::make_unique<ScopedKeepAlive>(
       KeepAliveOrigin::ISOLATED_WEB_APP_INSTALL,

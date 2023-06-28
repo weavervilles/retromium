@@ -19,6 +19,7 @@
 #import "components/bookmarks/browser/bookmark_model.h"
 #import "components/bookmarks/browser/bookmark_utils.h"
 #import "ios/chrome/browser/bookmarks/account_bookmark_model_factory.h"
+#import "ios/chrome/browser/bookmarks/bookmarks_utils.h"
 #import "ios/chrome/browser/bookmarks/local_or_syncable_bookmark_model_factory.h"
 #import "ios/chrome/browser/default_browser/utils.h"
 #import "ios/chrome/browser/metrics/new_tab_page_uma.h"
@@ -79,7 +80,8 @@ enum class PresentedState {
                                     BookmarksFolderEditorCoordinatorDelegate,
                                     BookmarksFolderChooserCoordinatorDelegate,
                                     BookmarksHomeViewControllerDelegate,
-                                    UIAdaptivePresentationControllerDelegate>
+                                    UIAdaptivePresentationControllerDelegate,
+                                    UINavigationControllerDelegate>
 
 // The type of view controller that is being presented.
 @property(nonatomic, assign) PresentedState currentPresentedState;
@@ -177,11 +179,12 @@ enum class PresentedState {
 }
 
 - (void)dealloc {
-  [self shutdown];
+  CHECK(!_browserState);
 }
 
-- (void)shutdown {
+- (void)stop {
   [_mediator disconnect];
+  _mediator = nil;
   switch (self.currentPresentedState) {
     case PresentedState::BOOKMARK_BROWSER:
       [self bookmarkBrowserDismissed];
@@ -198,11 +201,17 @@ enum class PresentedState {
     case PresentedState::NONE:
       break;
   }
+  _browserState = nullptr;
+  _currentBrowserState = nullptr;
+  _profileBookmarkModel = nullptr;
+  _accountBookmarkModel = nullptr;
+  _mediator = nil;
   DCHECK_EQ(PresentedState::NONE, self.currentPresentedState);
   DCHECK(!self.bookmarkEditorCoordinator) << [self description];
   DCHECK(!self.folderEditorCoordinator) << [self description];
   DCHECK(!self.folderChooserCoordinator) << [self description];
   DCHECK(!self.bookmarkNavigationController) << [self description];
+  [super stop];
 }
 
 - (id<ApplicationCommands>)applicationCommandsHandler {
@@ -225,8 +234,9 @@ enum class PresentedState {
   return _snackbarCommandsHandler;
 }
 
-- (void)bookmarkURL:(const GURL&)URL title:(NSString*)title {
-  if (!_profileBookmarkModel->loaded()) {
+- (void)createBookmarkURL:(const GURL&)URL title:(NSString*)title {
+  if (!bookmark_utils_ios::AreAllAvailableBookmarkModelsLoaded(
+          _profileBookmarkModel.get(), _accountBookmarkModel.get())) {
     return;
   }
 
@@ -246,12 +256,14 @@ enum class PresentedState {
 }
 
 - (void)presentBookmarkEditorForURL:(const GURL&)URL {
-  if (!_profileBookmarkModel->loaded()) {
+  if (!bookmark_utils_ios::AreAllAvailableBookmarkModelsLoaded(
+          _profileBookmarkModel.get(), _accountBookmarkModel.get())) {
     return;
   }
 
   const BookmarkNode* bookmark =
-      _profileBookmarkModel->GetMostRecentlyAddedUserNodeForURL(URL);
+      bookmark_utils_ios::GetMostRecentlyAddedUserNodeForURL(
+          URL, _profileBookmarkModel.get(), _accountBookmarkModel.get());
   if (!bookmark) {
     return;
   }
@@ -375,6 +387,8 @@ enum class PresentedState {
   [self.bookmarkNavigationController setViewControllers:@[] animated:NO];
   self.bookmarkBrowser.homeDelegate = nil;
   self.bookmarkBrowser = nil;
+  self.bookmarkNavigationController.presentationController.delegate = nil;
+  self.bookmarkNavigationController.delegate = nil;
   self.bookmarkNavigationController = nil;
   self.currentPresentedState = PresentedState::NONE;
 }
@@ -461,6 +475,10 @@ enum class PresentedState {
   DCHECK(_URLs) << [self description];
 
   [self stopBookmarksFolderChooserCoordinator];
+
+  bookmarks::StorageType type = bookmark_utils_ios::GetBookmarkModelType(
+      folder, _profileBookmarkModel.get(), _accountBookmarkModel.get());
+  SetLastUsedBookmarkFolder(_browserState->GetPrefs(), folder, type);
   [self.snackbarCommandsHandler
       showSnackbarMessage:[self.mediator addBookmarks:_URLs toFolder:folder]];
   _URLs = nil;
@@ -536,42 +554,53 @@ enum class PresentedState {
 
 #pragma mark - BookmarksCommands
 
-- (void)bookmark:(BookmarkAddCommand*)command {
-  DCHECK(command.URLs.count > 0) << "URLs are missing " << [self description];
-
-  if (!_profileBookmarkModel->loaded()) {
-    return;
-  }
-
-  if (command.URLs.count == 1 && !command.presentFolderChooser) {
-    URLWithTitle* URLWithTitle = command.URLs.firstObject;
-    DCHECK(URLWithTitle) << [self description];
-
-    const BookmarkNode* existingBookmark =
-        _profileBookmarkModel->GetMostRecentlyAddedUserNodeForURL(
-            URLWithTitle.URL);
-
-    if (existingBookmark) {
-      [self presentBookmarkEditorForURL:URLWithTitle.URL];
-    } else {
-      [self bookmarkURL:URLWithTitle.URL title:URLWithTitle.title];
-    }
-    return;
-  }
-
-  _URLs = command.URLs;
-  [self presentFolderChooser];
+- (void)bookmarkWithWebState:(web::WebState*)webState {
+  GURL URL = webState->GetLastCommittedURL();
+  NSString* title = tab_util::GetTabTitle(webState);
+  [self createOrEditBookmarkWithURL:[[URLWithTitle alloc] initWithURL:URL
+                                                                title:title]];
 }
 
-- (void)openToExternalBookmark:(BookmarkAddCommand*)command {
-  if (!_profileBookmarkModel->loaded() || command.URLs.count != 1 ||
-      command.presentFolderChooser) {
+- (void)createOrEditBookmarkWithURL:(URLWithTitle*)URLWithTitle {
+  DCHECK(URLWithTitle) << [self description];
+  NSString* title = URLWithTitle.title;
+  GURL URL = URLWithTitle.URL;
+  if (!bookmark_utils_ios::AreAllAvailableBookmarkModelsLoaded(
+          _profileBookmarkModel.get(), _accountBookmarkModel.get())) {
     return;
   }
 
   const BookmarkNode* existingBookmark =
-      _profileBookmarkModel->GetMostRecentlyAddedUserNodeForURL(
-          command.URLs.firstObject.URL);
+      bookmark_utils_ios::GetMostRecentlyAddedUserNodeForURL(
+          URL, _profileBookmarkModel.get(), _accountBookmarkModel.get());
+  if (existingBookmark) {
+    [self presentBookmarkEditorForURL:URL];
+  } else {
+    [self createBookmarkURL:URL title:title];
+  }
+}
+
+- (void)bookmarkWithFolderChooser:(NSArray<URLWithTitle*>*)URLs {
+  DCHECK(URLs.count > 0) << "URLs are missing " << [self description];
+
+  if (!bookmark_utils_ios::AreAllAvailableBookmarkModelsLoaded(
+          _profileBookmarkModel.get(), _accountBookmarkModel.get())) {
+    return;
+  }
+
+  _URLs = URLs;
+  [self presentFolderChooser];
+}
+
+- (void)openToExternalBookmark:(GURL)URL {
+  if (!bookmark_utils_ios::AreAllAvailableBookmarkModelsLoaded(
+          _profileBookmarkModel.get(), _accountBookmarkModel.get())) {
+    return;
+  }
+
+  const BookmarkNode* existingBookmark =
+      bookmark_utils_ios::GetMostRecentlyAddedUserNodeForURL(
+          URL, _profileBookmarkModel.get(), _accountBookmarkModel.get());
   [self
       presentBookmarksAtDisplayedFolderNode:_profileBookmarkModel->mobile_node()
                           selectingBookmark:existingBookmark];
@@ -633,6 +662,7 @@ enum class PresentedState {
   if (replacementViewControllers) {
     [navController setViewControllers:replacementViewControllers];
   }
+  self.bookmarkNavigationController.delegate = self;
 
   navController.toolbarHidden = YES;
   navController.presentationController.delegate = self;
@@ -672,6 +702,15 @@ enum class PresentedState {
             (const BookmarkNode*)displayedFolderNode
                             selectingBookmark:
                                 (const BookmarkNode*)bookmarkNode {
+  if (self.bookmarkNavigationController) {
+    // Since bookmark browser is dismissed asynchronously through
+    // `-presentationControllerDidDismiss:`, it is possible for this method to
+    // be called before `self.bookmarkNavigationController` is reset. In that
+    // case reset `self.bookmarkNavigationController` and continue.
+    DCHECK_EQ(PresentedState::BOOKMARK_BROWSER, self.currentPresentedState)
+        << [self description];
+    [self bookmarkBrowserDismissed];
+  }
   DCHECK_EQ(PresentedState::NONE, self.currentPresentedState);
   DCHECK(!self.bookmarkNavigationController) << [self description];
 
@@ -683,7 +722,8 @@ enum class PresentedState {
   self.bookmarkBrowser.snackbarCommandsHandler = self.snackbarCommandsHandler;
 
   NSArray<BookmarksHomeViewController*>* replacementViewControllers = nil;
-  if (_profileBookmarkModel->loaded()) {
+  if (bookmark_utils_ios::AreAllAvailableBookmarkModelsLoaded(
+          _profileBookmarkModel.get(), _accountBookmarkModel.get())) {
     // Set the root node if the model has been loaded. If the model has not been
     // loaded yet, the root node will be set in BookmarksHomeViewController
     // after the model is finished loading.
@@ -727,6 +767,26 @@ enum class PresentedState {
   [self bookmarkBrowserDismissed];
 }
 
+#pragma mark - UINavigationControllerDelegate
+
+- (id<UIViewControllerAnimatedTransitioning>)
+               navigationController:
+                   (UINavigationController*)navigationController
+    animationControllerForOperation:(UINavigationControllerOperation)operation
+                 fromViewController:(UIViewController*)fromVC
+                   toViewController:(UIViewController*)toVC {
+  if (operation == UINavigationControllerOperationPop) {
+    BookmarksHomeViewController* poppedHome =
+        base::mac::ObjCCastStrict<BookmarksHomeViewController>(fromVC);
+    // `shutdown` must wait for the next run of the main loop, so that
+    // methods such as `textFieldDidEndEditing` have time to be run.
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [poppedHome shutdown];
+    });
+  }
+  return nil;
+}
+
 #pragma mark - Debugging
 
 - (NSString*)description {
@@ -736,7 +796,8 @@ enum class PresentedState {
           @"bookmarkNavigationController=%p (presented: %@), "
           @"folderEditorCoordinator=%p, folderChooserCoordinator=%p "
           @"profileBookmarkModel=%p, accountBookmarkModel=%p>",
-          NSStringFromClass([self class]), self, self.currentPresentedState,
+          NSStringFromClass([self class]), self,
+          static_cast<int>(self.currentPresentedState),
           self.bookmarkEditorCoordinator, self.bookmarkNavigationController,
           self.bookmarkNavigationController ? @"YES" : @"NO",
           self.folderEditorCoordinator, self.folderChooserCoordinator,

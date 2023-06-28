@@ -31,6 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_TIMING_CALCULATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_TIMING_CALCULATIONS_H_
 
+#include "base/debug/dump_without_crashing.h"
 #include "base/notreached.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/animation/timing.h"
@@ -111,21 +112,31 @@ static inline AnimationTimeDelta MultiplyZeroAlwaysGivesZero(
 // https://w3.org/TR/web-animations-1/#animation-effect-phases-and-states
 static inline Timing::Phase CalculatePhase(
     const Timing::NormalizedTiming& normalized,
-    absl::optional<AnimationTimeDelta> local_time,
-    bool at_progress_timeline_boundary,
+    absl::optional<AnimationTimeDelta>& local_time,
     Timing::AnimationDirection direction) {
   DCHECK(GreaterThanOrEqualToWithinTimeTolerance(normalized.active_duration,
                                                  AnimationTimeDelta()));
-  if (!local_time)
+  if (!local_time) {
     return Timing::kPhaseNone;
+  }
 
   AnimationTimeDelta before_active_boundary_time =
       std::max(std::min(normalized.start_delay, normalized.end_time),
                AnimationTimeDelta());
-  if (local_time.value() < before_active_boundary_time ||
-      (direction == Timing::AnimationDirection::kBackwards &&
+  if (IsWithinAnimationTimeTolerance(local_time.value(),
+                                     before_active_boundary_time)) {
+    local_time = before_active_boundary_time;
+  }
+
+  if (local_time.value() < before_active_boundary_time) {
+    if (normalized.is_start_boundary_aligned) {
+      base::debug::DumpWithoutCrashing();
+    }
+    return Timing::kPhaseBefore;
+  }
+  if ((direction == Timing::AnimationDirection::kBackwards &&
        local_time.value() == before_active_boundary_time &&
-       !at_progress_timeline_boundary)) {
+       !normalized.is_start_boundary_aligned)) {
     return Timing::kPhaseBefore;
   }
 
@@ -133,11 +144,19 @@ static inline Timing::Phase CalculatePhase(
       std::max(std::min(normalized.start_delay + normalized.active_duration,
                         normalized.end_time),
                AnimationTimeDelta());
-  if (local_time.value() > active_after_boundary_time ||
-      (direction == Timing::AnimationDirection::kForwards &&
-       IsWithinAnimationTimeTolerance(local_time.value(),
-                                      active_after_boundary_time) &&
-       !at_progress_timeline_boundary)) {
+  if (IsWithinAnimationTimeTolerance(local_time.value(),
+                                     active_after_boundary_time)) {
+    local_time = active_after_boundary_time;
+  }
+  if (local_time.value() > active_after_boundary_time) {
+    if (normalized.is_end_boundary_aligned) {
+      base::debug::DumpWithoutCrashing();
+    }
+    return Timing::kPhaseAfter;
+  }
+  if ((direction == Timing::AnimationDirection::kForwards &&
+       local_time.value() == active_after_boundary_time &&
+       !normalized.is_end_boundary_aligned)) {
     return Timing::kPhaseAfter;
   }
   return Timing::kPhaseActive;

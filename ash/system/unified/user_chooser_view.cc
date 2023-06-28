@@ -234,7 +234,7 @@ UserItemButton::UserItemButton(PressedCallback callback,
   email_->SetText(base::UTF8ToUTF16(user_session->user_info.display_email));
   email_->SetEnabledColorId(
       is_jelly_enabled
-          ? static_cast<ui::ColorId>(cros_tokens::kCrosSysSecondary)
+          ? static_cast<ui::ColorId>(cros_tokens::kCrosSysOnSurfaceVariant)
           : kColorAshTextColorSecondary);
   if (is_jelly_enabled) {
     TypographyProvider::Get()->StyleLabel(TypographyToken::kCrosAnnotation1,
@@ -356,7 +356,7 @@ UserChooserView::UserChooserView(
       AddChildView(CreateAddUserErrorView(l10n_util::GetStringUTF16(
           IDS_ASH_STATUS_TRAY_MESSAGE_NOT_ALLOWED_PRIMARY_USER)));
       break;
-    case AddUserSessionPolicy::ERROR_LACROS_RUNNING:
+    case AddUserSessionPolicy::ERROR_LACROS_ENABLED:
       AddChildView(CreateAddUserErrorView(l10n_util::GetStringUTF16(
           IDS_ASH_STATUS_TRAY_MESSAGE_NOT_ALLOWED_LACROS)));
       break;

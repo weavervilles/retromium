@@ -510,6 +510,12 @@ TEST_F('PrintPreviewLinkContainerTest', 'SystemDialogLinkClick', function() {
   this.runMochaTest(link_container_test.TestNames.SystemDialogLinkClick);
 });
 
+TEST_F(
+    'PrintPreviewLinkContainerTest', 'SystemDialogLinkProperties', function() {
+      this.runMochaTest(
+          link_container_test.TestNames.SystemDialogLinkProperties);
+    });
+
 TEST_F('PrintPreviewLinkContainerTest', 'InvalidState', function() {
   this.runMochaTest(link_container_test.TestNames.InvalidState);
 });
@@ -665,7 +671,24 @@ TEST_F(
 TEST_F('PrintPreviewDestinationStoreTestCros', 'DriveNotMounted', function() {
   this.runMochaTest(destination_store_test.TestNames.DriveNotMounted);
 });
-GEN('#endif');
+
+var PrintPreviewPrinterSetupInfoCrosTest = class extends PrintPreviewTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://print/test_loader.html?module=print_preview/' +
+        'printer_setup_info_cros_test.js';
+  }
+
+  /** @override */
+  get suiteName() {
+    return printer_setup_info_cros_test.suiteName;
+  }
+};
+
+TEST_F('PrintPreviewPrinterSetupInfoCrosTest', 'ElementDisplays', function() {
+  this.runMochaTest(printer_setup_info_cros_test.TestNames.ElementDisplays);
+});
+GEN('#endif')
 
 GEN('#if BUILDFLAG(IS_CHROMEOS)');
 var PrintPreviewPrintServerStoreTestCros = class extends PrintPreviewTest {
@@ -754,6 +777,20 @@ TEST_F(
     'PrintPreviewDestinationDialogCrosTest', 'PrintServerSelected', function() {
       this.runMochaTest(
           destination_dialog_cros_test.TestNames.PrintServerSelected);
+    });
+
+TEST_F(
+    'PrintPreviewDestinationDialogCrosTest',
+    'PrinterSetupAssistanceHasDestinations', function() {
+      this.runMochaTest(destination_dialog_cros_test.TestNames
+                            .PrinterSetupAssistanceHasDestinations);
+    });
+
+TEST_F(
+    'PrintPreviewDestinationDialogCrosTest',
+    'PrinterSetupAssistanceHasNoDestinations', function() {
+      this.runMochaTest(destination_dialog_cros_test.TestNames
+                            .PrinterSetupAssistanceHasNoDestinations);
     });
 
 GEN('#endif');
@@ -996,6 +1033,12 @@ TEST_F('PrintPreviewButtonStripTest', 'ButtonOrder', function() {
 TEST_F('PrintPreviewButtonStripTest', 'ButtonStripFiresEvents', function() {
   this.runMochaTest(button_strip_test.TestNames.ButtonStripFiresEvents);
 });
+
+GEN('#if BUILDFLAG(IS_CHROMEOS)');
+TEST_F('PrintPreviewButtonStripTest', 'InvalidPinDisablesPrint', function() {
+  this.runMochaTest(button_strip_test.TestNames.InvalidPinDisablesPrint);
+});
+GEN('#endif');
 
 var PrintPreviewDestinationItemTest = class extends PrintPreviewTest {
   /** @override */

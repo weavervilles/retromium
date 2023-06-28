@@ -7,12 +7,17 @@
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/companion/core/mojom/companion.mojom.h"
+#include "chrome/browser/ui/webui/side_panel/companion/companion_page_handler.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/webui_config.h"
 #include "content/public/common/url_constants.h"
 #include "ui/webui/untrusted_bubble_web_ui_controller.h"
 
 class CompanionSidePanelUntrustedUI
-    : public ui::UntrustedBubbleWebUIController,
+    : public content::WebContentsObserver,
+      public content::WebContentsDelegate,
+      public ui::UntrustedBubbleWebUIController,
       public side_panel::mojom::CompanionPageHandlerFactory {
  public:
   explicit CompanionSidePanelUntrustedUI(content::WebUI* web_ui);
@@ -31,14 +36,30 @@ class CompanionSidePanelUntrustedUI
   // Gets a weak pointer to this object.
   base::WeakPtr<CompanionSidePanelUntrustedUI> GetWeakPtr();
 
+  // content::WebContentsDelegate:
+  content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params) override;
+
  private:
   // side_panel::mojom::CompanionPageHandlerFactory:
   void CreateCompanionPageHandler(
       mojo::PendingReceiver<side_panel::mojom::CompanionPageHandler> receiver,
       mojo::PendingRemote<side_panel::mojom::CompanionPage> page) override;
 
-  std::unique_ptr<side_panel::mojom::CompanionPageHandler>
-      companion_page_handler_;
+  // content::WebContentsObserver:
+  // Listening to navigations because the primary document is the WebUI frame
+  // which is able to load without network access.
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
+
+  // content::WebContentsDelegate:
+  void RequestMediaAccessPermission(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      content::MediaResponseCallback callback) override;
+
+  std::unique_ptr<companion::CompanionPageHandler> companion_page_handler_;
   mojo::Receiver<side_panel::mojom::CompanionPageHandlerFactory>
       companion_page_factory_receiver_{this};
 

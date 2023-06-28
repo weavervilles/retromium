@@ -102,42 +102,37 @@ class BrowsingDataModelTest : public testing::Test {
 TEST_F(BrowsingDataModelTest, PrimaryHostMapping) {
   model()->AddBrowsingData(kSubdomainOrigin,
                            BrowsingDataModel::StorageType::kTrustTokens, 0, 1);
-  model()->AddBrowsingData(
-      blink::StorageKey::CreateFirstParty(kSubdomainOrigin),
-      BrowsingDataModel::StorageType::kPartitionedQuotaStorage, 123, 0);
-  model()->AddBrowsingData(
-      blink::StorageKey::CreateFirstParty(kSubdomainOrigin),
-      BrowsingDataModel::StorageType::kUnpartitionedQuotaStorage, 456, 0);
+  model()->AddBrowsingData(blink::StorageKey::CreateFirstParty(kTestOrigin),
+                           BrowsingDataModel::StorageType::kQuotaStorage, 123,
+                           0);
 
   ValidateBrowsingDataEntries(
-      model(),
-      {{kSubdomainOriginHost,
-        kSubdomainOrigin,
-        {BrowsingDataModel::StorageType::kTrustTokens, 0, 1}},
-       {kSubdomainOriginSite,
-        blink::StorageKey::CreateFirstParty(kSubdomainOrigin),
-        {BrowsingDataModel::StorageType::kPartitionedQuotaStorage, 123, 0}},
-       {kSubdomainOriginHost,
-        blink::StorageKey::CreateFirstParty(kSubdomainOrigin),
-        {BrowsingDataModel::StorageType::kUnpartitionedQuotaStorage, 456, 0}}});
+      model(), {
+                   {kSubdomainOriginHost,
+                    kSubdomainOrigin,
+                    {{BrowsingDataModel::StorageType::kTrustTokens}, 0, 1}},
+                   {kTestOriginHost,
+                    blink::StorageKey::CreateFirstParty(kTestOrigin),
+                    {{BrowsingDataModel::StorageType::kQuotaStorage}, 123, 0}},
+               });
 }
 
 TEST_F(BrowsingDataModelTest, EntryCoalescense) {
   // Check that multiple entries are correctly coalesced.
   // Browsing data with the same owner + data_key pair should update the
   // same entry's details.
-  model()->AddBrowsingData(
-      blink::StorageKey::CreateFirstParty(kSiteOrigin),
-      BrowsingDataModel::StorageType::kPartitionedQuotaStorage, 123, 0);
-  model()->AddBrowsingData(
-      blink::StorageKey::CreateFirstParty(kSiteOrigin),
-      BrowsingDataModel::StorageType::kUnpartitionedQuotaStorage, 234, 5);
+  model()->AddBrowsingData(blink::StorageKey::CreateFirstParty(kSiteOrigin),
+                           BrowsingDataModel::StorageType::kQuotaStorage, 123,
+                           0);
+  model()->AddBrowsingData(blink::StorageKey::CreateFirstParty(kSiteOrigin),
+                           BrowsingDataModel::StorageType::kLocalStorage, 234,
+                           5);
 
   auto expected_entries = std::vector<BrowsingDataEntry>(
       {{kSiteOriginHost,
         blink::StorageKey::CreateFirstParty(kSiteOrigin),
-        {{BrowsingDataModel::StorageType::kPartitionedQuotaStorage,
-          BrowsingDataModel::StorageType::kUnpartitionedQuotaStorage},
+        {{BrowsingDataModel::StorageType::kQuotaStorage,
+          BrowsingDataModel::StorageType::kLocalStorage},
          123 + 234,
          5}}});
 
@@ -147,18 +142,18 @@ TEST_F(BrowsingDataModelTest, EntryCoalescense) {
   // create a new entry.
   model()->AddBrowsingData(
       blink::StorageKey::CreateFirstParty(kAnotherSiteOrigin),
-      BrowsingDataModel::StorageType::kPartitionedQuotaStorage, 345, 0);
+      BrowsingDataModel::StorageType::kQuotaStorage, 345, 0);
   model()->AddBrowsingData(
       kAnotherSiteOrigin, BrowsingDataModel::StorageType::kTrustTokens, 456, 6);
 
   expected_entries.push_back(
       {kAnotherSiteOriginHost,
        blink::StorageKey::CreateFirstParty(kAnotherSiteOrigin),
-       {BrowsingDataModel::StorageType::kPartitionedQuotaStorage, 345}});
+       {{BrowsingDataModel::StorageType::kQuotaStorage}, 345}});
   expected_entries.push_back(
       {kAnotherSiteOriginHost,
        kAnotherSiteOrigin,
-       {BrowsingDataModel::StorageType::kTrustTokens, 456, 6}});
+       {{BrowsingDataModel::StorageType::kTrustTokens}, 456, 6}});
 
   browsing_data_model_test_util::ValidateBrowsingDataEntries(model(),
                                                              expected_entries);
@@ -184,16 +179,17 @@ TEST_F(BrowsingDataModelTest, ConcurrentDeletions) {
   auto expected_entries = std::vector<BrowsingDataEntry>{
       {kSubdomainOriginHost,
        kSubdomainOrigin,
-       {BrowsingDataModel::StorageType::kTrustTokens, 100, 0}},
+       {{BrowsingDataModel::StorageType::kTrustTokens}, 100, 0}},
       {kAnotherSiteOriginHost,
        kAnotherSiteOrigin,
-       {BrowsingDataModel::StorageType::kTrustTokens, 100, 0}},
+       {{BrowsingDataModel::StorageType::kTrustTokens}, 100, 0}},
       {kTestOriginHost,
        kTestOrigin,
-       {static_cast<BrowsingDataModel::StorageType>(
+       {{static_cast<BrowsingDataModel::StorageType>(
             browsing_data::TestBrowsingDataModelDelegate::StorageType::
-                kTestDelegateType),
-        0, 0}}};
+                kTestDelegateType)},
+        0,
+        0}}};
 
   browsing_data_model_test_util::ValidateBrowsingDataEntries(model(),
                                                              expected_entries);
@@ -290,10 +286,11 @@ TEST_F(BrowsingDataModelTest, DelegateDataDeleted) {
   auto expected_entries = std::vector<BrowsingDataEntry>{
       {kTestOriginHost,
        kTestOrigin,
-       {static_cast<BrowsingDataModel::StorageType>(
+       {{static_cast<BrowsingDataModel::StorageType>(
             browsing_data::TestBrowsingDataModelDelegate::StorageType::
-                kTestDelegateType),
-        0, 0}}};
+                kTestDelegateType)},
+        0,
+        0}}};
 
   browsing_data_model_test_util::ValidateBrowsingDataEntries(model(),
                                                              expected_entries);
@@ -361,16 +358,16 @@ TEST_F(BrowsingDataModelTest, DelegateDataCanBeOriginOwned) {
   auto expected_entries = std::vector<BrowsingDataEntry>{
       {httpOriginOwned,
        httpOriginOwned,
-       {BrowsingDataModel::StorageType::kTrustTokens, 100, 0}},
+       {{BrowsingDataModel::StorageType::kTrustTokens}, 100, 0}},
       {httpsOriginOwned,
        httpsOriginOwned,
-       {BrowsingDataModel::StorageType::kTrustTokens, 100, 0}},
+       {{BrowsingDataModel::StorageType::kTrustTokens}, 100, 0}},
       {"host.owned.com",
        httpHostOwned,
-       {BrowsingDataModel::StorageType::kTrustTokens, 100, 0}},
+       {{BrowsingDataModel::StorageType::kTrustTokens}, 100, 0}},
       {"host.owned.com",
        httpsHostOwned,
-       {BrowsingDataModel::StorageType::kTrustTokens, 100, 0}},
+       {{BrowsingDataModel::StorageType::kTrustTokens}, 100, 0}},
   };
 
   browsing_data_model_test_util::ValidateBrowsingDataEntries(model.get(),

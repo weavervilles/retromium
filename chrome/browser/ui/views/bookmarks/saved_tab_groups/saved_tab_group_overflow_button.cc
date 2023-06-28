@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/bookmarks/saved_tab_groups/saved_tab_group_bar.h"
@@ -20,33 +21,30 @@
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/highlight_path_generator.h"
+#include "ui/views/view_class_properties.h"
 
 SavedTabGroupOverflowButton::SavedTabGroupOverflowButton(
     PressedCallback callback)
-    : views::MenuButton(std::move(callback), u"") {
-  SetAccessibleName(
+    : views::MenuButton(std::move(callback)) {
+  SetAccessibilityProperties(
+      ax::mojom::Role::kMenu,
       l10n_util::GetStringUTF16(IDS_ACCNAME_SAVED_TAB_GROUPS_CHEVRON));
   SetTooltipText(
       l10n_util::GetStringUTF16(IDS_SAVED_TAB_GROUPS_OVERFLOW_BUTTON_TOOLTIP));
   ConfigureInkDropForToolbar(this);
   SetImageLabelSpacing(ChromeLayoutProvider::Get()->GetDistanceMetric(
       DISTANCE_RELATED_LABEL_HORIZONTAL_LIST));
-  views::InstallPillHighlightPathGenerator(this);
+  SetProperty(views::kElementIdentifierKey,
+              kSavedTabGroupOverflowButtonElementId);
 }
 
 SavedTabGroupOverflowButton::~SavedTabGroupOverflowButton() = default;
 
 void SavedTabGroupOverflowButton::GetAccessibleNodeData(
     ui::AXNodeData* node_data) {
-  // If the button would have no name, avoid crashing by setting the name
-  // explicitly empty.
-  if (GetAccessibleName().empty()) {
-    node_data->SetNameExplicitlyEmpty();
-  }
-
   views::MenuButton::GetAccessibleNodeData(node_data);
-  node_data->AddStringAttribute(
-      ax::mojom::StringAttribute::kRoleDescription,
+  node_data->role = ax::mojom::Role::kMenu;
+  node_data->SetNameChecked(
       l10n_util::GetStringUTF8(IDS_ACCNAME_SAVED_TAB_GROUPS_CHEVRON));
 }
 

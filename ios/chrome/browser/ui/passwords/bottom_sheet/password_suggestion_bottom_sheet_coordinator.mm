@@ -4,13 +4,11 @@
 
 #import "ios/chrome/browser/ui/passwords/bottom_sheet/password_suggestion_bottom_sheet_coordinator.h"
 
-#import "components/autofill/ios/browser/form_suggestion.h"
 #import "components/keyed_service/core/service_access_type.h"
 #import "components/password_manager/core/browser/ui/credential_ui_entry.h"
 #import "components/password_manager/core/browser/ui/saved_passwords_presenter.h"
 #import "ios/chrome/browser/favicon/ios_chrome_favicon_loader_factory.h"
 #import "ios/chrome/browser/passwords/ios_chrome_account_password_store_factory.h"
-#import "ios/chrome/browser/passwords/ios_chrome_affiliation_service_factory.h"
 #import "ios/chrome/browser/passwords/ios_chrome_password_store_factory.h"
 #import "ios/chrome/browser/passwords/password_controller_delegate.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
@@ -27,6 +25,7 @@
 #error "This file requires ARC support."
 #endif
 
+using PasswordSuggestionBottomSheetExitReason::kShowPasswordDetails;
 using PasswordSuggestionBottomSheetExitReason::kShowPasswordManager;
 
 @interface PasswordSuggestionBottomSheetCoordinator () {
@@ -64,12 +63,10 @@ using PasswordSuggestionBottomSheetExitReason::kShowPasswordManager;
 
     auto profilePasswordStore =
         IOSChromePasswordStoreFactory::GetForBrowserState(
-            self.browser->GetBrowserState(),
-            ServiceAccessType::EXPLICIT_ACCESS);
+            browserState, ServiceAccessType::EXPLICIT_ACCESS);
     auto accountPasswordStore =
         IOSChromeAccountPasswordStoreFactory::GetForBrowserState(
-            self.browser->GetBrowserState(),
-            ServiceAccessType::EXPLICIT_ACCESS);
+            browserState, ServiceAccessType::EXPLICIT_ACCESS);
 
     WebStateList* webStateList = browser->GetWebStateList();
     const GURL& URL = webStateList->GetActiveWebState()->GetLastCommittedURL();
@@ -102,7 +99,7 @@ using PasswordSuggestionBottomSheetExitReason::kShowPasswordManager;
   // sheet. Instead, re-focus the field which triggered the bottom sheet and
   // disable it.
   if (![self.mediator hasSuggestions]) {
-    [self.mediator refocus];
+    [self.mediator dismiss];
     return;
   }
 
@@ -123,22 +120,31 @@ using PasswordSuggestionBottomSheetExitReason::kShowPasswordManager;
 #pragma mark - PasswordSuggestionBottomSheetHandler
 
 - (void)displayPasswordManager {
+  [self.mediator logExitReason:kShowPasswordManager];
+
+  __weak __typeof(self) weakSelf = self;
   [self.baseViewController.presentedViewController
       dismissViewControllerAnimated:NO
-                         completion:nil];
+                         completion:^{
+                           [weakSelf stop];
+                         }];
 
-  [_mediator logExitReason:kShowPasswordManager];
   [_passwordControllerDelegate displaySavedPasswordList];
 }
 
 - (void)displayPasswordDetailsForFormSuggestion:
     (FormSuggestion*)formSuggestion {
-  [self.baseViewController.presentedViewController
-      dismissViewControllerAnimated:NO
-                         completion:nil];
-
+  [self.mediator logExitReason:kShowPasswordDetails];
   absl::optional<password_manager::CredentialUIEntry> credential =
       [self.mediator getCredentialForFormSuggestion:formSuggestion];
+
+  __weak __typeof(self) weakSelf = self;
+  [self.baseViewController.presentedViewController
+      dismissViewControllerAnimated:NO
+                         completion:^{
+                           [weakSelf stop];
+                         }];
+
   if (credential.has_value()) {
     [_passwordControllerDelegate
         showPasswordDetailsForCredential:credential.value()];

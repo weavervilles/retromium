@@ -43,6 +43,7 @@
   }
 
   #clearAllContainer {
+    column-gap: 8px;
     display: flex;
   }
 
@@ -103,6 +104,12 @@
     margin-bottom: 0;
     margin-top: 0;
   }
+
+  printer-setup-info {
+    align-items: center;
+    flex: 1 1 auto;
+    height: 100%;
+  }
 </style>
 
 <div class="main-container margin-border">
@@ -116,8 +123,18 @@
       <cr-button id="clearAllButton" on-click="onClearHistoryClicked"
           disabled="[[shouldDisableClearAllButton]]"
           hidden="[[!showClearAllButton]]">
-        <iron-icon id="deleteIcon" icon="print-management:delete"></iron-icon>
+        <iron-icon id="deleteIcon" icon="print-management:delete"
+            slot="prefix-icon">
+        </iron-icon>
         [[i18n('clearAllHistoryLabel')]]
+      </cr-button>
+      <cr-button id="managePrinters" hidden="[[!shouldShowManagePrinterButton(
+          ongoingPrintJobs.length, printJobs.length)]]"
+          on-click="onManagePrintersClicked">
+        <iron-icon id="openInNewIcon" icon="print-management:open-in-new"
+            slot="suffix-icon">
+        </iron-icon>
+        [[i18n('headerManagePrintersButtonLabel')]]
       </cr-button>
     </div>
   </div>
@@ -161,9 +178,14 @@
       </iron-list>
     </template>
 
-    <div id="ongoingEmptyState" hidden="[[ongoingPrintJobs.length]]">
+    <div id="ongoingEmptyState" hidden="[[!shouldShowOngoingEmptyState(
+          ongoingPrintJobs.length, printJobs.length)]]">
       [[i18n('noPrintJobInProgress')]]
     </div>
+
+    <printer-setup-info hidden="[[!shouldShowSetupAssistance(
+        ongoingPrintJobs.length, printJobs.length)]]">
+    </printer-setup-info>
 
     <template is="dom-if" if="[[printJobs.length]]" restamp>
       <div id="historyHeaderContainer" class="column-headers flex-center">

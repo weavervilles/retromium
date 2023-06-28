@@ -16,12 +16,13 @@
 #include "components/autofill/core/browser/data_model/contact_info.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/geo/alternative_state_name_map_test_utils.h"
-#include "components/autofill/core/browser/geo/country_names.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Field Type Constants
+using autofill::ADDRESS_HOME_ADMIN_LEVEL2;
+using autofill::ADDRESS_HOME_BETWEEN_STREETS;
 using autofill::ADDRESS_HOME_CITY;
 using autofill::ADDRESS_HOME_COUNTRY;
 using autofill::ADDRESS_HOME_DEPENDENT_LOCALITY;
@@ -91,9 +92,7 @@ class AutofillProfileComparatorTest : public testing::Test {
     using Super::SAME_TOKENS;
   };
 
-  AutofillProfileComparatorTest() {
-    autofill::CountryNames::SetLocaleString(kLocale);
-  }
+  AutofillProfileComparatorTest() = default;
 
   AutofillProfileComparatorTest(const AutofillProfileComparatorTest&) = delete;
   AutofillProfileComparatorTest& operator=(
@@ -188,13 +187,6 @@ class AutofillProfileComparatorTest : public testing::Test {
     profile.SetRawInfo(BIRTHDATE_DAY, base::UTF8ToUTF16(day));
     profile.SetRawInfo(BIRTHDATE_MONTH, base::UTF8ToUTF16(month));
     profile.SetRawInfo(BIRTHDATE_4_DIGIT_YEAR, base::UTF8ToUTF16(year));
-    return profile;
-  }
-
-  AutofillProfile CreateProfileWithLandmark(const char* landmark) {
-    AutofillProfile profile;
-    profile.SetRawInfo(autofill::ADDRESS_HOME_LANDMARK,
-                       base::UTF8ToUTF16(landmark));
     return profile;
   }
 
@@ -447,41 +439,48 @@ TEST_F(AutofillProfileComparatorTest, Compare) {
 }
 
 TEST_F(AutofillProfileComparatorTest, NormalizeForComparison) {
-  EXPECT_EQ(u"timothe", comparator_.NormalizeForComparison(u"Timothé"));
-  EXPECT_EQ(u"sven ake", comparator_.NormalizeForComparison(u" sven-åke "));
-  EXPECT_EQ(u"c 㸐", comparator_.NormalizeForComparison(u"Ç 㸐"));
+  EXPECT_EQ(u"timothe",
+            AutofillProfileComparator::NormalizeForComparison(u"Timothé"));
+  EXPECT_EQ(u"sven ake",
+            AutofillProfileComparator::NormalizeForComparison(u" sven-åke "));
+  EXPECT_EQ(u"c 㸐",
+            AutofillProfileComparator::NormalizeForComparison(u"Ç 㸐"));
   EXPECT_EQ(u"902103214",
-            comparator_.NormalizeForComparison(
+            AutofillProfileComparator::NormalizeForComparison(
                 u"90210-3214", AutofillProfileComparator::DISCARD_WHITESPACE));
   EXPECT_EQ(u"timothe noel etienne perier",
-            comparator_.NormalizeForComparison(u"Timothé-Noël Étienne Périer"));
+            AutofillProfileComparator::NormalizeForComparison(
+                u"Timothé-Noël Étienne Périer"));
   // NOP.
-  EXPECT_EQ(std::u16string(),
-            comparator_.NormalizeForComparison(std::u16string()));
+  EXPECT_EQ(std::u16string(), AutofillProfileComparator::NormalizeForComparison(
+                                  std::u16string()));
 
   // Simple punctuation removed.
   EXPECT_EQ(u"1600 amphitheatre pkwy",
-            comparator_.NormalizeForComparison(u"1600 Amphitheatre, Pkwy."));
+            AutofillProfileComparator::NormalizeForComparison(
+                u"1600 Amphitheatre, Pkwy."));
 
   // Unicode punctuation (hyphen and space), multiple spaces collapsed.
   EXPECT_EQ(u"mid island plaza",
-            comparator_.NormalizeForComparison(u"Mid\x2013Island\x2003 Plaza"));
+            AutofillProfileComparator::NormalizeForComparison(
+                u"Mid\x2013Island\x2003 Plaza"));
 
   // Newline character removed.
-  EXPECT_EQ(
-      u"1600 amphitheatre pkwy app 2",
-      comparator_.NormalizeForComparison(u"1600 amphitheatre pkwy \n App. 2"));
+  EXPECT_EQ(u"1600 amphitheatre pkwy app 2",
+            AutofillProfileComparator::NormalizeForComparison(
+                u"1600 amphitheatre pkwy \n App. 2"));
 
   // Diacritics removed.
-  EXPECT_EQ(u"まeoa정", comparator_.NormalizeForComparison(u"まéÖä정"));
+  EXPECT_EQ(u"まeoa정",
+            AutofillProfileComparator::NormalizeForComparison(u"まéÖä정"));
 
   // Spaces removed.
   EXPECT_EQ(u"유재석",
-            comparator_.NormalizeForComparison(
+            AutofillProfileComparator::NormalizeForComparison(
                 u"유 재석", AutofillProfileComparator::DISCARD_WHITESPACE));
 
   // Punctuation removed, Japanese kana normalized.
-  EXPECT_EQ(u"ヒルケイツ", comparator_.NormalizeForComparison(
+  EXPECT_EQ(u"ヒルケイツ", AutofillProfileComparator::NormalizeForComparison(
                                u"ビル・ゲイツ",
                                AutofillProfileComparator::DISCARD_WHITESPACE));
 }
@@ -1148,7 +1147,7 @@ TEST_F(AutofillProfileComparatorTest, MergeAddressesWithRewrite) {
 }
 
 TEST_F(AutofillProfileComparatorTest,
-       MergeAddressesDependendLocalityAndSortingCode) {
+       MergeAddressesDependentLocalityAndSortingCode) {
   AutofillProfile p1 = CreateProfileWithAddress(
       "6543 CH BACON", "APP 3", "MONTRÉAL", "QUÉBEC", "HHH999", "ca");
   p1.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"Some String");
@@ -1190,19 +1189,24 @@ TEST_F(AutofillProfileComparatorTest, MergeBirthdates) {
   }
 }
 
-TEST_F(AutofillProfileComparatorTest, MergeLandmarks) {
-  AutofillProfile empty = CreateProfileWithLandmark("");
-  AutofillProfile profile2 = CreateProfileWithLandmark("Red tree");
+TEST_F(AutofillProfileComparatorTest, MergeLandmarkAndBetweenStreetsAndAdmin2) {
+  AutofillProfile empty;
+  AutofillProfile profile2;
+  profile2.SetRawInfo(ADDRESS_HOME_LANDMARK, u"Landmark example");
+  profile2.SetRawInfo(ADDRESS_HOME_BETWEEN_STREETS, u"Between streets example");
+  profile2.SetRawInfo(ADDRESS_HOME_ADMIN_LEVEL2, u"Admin level 2 example");
 
   Address expected;
-  expected.SetRawInfo(ADDRESS_HOME_LANDMARK, u"Red tree");
+  expected.SetRawInfo(ADDRESS_HOME_LANDMARK, u"Landmark example");
+  expected.SetRawInfo(ADDRESS_HOME_BETWEEN_STREETS, u"Between streets example");
+  expected.SetRawInfo(ADDRESS_HOME_ADMIN_LEVEL2, u"Admin level 2 example");
 
   MergeAddressesAndExpect(empty, profile2, expected);
 }
 
-// Checks for various scenarios for determining mergeability of profiles w.r.t.
+// Checks for various scenarios for determining mergability of profiles w.r.t.
 // the state.
-TEST_F(AutofillProfileComparatorTest, CheckStatesMergeability) {
+TEST_F(AutofillProfileComparatorTest, CheckStatesMergability) {
   base::test::ScopedFeatureList feature;
   feature.InitAndEnableFeature(
       autofill::features::kAutofillUseAlternativeStateNameMap);
@@ -1241,6 +1245,12 @@ TEST_F(AutofillProfileComparatorTest,
       &existing_profile, "firstName", "middleName", "lastName", "mail@mail.com",
       "company", "line1", "line2", "city", "state", "zip", "US", "phone");
 
+  existing_profile.SetRawInfo(ADDRESS_HOME_LANDMARK, u"Landmark example");
+  existing_profile.SetRawInfo(ADDRESS_HOME_BETWEEN_STREETS,
+                              u"Cross streets example");
+  existing_profile.SetRawInfo(ADDRESS_HOME_ADMIN_LEVEL2,
+                              u"Admin level 2 example");
+
   // A profile compared with itself cannot have different settings visible
   // values.
   EXPECT_FALSE(
@@ -1250,7 +1260,8 @@ TEST_F(AutofillProfileComparatorTest,
   // Test for most settings visible types that a change is correctly recognized.
   for (ServerFieldType changed_type :
        {NAME_FULL, ADDRESS_HOME_STREET_ADDRESS, ADDRESS_HOME_CITY,
-        ADDRESS_HOME_ZIP, EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER}) {
+        ADDRESS_HOME_ZIP, ADDRESS_HOME_LANDMARK, ADDRESS_HOME_BETWEEN_STREETS,
+        ADDRESS_HOME_ADMIN_LEVEL2, EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER}) {
     // Make a fresh copy and test that the function returns false.
     AutofillProfile new_profile = existing_profile;
     EXPECT_FALSE(
@@ -1421,12 +1432,12 @@ TEST_F(AutofillProfileComparatorTest, IsMergeCandidate) {
 
   // A profile that is mergeable but without changing a value is not a merge
   // candidate.
-  AutofillProfile updateable_profile = existing_profile;
+  AutofillProfile updatable_profile = existing_profile;
   // This is a subset of the existing city name and should result in a merge but
   // without changing the stored value.
   mergeable_profile.SetRawInfoWithVerificationStatus(
       ADDRESS_HOME_CITY, u"City", autofill::VerificationStatus::kObserved);
-  EXPECT_FALSE(comparator.IsMergeCandidate(existing_profile, updateable_profile,
+  EXPECT_FALSE(comparator.IsMergeCandidate(existing_profile, updatable_profile,
                                            "en_US"));
 
   // A profile that is not mergeable is not a merge candidate.

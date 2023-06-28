@@ -4,29 +4,11 @@
 
 #include "services/network/public/cpp/attribution_utils.h"
 
-#include "base/strings/string_piece.h"
 #include "services/network/public/mojom/attribution.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace network {
 namespace {
-
-TEST(AttributionSupportTest, GetAttributionSupportHeader) {
-  const struct {
-    mojom::AttributionSupport attribution_support;
-    const char* expected;
-  } kTestCases[] = {
-      {mojom::AttributionSupport::kWeb, "web"},
-      {mojom::AttributionSupport::kWebAndOs, "os, web"},
-      {mojom::AttributionSupport::kOs, "os"},
-      {mojom::AttributionSupport::kNone, ""},
-  };
-
-  for (const auto& test_case : kTestCases) {
-    EXPECT_EQ(GetAttributionSupportHeader(test_case.attribution_support),
-              test_case.expected);
-  }
-}
 
 TEST(AttributionSupportTest, HasAttributionOsSupport) {
   const struct {

@@ -9,7 +9,6 @@
 
 #import "ios/chrome/browser/ui/ntp/new_tab_page_consumer.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_view_controller_delegate.h"
-#import "ios/chrome/browser/ui/thumb_strip/thumb_strip_supporting.h"
 
 @class BubblePresenter;
 @class ContentSuggestionsViewController;
@@ -19,13 +18,11 @@
 @protocol NewTabPageContentDelegate;
 @class NewTabPageHeaderViewController;
 @protocol OverscrollActionsControllerDelegate;
-@class ViewRevealingVerticalPanHandler;
 
 // View controller containing all the content presented on a standard,
 // non-incognito new tab page.
 @interface NewTabPageViewController
-    : UIViewController <ThumbStripSupporting,
-                        NewTabPageConsumer,
+    : UIViewController <NewTabPageConsumer,
                         NewTabPageHeaderViewControllerDelegate,
                         UIScrollViewDelegate>
 
@@ -42,10 +39,6 @@
 
 // Delegate for actions relating to the NTP content.
 @property(nonatomic, weak) id<NewTabPageContentDelegate> ntpContentDelegate;
-
-// The pan gesture handler to notify of scroll events happening in this view
-// controller.
-@property(nonatomic, weak) ViewRevealingVerticalPanHandler* panGestureHandler;
 
 // The view controller representing the content suggestions.
 @property(nonatomic, strong)
@@ -100,11 +93,11 @@
 // Lays out content above feed and adjusts content suggestions.
 - (void)updateNTPLayout;
 
-// Signal to the ViewController that the height about the feed needs to be
-// recalculated and thus also likely needs to be scrolled up to accommodate for
-// the new height. Nothing may happen if the ViewController determines that the
-// current scroll state should not change.
-- (void)updateHeightAboveFeedAndScrollToTopIfNeeded;
+// Signals to the ViewController that the height above the feed needs to be
+// recalculated. Usually called in response to an event that happens after
+// all the content has been loaded (example: a UI element expanding). Keeps
+// the scroll position from the top the same.
+- (void)updateHeightAboveFeed;
 
 // Returns whether the NTP is scrolled to the top or not.
 - (BOOL)isNTPScrolledToTop;

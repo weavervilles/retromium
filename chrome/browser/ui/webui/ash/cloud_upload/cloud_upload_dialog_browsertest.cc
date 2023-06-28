@@ -93,7 +93,7 @@ void CreateFakeWebApps(
   for (int i = 0; i < n; ++i) {
     std::string start_url =
         "https://www.example" + base::NumberToString(i) + ".com";
-    auto web_app_info = std::make_unique<WebAppInstallInfo>();
+    auto web_app_info = std::make_unique<web_app::WebAppInstallInfo>();
     web_app_info->start_url = GURL(start_url);
     web_app_info->scope = GURL(start_url);
     apps::FileHandler handler;
@@ -373,10 +373,10 @@ IN_PROC_BROWSER_TEST_F(FileHandlerDialogBrowserTest, OpenFileTaskFromDialog) {
       (GURL(chrome::kChromeUICloudUploadURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
-  // Check that the Setup flow has never run and so the File
-  // Handler dialog will be launched when CloudOpenTask::Execute() is
-  // called.
-  ASSERT_FALSE(file_manager::file_tasks::OfficeSetupComplete(profile()));
+  // Check that the Setup flow has never run and so the File Handler dialog will
+  // be launched when CloudOpenTask::Execute() is called.
+  ASSERT_FALSE(file_manager::file_tasks::HasExplicitDefaultFileHandler(
+      profile(), ".docx"));
 
   // Launch File Handler dialog.
   ASSERT_TRUE(CloudOpenTask::Execute(profile(), files_,
@@ -473,7 +473,8 @@ IN_PROC_BROWSER_TEST_F(FileHandlerDialogBrowserTest, OpenFileTaskFromDialog) {
   navigation_observer_task.Wait();
 
   // Check that the Setup flow has been marked complete.
-  ASSERT_TRUE(file_manager::file_tasks::OfficeSetupComplete(profile()));
+  ASSERT_TRUE(file_manager::file_tasks::HasExplicitDefaultFileHandler(profile(),
+                                                                      ".docx"));
 
   // Check that the selected task has been made the default for doc files.
   ASSERT_TRUE(file_manager::file_tasks::GetDefaultTaskFromPrefs(
@@ -504,7 +505,8 @@ IN_PROC_BROWSER_TEST_F(FileHandlerDialogBrowserTest, DefaultSetForDocsOnly) {
   // Check that the Setup flow has never run and so the File
   // Handler dialog will be launched when CloudOpenTask::Execute() is
   // called.
-  ASSERT_FALSE(file_manager::file_tasks::OfficeSetupComplete(profile()));
+  ASSERT_FALSE(file_manager::file_tasks::HasExplicitDefaultFileHandler(
+      profile(), ".docx"));
 
   // Launch File Handler dialog.
   ASSERT_TRUE(CloudOpenTask::Execute(profile(), files_,
@@ -571,7 +573,8 @@ IN_PROC_BROWSER_TEST_F(FileHandlerDialogBrowserTest, DefaultSetForDocsOnly) {
   ASSERT_TRUE(navigation_observer_move_page.last_navigation_succeeded());
 
   // Check that the Setup flow has been marked complete.
-  ASSERT_TRUE(file_manager::file_tasks::OfficeSetupComplete(profile()));
+  ASSERT_TRUE(file_manager::file_tasks::HasExplicitDefaultFileHandler(profile(),
+                                                                      ".docx"));
 
   // Check that the Docs/Slides task has been made the default for doc/x and
   // ppt/x files, but the Sheets task has not been made default for xlsx files,
@@ -594,6 +597,54 @@ IN_PROC_BROWSER_TEST_F(FileHandlerDialogBrowserTest, DefaultSetForDocsOnly) {
   ASSERT_FALSE(file_manager::file_tasks::GetDefaultTaskFromPrefs(
       *profile()->GetPrefs(), kXlsxMimeType, kXlsxFileExtension,
       &default_task));
+}
+
+// Helper to launch Files app and return its NativeWindow.
+gfx::NativeWindow LaunchFilesAppAndWait(Profile* profile) {
+  GURL files_swa_url = file_manager::util::GetFileManagerMainPageUrlWithParams(
+      ui::SelectFileDialog::SELECT_NONE, /*title=*/std::u16string(),
+      /*current_directory_url=*/{},
+      /*selection_url=*/GURL(),
+      /*target_name=*/{}, /*file_types=*/{},
+      /*file_type_index=*/0,
+      /*search_query=*/{},
+      /*show_android_picker_apps=*/false,
+      /*volume_filter=*/{});
+  ash::SystemAppLaunchParams params;
+  params.url = files_swa_url;
+  ash::LaunchSystemWebAppAsync(profile, ash::SystemWebAppType::FILE_MANAGER,
+                               params);
+  Browser* files_app = ui_test_utils::WaitForBrowserToOpen();
+  return files_app->window()->GetNativeWindow();
+}
+
+IN_PROC_BROWSER_TEST_F(FileHandlerDialogBrowserTest,
+                       ShowConnectOneDriveDialog_OpensAndClosesDialog) {
+  // Watch for the Connect OneDrive dialog URL chrome://cloud-upload.
+  content::TestNavigationObserver navigation_observer_dialog(
+      (GURL(chrome::kChromeUICloudUploadURL)));
+  navigation_observer_dialog.StartWatchingNewWebContents();
+
+  // Launch the Connect OneDrive dialog.
+  gfx::NativeWindow modal_parent = LaunchFilesAppAndWait(browser()->profile());
+  ASSERT_TRUE(ShowConnectOneDriveDialog(modal_parent));
+
+  // Wait for the Connect OneDrive dialog to open at chrome://cloud-upload.
+  navigation_observer_dialog.Wait();
+  ASSERT_TRUE(navigation_observer_dialog.last_navigation_succeeded());
+
+  // Check that we have the right dialog page (Connect OneDrive).
+  content::WebContents* web_contents = GetWebContentsFromCloudUploadDialog();
+  content::EvalJsResult eval_result = content::EvalJs(
+      web_contents, "!!document.querySelector('connect-onedrive')");
+  ASSERT_TRUE(eval_result.ExtractBool());
+
+  // Click the close button and wait for the dialog to close.
+  content::WebContentsDestroyedWatcher watcher(web_contents);
+  EXPECT_TRUE(content::ExecJs(web_contents,
+                              "document.querySelector('connect-onedrive')"
+                              ".$('.cancel-button').click()"));
+  watcher.Wait();
 }
 
 // Tests that OnDialogComplete() opens the specified fake file task.
@@ -690,26 +741,6 @@ class FixUpFlowBrowserTest : public InProcessBrowserTest {
         apps::AppServiceProxyFactory::GetForProfile(profile()));
   }
 
-  // Launch Files app and return its NativeWindow.
-  gfx::NativeWindow LaunchFilesAppAndWait() {
-    GURL files_swa_url =
-        file_manager::util::GetFileManagerMainPageUrlWithParams(
-            ui::SelectFileDialog::SELECT_NONE, /*title=*/std::u16string(),
-            /*current_directory_url=*/{},
-            /*selection_url=*/GURL(),
-            /*target_name=*/{}, /*file_types=*/{},
-            /*file_type_index=*/0,
-            /*search_query=*/{},
-            /*show_android_picker_apps=*/false,
-            /*volume_filter=*/{});
-    ash::SystemAppLaunchParams params;
-    params.url = files_swa_url;
-    ash::LaunchSystemWebAppAsync(browser()->profile(),
-                                 ash::SystemWebAppType::FILE_MANAGER, params);
-    Browser* files_app = ui_test_utils::WaitForBrowserToOpen();
-    return files_app->window()->GetNativeWindow();
-  }
-
  protected:
   // Use a non-managed user in this browser test to ensure
   // |IsEligibleAndEnabledUploadOfficeToCloud| returns the result of
@@ -723,12 +754,15 @@ class FixUpFlowBrowserTest : public InProcessBrowserTest {
   base::test::ScopedFeatureList feature_list_;
 };
 
+using file_manager::file_tasks::kActionIdWebDriveOfficeWord;
+using file_manager::file_tasks::SetWordFileHandlerToFilesSWA;
+
 // Tests that the Fixup flow is entered when OneDrive is selected as the cloud
 // provider but ODFS is not mounted and the Setup flow has already completed.
 // Checks that the ODFS Sign In Page is reachable.
 IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest, FixUpFlowWhenODFSNotMounted) {
-  // Set Setup flow as complete.
-  file_manager::file_tasks::SetOfficeSetupComplete(profile(), true);
+  // Simulate prefs where the setup flow has already run.
+  SetWordFileHandlerToFilesSWA(profile(), kActionIdWebDriveOfficeWord);
 
   SetUpFiles();
   AddFakeOfficePWA();
@@ -741,7 +775,7 @@ IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest, FixUpFlowWhenODFSNotMounted) {
       (GURL(chrome::kChromeUICloudUploadURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
-  gfx::NativeWindow modal_parent = LaunchFilesAppAndWait();
+  gfx::NativeWindow modal_parent = LaunchFilesAppAndWait(browser()->profile());
 
   CloudOpenTask::Execute(profile(), files_, CloudProvider::kOneDrive,
                          modal_parent);
@@ -772,8 +806,8 @@ IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest, FixUpFlowWhenODFSNotMounted) {
 // completed. Checks that the Office PWA Install Page is reachable.
 IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest,
                        FixUpFlowWhenOfficePWANotInstalled) {
-  // Set Setup flow as complete.
-  file_manager::file_tasks::SetOfficeSetupComplete(profile(), true);
+  // Simulate prefs where the setup flow has already run.
+  SetWordFileHandlerToFilesSWA(profile(), kActionIdWebDriveOfficeWord);
 
   SetUpFiles();
   AddFakeODFS();
@@ -786,7 +820,7 @@ IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest,
       (GURL(chrome::kChromeUICloudUploadURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
-  gfx::NativeWindow modal_parent = LaunchFilesAppAndWait();
+  gfx::NativeWindow modal_parent = LaunchFilesAppAndWait(browser()->profile());
 
   CloudOpenTask::Execute(profile(), files_, CloudProvider::kOneDrive,
                          modal_parent);
@@ -837,8 +871,7 @@ IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest, ShouldFixUpOfficeODFSAndPWA) {
 // point changes the default task set when the Setup has not been run before.
 IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest,
                        OneDriveSetUpChangesDefaultTaskWhenSetUpIncomplete) {
-  // Set Setup flow as incomplete.
-  file_manager::file_tasks::SetOfficeSetupComplete(profile(), false);
+  // Simulate Setup flow incomplete - prefs are empty to begin with.
 
   // Add a doc test file.
   SetUpFiles();
@@ -902,13 +935,13 @@ IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest,
 }
 
 // Test that entering and completing the Setup flow from the OneDrive Set Up
-// point does not change the default task set when the Setup has been run
-// before. This is to test that when the Fixup flow runs, the default task does
-// not change.
+// point does not change the default task set when there was already a default
+// handler before setup. This is to test that when the Fixup flow runs, the
+// default task does not change.
 IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest,
                        OneDriveSetUpDoesNotChangeDefaultTaskWhenSetUpComplete) {
-  // Set Setup flow as complete.
-  file_manager::file_tasks::SetOfficeSetupComplete(profile(), true);
+  // Simulate prefs where the setup flow has already run.
+  SetWordFileHandlerToFilesSWA(profile(), kActionIdWebDriveOfficeWord);
 
   // Add a doc test file.
   SetUpFiles();
@@ -935,14 +968,9 @@ IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest,
       (GURL(chrome::kChromeUICloudUploadURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
-  // Check that there is not a default task for doc files.
-  file_manager::file_tasks::TaskDescriptor default_task;
-  ASSERT_FALSE(file_manager::file_tasks::GetDefaultTaskFromPrefs(
-      *profile()->GetPrefs(), kDocMimeType, kDocFileExtension, &default_task));
-
   // Open the Welcome Page for the OneDrive set up part of the Setup flow. This
-  // will not lead to the Office PWA being set as the default task because the
-  // Setup flow has already been completed.
+  // will not lead to the Office PWA being set as the default task because there
+  // was already a default before running setup.
   dialog->ShowSystemDialog();
 
   // Wait for Welcome Page to open at chrome://cloud-upload.
@@ -965,9 +993,12 @@ IN_PROC_BROWSER_TEST_F(FixUpFlowBrowserTest,
                        ".querySelector('.action-button').click()")) {
   }
 
-  // Check that there is still not a default task for doc files.
-  ASSERT_FALSE(file_manager::file_tasks::GetDefaultTaskFromPrefs(
+  // Check that the default task for doc files is still Drive, and not OneDrive,
+  // despite running fixup setup.
+  file_manager::file_tasks::TaskDescriptor default_task;
+  ASSERT_TRUE(file_manager::file_tasks::GetDefaultTaskFromPrefs(
       *profile()->GetPrefs(), kDocMimeType, kDocFileExtension, &default_task));
+  ASSERT_TRUE(default_task.action_id.ends_with(kActionIdWebDriveOfficeWord));
 }
 
 class CloudOpenTaskBrowserTest : public InProcessBrowserTest {

@@ -15,15 +15,8 @@
 #include "chrome/updater/update_service.h"
 #include "chrome/updater/util/win_util.h"
 
-// Definitions for native COM updater classes.
-
 namespace updater {
 
-// TODO(crbug.com/1065712): these classes do not have to be visible in the
-// updater namespace. Additionally, there is some code duplication for the
-// registration and unregistration code in both server and service_main
-// compilation units.
-//
 // This class implements the IUpdateState interface and exposes it as a COM
 // object. The purpose of this class is to remote the state of the
 // |UpdateService|. Instances of this class are typically passed as arguments
@@ -123,6 +116,7 @@ class UpdaterImpl : public DYNAMICIIDSIMPL(IUpdater) {
                               const wchar_t* install_data,
                               const wchar_t* install_settings,
                               IUpdaterObserver* observer) override;
+  IFACEMETHODIMP GetAppStates(IUpdaterAppStatesCallback* callback) override;
 
  private:
   ~UpdaterImpl() override = default;

@@ -21,12 +21,24 @@ BASE_FEATURE(kLauncherQueryFederatedAnalyticsPHH,
              "LauncherQueryFederatedAnalyticsPHH",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kLauncherFuzzyMatchAcrossProviders,
+             "LauncherFuzzyMatchAcrossProviders",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kLauncherFuzzyMatchForOmnibox,
              "LauncherFuzzyMatchForOmnibox",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLauncherImageSearch,
              "LauncherImageSearch",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kLauncherImageSearchIca,
+             "LauncherImageSearchIca",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kLauncherImageSearchOcr,
+             "LauncherImageSearchOcr",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLauncherSystemInfoAnswerCards,
@@ -46,12 +58,24 @@ bool IsLauncherQueryFederatedAnalyticsPHHEnabled() {
   return base::FeatureList::IsEnabled(kLauncherQueryFederatedAnalyticsPHH);
 }
 
+bool IsLauncherFuzzyMatchAcrossProvidersEnabled() {
+  return base::FeatureList::IsEnabled(kLauncherFuzzyMatchAcrossProviders);
+}
+
 bool isLauncherFuzzyMatchForOmniboxEnabled() {
   return base::FeatureList::IsEnabled(kLauncherFuzzyMatchForOmnibox);
 }
 
 bool IsLauncherImageSearchEnabled() {
   return base::FeatureList::IsEnabled(kLauncherImageSearch);
+}
+
+bool IsLauncherImageSearchIcaEnabled() {
+  return base::FeatureList::IsEnabled(kLauncherImageSearchIca);
+}
+
+bool IsLauncherImageSearchOcrEnabled() {
+  return base::FeatureList::IsEnabled(kLauncherImageSearchOcr);
 }
 
 bool isLauncherSystemInfoAnswerCardsEnabled() {

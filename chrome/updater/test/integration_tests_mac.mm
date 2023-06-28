@@ -13,6 +13,7 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/run_loop.h"
@@ -34,15 +35,18 @@
 #include "chrome/updater/updater_branding.h"
 #include "chrome/updater/updater_scope.h"
 #import "chrome/updater/util/mac_util.h"
-#include "chrome/updater/util/unittest_util.h"
+#include "chrome/updater/util/unit_test_util.h"
 #include "chrome/updater/util/util.h"
 #include "components/crx_file/crx_verifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
-namespace updater {
-namespace test {
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
+namespace updater::test {
 namespace {
 
 base::FilePath GetExecutablePath() {
@@ -54,7 +58,7 @@ base::FilePath GetExecutablePath() {
 
 absl::optional<base::FilePath> GetActiveFile(UpdaterScope /*scope*/,
                                              const std::string& id) {
-  // The active user is always managaged in the updater scope for the user.
+  // The active user is always managed in the updater scope for the user.
   const absl::optional<base::FilePath> path =
       GetLibraryFolderPath(UpdaterScope::kUser);
   if (!path)
@@ -75,7 +79,8 @@ base::FilePath GetSetupExecutablePath() {
 
 void EnterTestMode(const GURL& update_url,
                    const GURL& crash_upload_url,
-                   const GURL& device_management_url) {
+                   const GURL& device_management_url,
+                   const base::TimeDelta& idle_timeout) {
   ASSERT_TRUE(ExternalConstantsBuilder()
                   .SetUpdateURL(std::vector<std::string>{update_url.spec()})
                   .SetCrashUploadURL(crash_upload_url.spec())
@@ -85,6 +90,7 @@ void EnterTestMode(const GURL& update_url,
                   .SetServerKeepAliveTime(base::Seconds(1))
                   .SetCrxVerifierFormat(crx_file::VerifierFormat::CRX3)
                   .SetOverinstallTimeout(base::Seconds(5))
+                  .SetIdleCheckPeriod(idle_timeout)
                   .Modify());
 }
 
@@ -225,7 +231,7 @@ void ExpectNotActive(UpdaterScope scope, const std::string& app_id) {
 
 bool WaitForUpdaterExit(UpdaterScope /*scope*/) {
   return WaitFor(
-      base::BindRepeating([]() {
+      base::BindRepeating([] {
         std::string ps_stdout;
         EXPECT_TRUE(
             base::GetAppOutput({"ps", "ax", "-o", "command"}, &ps_stdout));
@@ -236,7 +242,7 @@ bool WaitForUpdaterExit(UpdaterScope /*scope*/) {
         return false;
       }),
       base::BindLambdaForTesting(
-          []() { VLOG(0) << "Still waiting for updater to exit..."; }));
+          [] { VLOG(0) << "Still waiting for updater to exit..."; }));
 }
 
 void SetupRealUpdaterLowerVersion(UpdaterScope scope) {
@@ -321,13 +327,9 @@ void ExpectLegacyUpdaterMigrated(UpdaterScope scope) {
   EXPECT_EQ(persisted_data->GetDateLastActive(kPopularApp).value(), 5921);
   EXPECT_EQ(persisted_data->GetDateLastRollcall(kPopularApp).value(), 5922);
 
-// TODO(crbug.com/1442695): Enable this after updating the `ticketstore` under
-// chrome/test/data/updater/Keystone.legacy.ticketstore.
-#if 0
   EXPECT_EQ(persisted_data->GetCohort(kPopularApp), "TestCohort");
   EXPECT_EQ(persisted_data->GetCohortName(kPopularApp), "TestCohortName");
   EXPECT_EQ(persisted_data->GetCohortHint(kPopularApp), "TestCohortHint");
-#endif
 
   // App CorruptedApp (client-regulated counting data is corrupted).
   const std::string kCorruptedApp = "com.chromium.CorruptedApp";
@@ -349,11 +351,9 @@ void UninstallApp(UpdaterScope scope, const std::string& app_id) {
                           base::FilePath(FILE_PATH_LITERAL("NONE")));
 }
 
-void RunOfflineInstall(UpdaterScope scope,
-                       bool is_legacy_install,
-                       bool is_silent_install) {
-  // TODO(crbug.com/1286574).
+base::CommandLine MakeElevated(base::CommandLine command_line) {
+  command_line.PrependWrapper("/usr/bin/sudo");
+  return command_line;
 }
 
-}  // namespace test
-}  // namespace updater
+}  // namespace updater::test

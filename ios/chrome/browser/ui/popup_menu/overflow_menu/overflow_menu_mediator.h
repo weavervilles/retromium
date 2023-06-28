@@ -31,6 +31,7 @@ class SyncService;
 class BrowserPolicyConnectorIOS;
 @protocol FindInPageCommands;
 class FollowBrowserAgent;
+@protocol OverflowMenuCustomizationCommands;
 class OverlayPresenter;
 @protocol PageInfoCommands;
 @protocol PopupMenuCommands;
@@ -58,6 +59,7 @@ class WebStateList;
                               ApplicationCommands,
                               BrowserCoordinatorCommands,
                               FindInPageCommands,
+                              OverflowMenuCustomizationCommands,
                               PriceNotificationsCommands,
                               TextZoomCommands>
     dispatcher;
@@ -75,8 +77,10 @@ class WebStateList;
 // BaseViewController for presenting some UI.
 @property(nonatomic, weak) UIViewController* baseViewController;
 
-// The bookmarks model to know if the page is bookmarked.
-@property(nonatomic, assign) bookmarks::BookmarkModel* bookmarkModel;
+// Bookmarks models to know if the page is bookmarked.
+@property(nonatomic, assign)
+    bookmarks::BookmarkModel* localOrSyncableBookmarkModel;
+@property(nonatomic, assign) bookmarks::BookmarkModel* accountBookmarkModel;
 
 // Pref service to retrieve browser state preference values.
 @property(nonatomic, assign) PrefService* browserStatePrefs;

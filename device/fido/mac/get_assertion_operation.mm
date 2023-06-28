@@ -67,8 +67,6 @@ void GetAssertionOperation::Run() {
   }
 
   bool require_uv =
-      !base::FeatureList::IsEnabled(
-          kWebAuthnMacPlatformAuthenticatorOptionalUv) ||
       DeviceHasBiometricsAvailable() ||
       request_.user_verification == UserVerificationRequirement::kRequired ||
       std::any_of(credentials->begin(), credentials->end(),
@@ -158,8 +156,8 @@ GetAssertionOperation::ResponseForCredential(const Credential& credential,
     return absl::nullopt;
   }
   AuthenticatorGetAssertionResponse response(std::move(authenticator_data),
-                                             std::move(*signature));
-  response.transport_used = FidoTransportProtocol::kInternal;
+                                             std::move(*signature),
+                                             FidoTransportProtocol::kInternal);
   response.credential = PublicKeyCredentialDescriptor(
       CredentialType::kPublicKey, credential.credential_id);
   if (has_uv) {

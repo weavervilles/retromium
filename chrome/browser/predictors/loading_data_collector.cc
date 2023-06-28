@@ -94,13 +94,11 @@ OriginRequestSummary::~OriginRequestSummary() = default;
 
 PageRequestSummary::PageRequestSummary(ukm::SourceId ukm_source_id,
                                        const GURL& main_frame_url,
-                                       base::TimeTicks creation_time)
+                                       base::TimeTicks navigation_started)
     : ukm_source_id(ukm_source_id),
       main_frame_url(main_frame_url),
       initial_url(main_frame_url),
-      navigation_started(creation_time),
-      navigation_committed(base::TimeTicks::Max()),
-      first_contentful_paint(base::TimeTicks::Max()) {}
+      navigation_started(navigation_started) {}
 
 PageRequestSummary::PageRequestSummary(const PageRequestSummary& other) =
     default;
@@ -274,6 +272,17 @@ void LoadingDataCollector::RecordFirstContentfulPaint(
   auto nav_it = inflight_navigations_.find(navigation_id);
   if (nav_it != inflight_navigations_.end())
     nav_it->second->first_contentful_paint = first_contentful_paint;
+}
+
+void LoadingDataCollector::RecordLCPElementLocator(
+    NavigationId navigation_id,
+    base::StringPiece lcp_element_locator) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  auto nav_it = inflight_navigations_.find(navigation_id);
+  if (nav_it != inflight_navigations_.end()) {
+    nav_it->second->lcp_element_locator = lcp_element_locator;
+  }
 }
 
 bool LoadingDataCollector::ShouldRecordResourceLoad(

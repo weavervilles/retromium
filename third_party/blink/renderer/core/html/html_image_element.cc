@@ -115,8 +115,7 @@ HTMLImageElement::HTMLImageElement(Document& document, bool created_by_parser)
       is_ad_related_(false),
       is_lcp_element_(false),
       is_changed_shortly_after_mouseover_(false),
-      has_sizes_attribute_in_img_or_sibling_(false),
-      is_lazy_loaded_(false) {}
+      has_sizes_attribute_in_img_or_sibling_(false) {}
 
 HTMLImageElement::~HTMLImageElement() = default;
 
@@ -304,7 +303,8 @@ void HTMLImageElement::ParseAttribute(
   const QualifiedName& name = params.name;
   if (name == html_names::kAltAttr || name == html_names::kTitleAttr) {
     if (UserAgentShadowRoot()) {
-      Element* text = UserAgentShadowRoot()->getElementById("alttext");
+      Element* text =
+          UserAgentShadowRoot()->getElementById(AtomicString("alttext"));
       String alt_text_content = AltText();
       if (text && text->textContent() != alt_text_content)
         text->setTextContent(alt_text_content);
@@ -346,12 +346,8 @@ void HTMLImageElement::ParseAttribute(
     if (loading == LoadingAttributeValue::kEager ||
         (loading == LoadingAttributeValue::kAuto)) {
       GetImageLoader().LoadDeferredImage();
-    } else {
-      is_lazy_loaded_ = true;
     }
-  } else if (name == html_names::kFetchpriorityAttr &&
-             RuntimeEnabledFeatures::PriorityHintsEnabled(
-                 GetExecutionContext())) {
+  } else if (name == html_names::kFetchpriorityAttr) {
     // We only need to keep track of usage here, as the communication of the
     // |fetchPriority| attribute to the loading pipeline takes place in
     // ImageLoader.
@@ -414,6 +410,11 @@ bool HTMLImageElement::SupportedImageType(
     return false;
   }
   return MIMETypeRegistry::IsSupportedImagePrefixedMIMEType(trimmed_type);
+}
+
+bool HTMLImageElement::HasLazyLoadingAttribute() const {
+  return GetLoadingAttributeValue(FastGetAttribute(html_names::kLoadingAttr)) ==
+         LoadingAttributeValue::kLazy;
 }
 
 // http://picture.responsiveimages.org/#update-source-set
@@ -594,32 +595,32 @@ unsigned HTMLImageElement::height() {
   return LayoutBoxHeight();
 }
 
-LayoutSize HTMLImageElement::DensityCorrectedIntrinsicDimensions() const {
+PhysicalSize HTMLImageElement::DensityCorrectedIntrinsicDimensions() const {
   if (IsDefaultIntrinsicSize()) {
-    return LayoutSize(LayoutReplaced::kDefaultWidth,
-                      LayoutReplaced::kDefaultHeight);
+    return PhysicalSize(LayoutUnit(LayoutReplaced::kDefaultWidth),
+                        LayoutUnit(LayoutReplaced::kDefaultHeight));
   }
   ImageResourceContent* image_content = GetImageLoader().GetContent();
   if (!image_content || !image_content->HasImage())
-    return LayoutSize();
+    return PhysicalSize();
 
   float pixel_density = image_device_pixel_ratio_;
   if (image_content->HasDevicePixelRatioHeaderValue() &&
       image_content->DevicePixelRatioHeaderValue() > 0)
     pixel_density = 1 / image_content->DevicePixelRatioHeaderValue();
 
-  LayoutSize natural_size(
+  PhysicalSize natural_size(
       image_content->GetImage()->Size(kRespectImageOrientation));
   natural_size.Scale(pixel_density);
   return natural_size;
 }
 
 unsigned HTMLImageElement::naturalWidth() const {
-  return DensityCorrectedIntrinsicDimensions().Width().ToUnsigned();
+  return DensityCorrectedIntrinsicDimensions().width.ToUnsigned();
 }
 
 unsigned HTMLImageElement::naturalHeight() const {
-  return DensityCorrectedIntrinsicDimensions().Height().ToUnsigned();
+  return DensityCorrectedIntrinsicDimensions().height.ToUnsigned();
 }
 
 unsigned HTMLImageElement::LayoutBoxWidth() const {
@@ -933,7 +934,7 @@ bool HTMLImageElement::IsCollapsed() const {
 }
 
 void HTMLImageElement::SetAutoSizesUsecounter() {
-  if (is_lazy_loaded_ && listener_) {
+  if (listener_ && HasLazyLoadingAttribute()) {
     UseCounter::Count(
         GetDocument(),
         has_sizes_attribute_in_img_or_sibling_

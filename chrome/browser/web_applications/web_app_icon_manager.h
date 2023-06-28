@@ -191,9 +191,9 @@ class WebAppIconManager : public WebAppInstallManagerObserver {
                          ReadIconsCallback callback);
 
   // Reads multiple densities of the icon for each supported UI scale factor.
-  // See ui/base/layout.h. Returns null image in |callback| if no icons found
-  // for all supported UI scale factors (matches only bigger icons, no
-  // upscaling).
+  // See ui/base/resource/resource_scale_factor.h. Returns null image in
+  // `callback` if no icons found for all supported UI scale factors (matches
+  // only bigger icons, no upscaling).
   void ReadUiScaleFactorsIcons(const AppId& app_id,
                                IconPurpose purpose,
                                SquareSizeDip size_in_dip,
@@ -242,7 +242,7 @@ class WebAppIconManager : public WebAppInstallManagerObserver {
                                  gfx::ImageSkia converted_image);
 
   raw_ptr<WebAppRegistrar, DanglingUntriaged> registrar_;
-  raw_ptr<WebAppInstallManager, DanglingUntriaged> install_manager_;
+  raw_ptr<WebAppInstallManager, DanglingAcrossTasks> install_manager_;
   base::FilePath web_apps_directory_;
   scoped_refptr<FileUtilsWrapper> utils_;
   scoped_refptr<base::SequencedTaskRunner> icon_task_runner_;

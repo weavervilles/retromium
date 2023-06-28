@@ -56,8 +56,17 @@ using html_names::kStyleAttr;
 
 // NOTE: This test uses <iframe sandbox> to create cross origin iframes.
 
-class FrameThrottlingTest : public PaintTestConfigurations, public SimTest {
+// This should not conflict with the existing PaintTestConfiguration bits.
+enum { kIntersectionOptimization = 1 << 20 };
+
+class FrameThrottlingTest : public PaintTestConfigurations,
+                            public SimTest,
+                            private ScopedIntersectionOptimizationForTest {
  protected:
+  FrameThrottlingTest()
+      : ScopedIntersectionOptimizationForTest(GetParam() &
+                                              kIntersectionOptimization) {}
+
   void SetUp() override {
     SimTest::SetUp();
     WebView().MainFrameViewWidget()->Resize(gfx::Size(640, 480));
@@ -91,7 +100,10 @@ class FrameThrottlingTest : public PaintTestConfigurations, public SimTest {
   };
 };
 
-INSTANTIATE_PAINT_TEST_SUITE_P(FrameThrottlingTest);
+INSTANTIATE_TEST_SUITE_P(All,
+                         FrameThrottlingTest,
+                         ::testing::Values(PAINT_TEST_SUITE_P_VALUES,
+                                           kIntersectionOptimization));
 
 TEST_P(FrameThrottlingTest, ThrottleInvisibleFrames) {
   SimRequest main_resource("https://example.com/", "text/html");
@@ -1986,7 +1998,7 @@ TEST_P(FrameThrottlingTest, PrintThrottledFrame) {
   auto* sub_frame = To<LocalFrame>(frame_element->ContentFrame());
   EXPECT_TRUE(sub_frame->View()->ShouldThrottleRenderingForTest());
   auto* web_frame = WebLocalFrameImpl::FromFrame(sub_frame);
-  WebPrintParams print_params(gfx::Size(500, 500));
+  WebPrintParams print_params(gfx::SizeF(500, 500));
   web_frame->PrintBegin(print_params, blink::WebNode());
   cc::PaintRecorder recorder;
   web_frame->PrintPage(0, recorder.beginRecording());

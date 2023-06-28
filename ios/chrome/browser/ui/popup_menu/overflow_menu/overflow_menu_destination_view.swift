@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import SwiftUI
+import ios_chrome_browser_shared_ui_util_util_swiftui
 import ios_chrome_common_ui_colors_swift
 
 /// Style based on state for an OverflowMenuDestinationView.
@@ -49,6 +50,8 @@ struct OverflowMenuDestinationButton: ButtonStyle {
   /// The layout parameters for this view.
   var layoutParameters: OverflowMenuDestinationView.LayoutParameters
 
+  var highlighted = false
+
   weak var metricsHandler: PopupMenuMetricsHandler?
 
   func makeBody(configuration: Configuration) -> some View {
@@ -79,7 +82,8 @@ struct OverflowMenuDestinationButton: ButtonStyle {
 
   /// Background color for the icon.
   func backgroundColor(configuration: Configuration) -> Color {
-    return configuration.isPressed ? Color(.systemGray4) : .groupedSecondaryBackground
+    return configuration.isPressed
+      ? Color(.systemGray4) : (highlighted ? .blueHalo : .groupedSecondaryBackground)
   }
 
   /// View representing the background of the icon.
@@ -100,9 +104,10 @@ struct OverflowMenuDestinationButton: ButtonStyle {
       spacing = 0
       interiorPadding = Dimensions.horizontalLayoutIconPadding
     }
+    let symbolName = destination.symbolName ?? "gearshape"
     let image =
       (destination.systemSymbol
-      ? Image(systemName: destination.symbolName) : Image(destination.symbolName)).renderingMode(
+      ? Image(systemName: symbolName) : Image(symbolName)).renderingMode(
         .template)
     return iconBuilder(
       configuration: configuration, spacing: spacing, interiorPadding: interiorPadding, image: image
@@ -238,6 +243,8 @@ struct OverflowMenuDestinationView: View {
   /// The layout parameters for this view.
   var layoutParameters: LayoutParameters
 
+  var highlighted = false
+
   weak var metricsHandler: PopupMenuMetricsHandler?
 
   var body: some View {
@@ -253,7 +260,14 @@ struct OverflowMenuDestinationView: View {
     .accessibilityIdentifier(accessibilityIdentifier)
     .accessibilityLabel(Text(accessibilityLabel))
     .buttonStyle(
-      OverflowMenuDestinationButton(destination: destination, layoutParameters: layoutParameters))
+      OverflowMenuDestinationButton(
+        destination: destination, layoutParameters: layoutParameters, highlighted: highlighted)
+    )
+    .if(highlighted) { view in
+      view.anchorPreference(
+        key: OverflowMenuDestinationList.HighlightedDestinationBounds.self, value: .bounds
+      ) { $0 }
+    }
   }
 
   var accessibilityLabel: String {

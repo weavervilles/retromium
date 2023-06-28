@@ -117,6 +117,9 @@ class BookmarkBarView : public views::AccessiblePaneView,
   void GetAnchorPositionForButton(views::MenuButton* button,
                                   views::MenuAnchorPosition* anchor);
 
+  // Returns the size of the leading margin of the bookmarks bar.
+  int GetLeadingMargin() const;
+
   // Returns the button responsible for showing bookmarks in the
   // "Other Bookmarks" folder.
   views::MenuButton* other_bookmarks_button() const {
@@ -367,7 +370,8 @@ class BookmarkBarView : public views::AccessiblePaneView,
   PrefChangeRegistrar profile_pref_registrar_;
 
   // Used for opening urls.
-  raw_ptr<content::PageNavigator, DanglingUntriaged> page_navigator_ = nullptr;
+  raw_ptr<content::PageNavigator, DanglingAcrossTasks> page_navigator_ =
+      nullptr;
 
   // BookmarkModel that owns the entries and folders that are shown in this
   // view. This is owned by the Profile.

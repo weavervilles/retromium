@@ -19,9 +19,9 @@
 #include "chrome/browser/ash/drive/file_system_util.h"
 #include "chrome/browser/ash/login/quick_unlock/pin_backend.h"
 #include "chrome/browser/ash/login/quick_unlock/quick_unlock_factory.h"
-#include "chrome/browser/ash/web_applications/personalization_app/personalization_app_manager.h"
-#include "chrome/browser/ash/web_applications/personalization_app/personalization_app_manager_factory.h"
-#include "chrome/browser/ash/web_applications/personalization_app/personalization_app_utils.h"
+#include "chrome/browser/ash/system_web_apps/apps/personalization_app/personalization_app_manager.h"
+#include "chrome/browser/ash/system_web_apps/apps/personalization_app/personalization_app_manager_factory.h"
+#include "chrome/browser/ash/system_web_apps/apps/personalization_app/personalization_app_utils.h"
 #include "chrome/browser/nearby_sharing/contacts/nearby_share_contact_manager.h"
 #include "chrome/browser/nearby_sharing/nearby_receive_manager.h"
 #include "chrome/browser/nearby_sharing/nearby_share_settings.h"
@@ -256,7 +256,6 @@ void OSSettingsUI::BindInterface(
 
 void OSSettingsUI::BindInterface(
     mojo::PendingReceiver<audio_config::mojom::CrosAudioConfig> receiver) {
-  DCHECK(features::IsAudioSettingsPageEnabled());
   GetAudioConfigService(std::move(receiver));
 }
 
@@ -302,13 +301,19 @@ void OSSettingsUI::BindInterface(
 
 void OSSettingsUI::BindInterface(
     mojo::PendingReceiver<google_drive::mojom::PageHandlerFactory> receiver) {
-  CHECK(drive::util::IsDriveFsBulkPinningEnabled());
   // The PageHandlerFactory is reused across same-origin navigations, so ensure
   // any existing factories are reset.
   google_drive_page_handler_factory_.reset();
   google_drive_page_handler_factory_ =
       std::make_unique<GoogleDrivePageHandlerFactory>(
           Profile::FromWebUI(web_ui()), std::move(receiver));
+}
+
+void OSSettingsUI::BindInterface(
+    mojo::PendingReceiver<one_drive::mojom::PageHandlerFactory> receiver) {
+  one_drive_page_handler_factory_ =
+      std::make_unique<OneDrivePageHandlerFactory>(Profile::FromWebUI(web_ui()),
+                                                   std::move(receiver));
 }
 
 void OSSettingsUI::BindInterface(

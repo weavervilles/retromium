@@ -35,6 +35,13 @@ constexpr auto enabled_by_default_desktop_only =
     base::FEATURE_ENABLED_BY_DEFAULT;
 #endif
 
+constexpr auto enabled_by_default_mobile_only =
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+    true;
+#else
+    false;
+#endif
+
 // Returns whether |locale| is a supported locale for |feature|.
 //
 // This matches |locale| with the "supported_locales" feature param value in
@@ -163,6 +170,10 @@ BASE_FEATURE(kPageVisibilityBatchAnnotations,
              "PageVisibilityBatchAnnotations",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kTextEmbeddingBatchAnnotations,
+             "TextEmebddingBatchAnnotations",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kPageContentAnnotationsValidation,
              "PageContentAnnotationsValidation",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -201,6 +212,19 @@ BASE_FEATURE(kPageContentAnnotationsPersistSalientImageMetadata,
              "PageContentAnnotationsPersistSalientImageMetadata",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Enables the model store to save relative paths computed from the base model
+// store dir. Storing as relative path in the model store is needed for IOS,
+// since the directories could change after Chrome upgrade. This feature is
+// expected to be enabled only for IOS.
+BASE_FEATURE(kModelStoreUseRelativePath,
+             "ModelStoreUseRelativePath",
+#if BUILDFLAG(IS_IOS)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
+
 // The default value here is a bit of a guess.
 // TODO(crbug/1163244): This should be tuned once metrics are available.
 base::TimeDelta PageTextExtractionOutstandingRequestsGracePeriod() {
@@ -210,9 +234,10 @@ base::TimeDelta PageTextExtractionOutstandingRequestsGracePeriod() {
 
 bool ShouldBatchUpdateHintsForActiveTabsAndTopHosts() {
   if (base::FeatureList::IsEnabled(kRemoteOptimizationGuideFetching)) {
+    // Batch update active tabs should only apply to non-desktop platforms.
     return GetFieldTrialParamByFeatureAsBool(kRemoteOptimizationGuideFetching,
                                              "batch_update_hints_for_top_hosts",
-                                             true);
+                                             enabled_by_default_mobile_only);
   }
   return false;
 }
@@ -562,6 +587,10 @@ bool ShouldDeferStartupActiveTabsHintsFetch() {
 
 bool PageVisibilityBatchAnnotationsEnabled() {
   return base::FeatureList::IsEnabled(kPageVisibilityBatchAnnotations);
+}
+
+bool TextEmbeddingBatchAnnotationsEnabled() {
+  return base::FeatureList::IsEnabled(kTextEmbeddingBatchAnnotations);
 }
 
 size_t AnnotateVisitBatchSize() {

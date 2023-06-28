@@ -4,29 +4,66 @@
 
 package org.chromium.chrome.browser.payments;
 
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.ALL_KEYS;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.CANCEL_RUNNABLE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.DONE_RUNNABLE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.DropdownFieldProperties.DROPDOWN_ALL_KEYS;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.DropdownFieldProperties.DROPDOWN_CALLBACK;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.DropdownFieldProperties.DROPDOWN_HINT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.DropdownFieldProperties.DROPDOWN_KEY_VALUE_LIST;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.EDITOR_FIELDS;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.EDITOR_TITLE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FORM_VALID;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldProperties.CUSTOM_ERROR_MESSAGE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldProperties.INVALID_ERROR_MESSAGE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldProperties.IS_REQUIRED;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldProperties.LABEL;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldProperties.REQUIRED_ERROR_MESSAGE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldProperties.VALIDATOR;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldProperties.VALUE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.ItemType.DROPDOWN;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.ItemType.TEXT_INPUT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.SHOW_REQUIRED_INDICATOR;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextFieldProperties.TEXT_ALL_KEYS;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextFieldProperties.TEXT_FORMATTER;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextFieldProperties.TEXT_INPUT_TYPE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextFieldProperties.TEXT_SUGGESTIONS;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextInputType.ALPHA_NUMERIC_INPUT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextInputType.PERSON_NAME_INPUT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextInputType.PHONE_NUMBER_INPUT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextInputType.PLAIN_TEXT_INPUT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextInputType.REGION_INPUT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.TextInputType.STREET_ADDRESS_INPUT;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.VISIBLE;
+import static org.chromium.chrome.browser.autofill.editors.EditorProperties.isFormValid;
+
 import android.app.ProgressDialog;
-import android.os.Handler;
 import android.text.TextUtils;
-import android.util.Pair;
 
 import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.autofill.AddressValidationType;
+import org.chromium.chrome.browser.autofill.AutofillAddress;
+import org.chromium.chrome.browser.autofill.AutofillProfileBridge;
+import org.chromium.chrome.browser.autofill.AutofillProfileBridge.AddressField;
+import org.chromium.chrome.browser.autofill.AutofillProfileBridge.AddressUiComponent;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.GetSubKeysRequestDelegate;
 import org.chromium.chrome.browser.autofill.PhoneNumberUtil;
-import org.chromium.chrome.browser.autofill.prefeditor.EditorBase;
-import org.chromium.chrome.browser.autofill.prefeditor.EditorModel;
-import org.chromium.chrome.browser.autofill.settings.AddressValidationType;
-import org.chromium.chrome.browser.autofill.settings.AutofillProfileBridge;
-import org.chromium.chrome.browser.autofill.settings.AutofillProfileBridge.AddressField;
-import org.chromium.chrome.browser.autofill.settings.AutofillProfileBridge.AddressUiComponent;
-import org.chromium.components.autofill.prefeditor.EditorFieldModel;
-import org.chromium.components.autofill.prefeditor.EditorFieldModel.EditorFieldValidator;
+import org.chromium.chrome.browser.autofill.editors.EditorBase;
+import org.chromium.chrome.browser.autofill.editors.EditorDialogViewBinder;
+import org.chromium.chrome.browser.autofill.editors.EditorProperties.EditorFieldValidator;
+import org.chromium.chrome.browser.autofill.editors.EditorProperties.FieldItem;
+import org.chromium.chrome.browser.autofill.editors.EditorProperties.ItemType;
 import org.chromium.payments.mojom.AddressErrors;
+import org.chromium.ui.modelutil.ListModel;
+import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -44,25 +81,29 @@ import java.util.UUID;
 @Deprecated
 public class AddressEditor
         extends EditorBase<AutofillAddress> implements GetSubKeysRequestDelegate {
-    private final Handler mHandler = new Handler();
-    private final Map<Integer, EditorFieldModel> mAddressFields = new HashMap<>();
-    private final Set<CharSequence> mPhoneNumbers = new HashSet<>();
+    private final Map<Integer, PropertyModel> mAddressFields = new HashMap<>();
+    private final Set<String> mPhoneNumbers = new HashSet<>();
     private final boolean mSaveToDisk;
     private final PhoneNumberUtil.CountryAwareFormatTextWatcher mPhoneFormatter;
     private final CountryAwarePhoneNumberValidator mPhoneValidator;
     @Nullable
     private AutofillProfileBridge mAutofillProfileBridge;
     @Nullable
-    private EditorFieldModel mCountryField;
+    private PropertyModel mCountryField;
     @Nullable
-    private EditorFieldModel mPhoneField;
+    private PropertyModel mPhoneField;
+    @Nullable
+    private PropertyModel mAdminAreaField;
+    private @ItemType int mAdminAreaFieldType;
     @Nullable
     private List<AddressUiComponent> mAddressUiComponents;
     private boolean mAdminAreasLoaded;
     private String mRecentlySelectedCountry;
-    private Runnable mCountryChangeCallback;
+    private Callback<AutofillAddress> mDoneCallback;
+    private Callback<AutofillAddress> mCancelCallback;
+    private boolean mAddressNew;
+    private AutofillAddress mAddress;
     private AutofillProfile mProfile;
-    private EditorModel mEditor;
     private ProgressDialog mProgressDialog;
     @Nullable
     private AddressErrors mAddressErrors;
@@ -85,8 +126,8 @@ public class AddressEditor
      *
      * @param phoneNumber The phone number to possibly add.
      */
-    public void addPhoneNumberIfValid(@Nullable CharSequence phoneNumber) {
-        if (!TextUtils.isEmpty(phoneNumber)) mPhoneNumbers.add(phoneNumber.toString());
+    public void addPhoneNumberIfValid(@Nullable String phoneNumber) {
+        if (!TextUtils.isEmpty(phoneNumber)) mPhoneNumbers.add(phoneNumber);
     }
 
     /**
@@ -150,23 +191,23 @@ public class AddressEditor
             final Callback<AutofillAddress> doneCallback,
             final Callback<AutofillAddress> cancelCallback) {
         super.edit(toEdit, doneCallback, cancelCallback);
-
         if (mAutofillProfileBridge == null) mAutofillProfileBridge = new AutofillProfileBridge();
+        mDoneCallback = doneCallback;
+        mCancelCallback = cancelCallback;
 
         // If |toEdit| is null, we're creating a new autofill profile with the country code of the
         // default locale on this device.
         final String editTitle;
-        final AutofillAddress address;
-        if (toEdit == null) {
-            address = new AutofillAddress(mContext, new AutofillProfile());
+        mAddressNew = toEdit == null;
+        if (mAddressNew) {
+            mAddress = new AutofillAddress(mContext, AutofillProfile.builder().build());
             editTitle = mContext.getString(R.string.autofill_create_profile);
         } else {
-            address = toEdit;
+            mAddress = toEdit;
             editTitle = toEdit.getEditTitle();
         }
 
-        mEditor = new EditorModel(editTitle);
-        mProfile = address.getProfile();
+        mProfile = mAddress.getProfile();
 
         // When edit is called, a new form is started, so the country on the
         // dropdown list is not changed. => mRecentlySelectedCountry should be null.
@@ -174,105 +215,159 @@ public class AddressEditor
 
         // The country dropdown is always present on the editor.
         if (mCountryField == null) {
-            mCountryField = EditorFieldModel.createDropdown(
-                    mContext.getString(R.string.autofill_profile_editor_country),
-                    AutofillProfileBridge.getSupportedCountries(),
-                    null /* hint */);
+            mCountryField =
+                    new PropertyModel.Builder(DROPDOWN_ALL_KEYS)
+                            .with(LABEL,
+                                    mContext.getString(R.string.autofill_profile_editor_country))
+                            .with(DROPDOWN_KEY_VALUE_LIST,
+                                    AutofillProfileBridge.getSupportedCountries())
+                            .build();
         }
 
-        // Changing the country will update which fields are in the model. The actual fields are not
-        // discarded, so their contents are preserved.
-        mCountryField.setDropdownCallback(new Callback<Pair<String, Runnable>>() {
+        mCountryField.set(DROPDOWN_CALLBACK, new Callback<String>() {
             /**
-             * If the selected country on the country dropdown list is changed,
-             * the first element of eventData is the recently selected dropdown key,
-             * the second element is the callback to invoke for when the dropdown
-             * change has been processed.
+             * Load admin areas for the selected country.
              */
             @Override
-            public void onResult(Pair<String, Runnable> eventData) {
-                mEditor.removeAllFields();
+            public void onResult(String countryCode) {
                 showProgressDialog();
-                mRecentlySelectedCountry = eventData.first;
+                mRecentlySelectedCountry = countryCode;
                 mPhoneFormatter.setCountryCode(mRecentlySelectedCountry);
                 mPhoneValidator.setCountryCode(mRecentlySelectedCountry);
-                mCountryChangeCallback = eventData.second;
                 loadAdminAreasForCountry(mRecentlySelectedCountry);
             }
         });
 
         // Country dropdown is cached, so the selected item needs to be updated for the new profile
         // that's being edited. This will not fire the dropdown callback.
-        mCountryField.setValue(AutofillAddress.getCountryCode(mProfile));
+        mCountryField.set(VALUE, AutofillAddress.getCountryCode(mProfile));
 
         // Phone number validator and formatter are cached, so their contry code needs to be updated
         // for the new profile that's being edited.
-        assert mCountryField.getValue() != null;
-        mPhoneValidator.setCountryCode(mCountryField.getValue().toString());
-        mPhoneFormatter.setCountryCode(mCountryField.getValue().toString());
+        final String countryValue = mCountryField.get(VALUE);
+        assert countryValue != null;
+        mPhoneValidator.setCountryCode(countryValue);
+        mPhoneFormatter.setCountryCode(countryValue);
 
         // There's a finite number of fields for address editing. Changing the country will re-order
         // and relabel the fields. The meaning of each field remains the same.
         if (mAddressFields.isEmpty()) {
             // City, dependent locality, and organization don't have any special formatting hints.
-            mAddressFields.put(AddressField.LOCALITY, EditorFieldModel.createTextInput());
-            mAddressFields.put(AddressField.DEPENDENT_LOCALITY, EditorFieldModel.createTextInput());
-            mAddressFields.put(AddressField.ORGANIZATION, EditorFieldModel.createTextInput());
+            mAddressFields.put(AddressField.LOCALITY,
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, PLAIN_TEXT_INPUT)
+                            .build());
+            mAddressFields.put(AddressField.DEPENDENT_LOCALITY,
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, PLAIN_TEXT_INPUT)
+                            .build());
+            mAddressFields.put(AddressField.ORGANIZATION,
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, PLAIN_TEXT_INPUT)
+                            .build());
 
             // Sorting code and postal code (a.k.a. ZIP code) should show both letters and digits on
             // the keyboard, if possible.
-            mAddressFields.put(AddressField.SORTING_CODE, EditorFieldModel.createTextInput(
-                    EditorFieldModel.INPUT_TYPE_HINT_ALPHA_NUMERIC));
-            mAddressFields.put(AddressField.POSTAL_CODE, EditorFieldModel.createTextInput(
-                    EditorFieldModel.INPUT_TYPE_HINT_ALPHA_NUMERIC));
+            mAddressFields.put(AddressField.SORTING_CODE,
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, ALPHA_NUMERIC_INPUT)
+                            .build());
+            mAddressFields.put(AddressField.POSTAL_CODE,
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, ALPHA_NUMERIC_INPUT)
+                            .build());
 
             // Street line field can contain \n to indicate line breaks.
-            mAddressFields.put(AddressField.STREET_ADDRESS, EditorFieldModel.createTextInput(
-                    EditorFieldModel.INPUT_TYPE_HINT_STREET_LINES));
+            mAddressFields.put(AddressField.STREET_ADDRESS,
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, STREET_ADDRESS_INPUT)
+                            .build());
 
             // Android has special formatting rules for names.
-            mAddressFields.put(AddressField.RECIPIENT, EditorFieldModel.createTextInput(
-                    EditorFieldModel.INPUT_TYPE_HINT_PERSON_NAME));
+            mAddressFields.put(AddressField.RECIPIENT,
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, PERSON_NAME_INPUT)
+                            .build());
         }
 
         // Phone number is present for all countries.
         if (mPhoneField == null) {
             String requiredErrorMessage =
                     mContext.getString(R.string.pref_edit_dialog_field_required_validation_message);
-            mPhoneField = EditorFieldModel.createTextInput(EditorFieldModel.INPUT_TYPE_HINT_PHONE,
-                    mContext.getString(R.string.autofill_profile_editor_phone_number),
-                    mPhoneNumbers, mPhoneFormatter, mPhoneValidator, null /* valueIconGenerator */,
-                    requiredErrorMessage,
-                    mContext.getString(R.string.payments_phone_invalid_validation_message),
-                    EditorFieldModel.LENGTH_COUNTER_LIMIT_NONE, null /* value */);
+            mPhoneField =
+                    new PropertyModel.Builder(TEXT_ALL_KEYS)
+                            .with(TEXT_INPUT_TYPE, PHONE_NUMBER_INPUT)
+                            .with(LABEL,
+                                    mContext.getString(
+                                            R.string.autofill_profile_editor_phone_number))
+                            .with(TEXT_SUGGESTIONS, new ArrayList<>(mPhoneNumbers))
+                            .with(TEXT_FORMATTER, mPhoneFormatter)
+                            .with(VALIDATOR, mPhoneValidator)
+                            .with(IS_REQUIRED, true)
+                            .with(REQUIRED_ERROR_MESSAGE, requiredErrorMessage)
+                            .with(INVALID_ERROR_MESSAGE,
+                                    mContext.getString(
+                                            R.string.payments_phone_invalid_validation_message))
+                            .build();
         }
 
         // Phone number field is cached, so its value needs to be updated for every new profile
         // that's being edited.
-        mPhoneField.setValue(mProfile.getPhoneNumber());
+        mPhoneField.set(VALUE, mProfile.getPhoneNumber());
 
-        // If the user clicks [Cancel], send |toEdit| address back to the caller, which was the
-        // original state (could be null, a complete address, a partial address).
-        mEditor.setCancelCallback(() -> {
-            // This makes sure that onSubKeysReceived returns early if it's
-            // ever called when Cancel has already occurred.
-            mAdminAreasLoaded = true;
-            PersonalDataManager.getInstance().cancelPendingGetSubKeys();
-            cancelCallback.onResult(toEdit);
-        });
+        mEditorModel = new PropertyModel.Builder(ALL_KEYS)
+                               .with(EDITOR_TITLE, editTitle)
+                               .with(SHOW_REQUIRED_INDICATOR, true)
+                               .with(EDITOR_FIELDS, new ListModel())
+                               .with(DONE_RUNNABLE, this::onDone)
+                               .with(CANCEL_RUNNABLE, this::onCancel)
+                               .with(FORM_VALID, true)
+                               .build();
+        mEditorMCP = PropertyModelChangeProcessor.create(
+                mEditorModel, mEditorDialog, EditorDialogViewBinder::bindEditorDialogView);
 
-        // If the user clicks [Done], save changes on disk, mark the address "complete" if possible,
-        // and send it back to the caller.
-        mEditor.setDoneCallback(() -> {
-            mAdminAreasLoaded = true;
-            PersonalDataManager.getInstance().cancelPendingGetSubKeys();
-            commitChanges(mProfile);
-            address.completeAddress(mProfile);
-            doneCallback.onResult(address);
-        });
+        loadAdminAreasForCountry(mCountryField.get(VALUE));
+        mEditorModel.set(FORM_VALID, mAddressErrors == null || isFormValid(mEditorModel));
+    }
 
-        loadAdminAreasForCountry(mCountryField.getValue().toString());
-        if (mAddressErrors != null) mEditorDialog.validateForm();
+    private void onDone() {
+        if (!isFormValid(mEditorModel)) {
+            // Note: triggering editor error messages and focused field update using temporary
+            // property.
+            // TODO(crbug.com/1435314): remove this temporary logic.
+            mEditorModel.set(FORM_VALID, true);
+            mEditorModel.set(FORM_VALID, false);
+            return;
+        }
+        mEditorModel.set(VISIBLE, false);
+
+        // This makes sure that onSubKeysReceived returns early if it's
+        // ever called when Done has already occurred.
+        mAdminAreasLoaded = true;
+        PersonalDataManager.getInstance().cancelPendingGetSubKeys();
+
+        // Commit changes to the address and send modified address to the caller.
+        commitChanges(mProfile);
+        mAddress.completeAddress(mProfile);
+        mDoneCallback.onResult(mAddress);
+
+        // Clean up the state of this editor.
+        reset();
+    }
+
+    private void onCancel() {
+        mEditorModel.set(VISIBLE, false);
+
+        // This makes sure that onSubKeysReceived returns early if it's
+        // ever called when Cancel has already occurred.
+        mAdminAreasLoaded = true;
+        PersonalDataManager.getInstance().cancelPendingGetSubKeys();
+
+        // Send unchanged address to the caller.
+        mCancelCallback.onResult(mAddressNew ? null : mAddress);
+
+        // Clean up the state of this editor.
+        reset();
     }
 
     private void showProgressDialog() {
@@ -292,8 +387,8 @@ public class AddressEditor
     private void commitChanges(AutofillProfile profile) {
         // Country code and phone number are always required and are always collected from the
         // editor model.
-        profile.setCountryCode(mCountryField.getValue().toString());
-        profile.setPhoneNumber(mPhoneField.getValue().toString());
+        profile.setCountryCode(mCountryField.get(VALUE));
+        profile.setPhoneNumber(mPhoneField.get(VALUE));
 
         // Autofill profile bridge normalizes the language code for the autofill profile.
         profile.setLanguageCode(mAutofillProfileBridge.getCurrentBestLanguageCode());
@@ -303,14 +398,17 @@ public class AddressEditor
         for (int i = 0; i < mAddressUiComponents.size(); i++) {
             AddressUiComponent component = mAddressUiComponents.get(i);
             visibleFields.add(component.id);
+            PropertyModel fieldModel = component.id == AddressField.ADMIN_AREA
+                    ? mAdminAreaField
+                    : mAddressFields.get(component.id);
             if (component.id != AddressField.COUNTRY) {
-                setProfileField(profile, component.id, mAddressFields.get(component.id).getValue());
+                setProfileField(profile, component.id, fieldModel.get(VALUE));
             }
         }
 
         // Clear the fields that are hidden from the user interface, so
         // AutofillAddress.toPaymentAddress() will send them to the renderer as empty strings.
-        for (Map.Entry<Integer, EditorFieldModel> entry : mAddressFields.entrySet()) {
+        for (Map.Entry<Integer, PropertyModel> entry : mAddressFields.entrySet()) {
             if (!visibleFields.contains(entry.getKey())) {
                 setProfileField(profile, entry.getKey(), "");
             }
@@ -334,7 +432,7 @@ public class AddressEditor
 
     /** Writes the given value into the specified autofill profile field. */
     private static void setProfileField(
-            AutofillProfile profile, int field, @Nullable CharSequence value) {
+            AutofillProfile profile, int field, @Nullable String value) {
         assert profile != null;
         switch (field) {
             case AddressField.COUNTRY:
@@ -369,16 +467,18 @@ public class AddressEditor
         assert false;
     }
 
-    private static String ensureNotNull(@Nullable CharSequence value) {
-        return value == null ? "" : value.toString();
+    private static String ensureNotNull(@Nullable String value) {
+        return value == null ? "" : value;
     }
 
     private void setAddressFieldValuesFromCache() {
         // Address fields are cached, so their values need to be updated for every new profile
         // that's being edited.
-        for (Map.Entry<Integer, EditorFieldModel> entry : mAddressFields.entrySet()) {
-            entry.getValue().setValue(AutofillAddress.getProfileField(mProfile, entry.getKey()));
+        for (Map.Entry<Integer, PropertyModel> entry : mAddressFields.entrySet()) {
+            entry.getValue().set(VALUE, AutofillAddress.getProfileField(mProfile, entry.getKey()));
         }
+        mAdminAreaField.set(
+                VALUE, AutofillAddress.getProfileField(mProfile, AddressField.ADMIN_AREA));
     }
 
     @Override
@@ -391,17 +491,7 @@ public class AddressEditor
         // subkeys.
         if (mEditorDialog.isDismissed()) return;
 
-        // When there is a timeout in the subkey request process, the admin area codes/names will be
-        // null.
-        mAddressFields.put(AddressField.ADMIN_AREA,
-                (adminAreaCodes != null && adminAreaNames != null && adminAreaCodes.length != 0
-                        && adminAreaCodes.length == adminAreaNames.length)
-                        ? EditorFieldModel.createDropdown(null /* label */,
-                                  AutofillProfileBridge.getAdminAreaDropdownList(
-                                          adminAreaCodes, adminAreaNames),
-                                  mContext.getString(R.string.select))
-                        : EditorFieldModel.createTextInput(
-                                  EditorFieldModel.INPUT_TYPE_HINT_REGION));
+        initializeAdminAreaField(adminAreaCodes, adminAreaNames);
 
         // Admin areas need to be fetched in two cases:
         // 1. Initial loading of the form.
@@ -415,25 +505,33 @@ public class AddressEditor
             // start with a person's full name or a with a prefecture name, depending on whether the
             // language code is "ja-Latn" or "ja".
             addAddressFieldsToEditor(mRecentlySelectedCountry, Locale.getDefault().getLanguage());
-            // Notify EditorDialog that the fields in the model have changed. EditorDialog should
-            // re-read the model and update the UI accordingly.
-            mHandler.post(mCountryChangeCallback);
         } else {
             // This should be called when all required fields are put in mAddressField.
             setAddressFieldValuesFromCache();
-            addAddressFieldsToEditor(
-                    mCountryField.getValue().toString(), mProfile.getLanguageCode());
-            mEditorDialog.show(mEditor);
+            addAddressFieldsToEditor(mCountryField.get(VALUE), mProfile.getLanguageCode());
+            mEditorModel.set(VISIBLE, true);
         }
     }
 
-    private static boolean contains(String[] haystack, String needle) {
-        if (haystack == null || haystack.length == 0) return false;
-        if (TextUtils.isEmpty(needle)) return true;
-        for (int i = 0; i < haystack.length; ++i) {
-            if (TextUtils.equals(haystack[i], needle)) return true;
+    private void initializeAdminAreaField(
+            @Nullable String[] adminAreaCodes, @Nullable String[] adminAreaNames) {
+        // When there is a timeout in the subkey request process, the admin area codes/names will be
+        // null.
+        if (adminAreaCodes == null || adminAreaNames == null || adminAreaCodes.length == 0
+                || adminAreaCodes.length != adminAreaNames.length) {
+            mAdminAreaField = new PropertyModel.Builder(TEXT_ALL_KEYS)
+                                      .with(TEXT_INPUT_TYPE, REGION_INPUT)
+                                      .build();
+            mAdminAreaFieldType = TEXT_INPUT;
+            return;
         }
-        return false;
+        mAdminAreaField = new PropertyModel.Builder(DROPDOWN_ALL_KEYS)
+                                  .with(DROPDOWN_KEY_VALUE_LIST,
+                                          AutofillProfileBridge.getAdminAreaDropdownList(
+                                                  adminAreaCodes, adminAreaNames))
+                                  .with(DROPDOWN_HINT, mContext.getString(R.string.select))
+                                  .build();
+        mAdminAreaFieldType = DROPDOWN;
     }
 
     /** Requests the list of admin areas. */
@@ -460,36 +558,47 @@ public class AddressEditor
      * the profile that's being edited.
      */
     private void addAddressFieldsToEditor(String countryCode, String languageCode) {
+        ListModel<FieldItem> editorFields = new ListModel<>();
         mAddressUiComponents = mAutofillProfileBridge.getAddressUiComponents(
                 countryCode, languageCode, AddressValidationType.PAYMENT_REQUEST);
         // In terms of order, country must be the first field.
-        mCountryField.setCustomErrorMessage(getAddressError(AddressField.COUNTRY));
-        mEditor.addField(mCountryField);
+        mCountryField.set(CUSTOM_ERROR_MESSAGE, getAddressError(AddressField.COUNTRY));
+        editorFields.add(new FieldItem(DROPDOWN, mCountryField, /*isFullLine=*/true));
         for (int i = 0; i < mAddressUiComponents.size(); i++) {
             AddressUiComponent component = mAddressUiComponents.get(i);
 
-            EditorFieldModel field = mAddressFields.get(component.id);
+            final PropertyModel field;
+            final @ItemType int fieldType;
+            if (component.id == AddressField.ADMIN_AREA) {
+                field = mAdminAreaField;
+                fieldType = mAdminAreaFieldType;
+            } else {
+                field = mAddressFields.get(component.id);
+                fieldType = TEXT_INPUT;
+            }
 
             // Labels depend on country, e.g., state is called province in some countries. These are
             // already localized.
-            field.setLabel(component.label);
-            field.setIsFullLine(component.isFullLine || component.id == AddressField.LOCALITY
-                    || component.id == AddressField.DEPENDENT_LOCALITY);
+            field.set(LABEL, component.label);
 
             // Libaddressinput formats do not always require the full name (RECIPIENT), but
             // PaymentRequest does.
-            field.setRequiredErrorMessage(
-                    component.isRequired || component.id == AddressField.RECIPIENT
-                            ? mContext.getString(
-                                    R.string.pref_edit_dialog_field_required_validation_message)
-                            : null);
+            if (component.isRequired || component.id == AddressField.RECIPIENT) {
+                field.set(IS_REQUIRED, true);
+                field.set(REQUIRED_ERROR_MESSAGE,
+                        mContext.getString(
+                                R.string.pref_edit_dialog_field_required_validation_message));
+            }
 
-            field.setCustomErrorMessage(getAddressError(component.id));
-            mEditor.addField(field);
+            field.set(CUSTOM_ERROR_MESSAGE, getAddressError(component.id));
+            boolean isFullLine = component.isFullLine || component.id == AddressField.LOCALITY
+                    || component.id == AddressField.DEPENDENT_LOCALITY;
+            editorFields.add(new FieldItem(fieldType, field, isFullLine));
         }
         // Phone number (and email if applicable) are the last fields of the address.
-        mPhoneField.setCustomErrorMessage(mAddressErrors != null ? mAddressErrors.phone : null);
-        mEditor.addField(mPhoneField);
+        mPhoneField.set(CUSTOM_ERROR_MESSAGE, mAddressErrors != null ? mAddressErrors.phone : null);
+        editorFields.add(new FieldItem(TEXT_INPUT, mPhoneField, /*isFullLine=*/true));
+        mEditorModel.set(EDITOR_FIELDS, editorFields);
     }
 
     /** Country based phone number validator. */
@@ -512,18 +621,13 @@ public class AddressEditor
         }
 
         @Override
-        public boolean isValid(@Nullable CharSequence value) {
+        public boolean isValid(@Nullable String value) {
             // TODO(gogerald): Warn users when the phone number is a possible number but may be
             // invalid, crbug.com/736387.
             // Note that isPossibleNumber is used since the metadata in libphonenumber has to be
             // updated frequently (daily) to do more strict validation.
             return !TextUtils.isEmpty(value)
-                    && PhoneNumberUtil.isPossibleNumber(value.toString(), mCountryCode);
-        }
-
-        @Override
-        public boolean isLengthMaximum(@Nullable CharSequence value) {
-            return false;
+                    && PhoneNumberUtil.isPossibleNumber(value, mCountryCode);
         }
     }
 }

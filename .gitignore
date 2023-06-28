@@ -200,6 +200,7 @@ vs-chromium-project.txt
 /chromeos/assistant/internal
 /chromeos/components/help_app_ui/resources/app
 /chromeos/components/help_app_ui/resources/prod
+/chromeos/profiles/chromeos.arm.orderfile.txt
 /chromeos/profiles/chromeos.orderfile.txt
 /chromeos/profiles/*.local.txt
 /chromeos/profiles/*.afdo.prof
@@ -208,6 +209,7 @@ vs-chromium-project.txt
 /components/autofill/core/browser/form_parsing/internal_resources
 /components/chrome_settings_proto_generated_compile.xml
 /components/cloud_policy_proto_generated_compile.xml
+/components/crash/core/app/internal
 /components/gcm_driver.xml
 /components/history_clusters/internal
 /components/leveldb_proto_test_support.xml
@@ -244,6 +246,7 @@ vs-chromium-project.txt
 /googleurl
 /gpu/gles2_conform_test
 /infra/.recipe_deps
+/internal
 /ios/third_party/earl_grey/src
 /ios/third_party/earl_grey2/src
 /ios/third_party/edo/src

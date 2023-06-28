@@ -38,8 +38,10 @@
 #include "components/autofill/core/browser/geo/phone_number_i18n.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
 #include "components/autofill/core/browser/metrics/profile_import_metrics.h"
+#include "components/autofill/core/browser/payments/mandatory_reauth_manager.h"
 #include "components/autofill/core/browser/payments/virtual_card_enrollment_manager.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/profile_requirement_utils.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_internals/log_message.h"
@@ -402,6 +404,38 @@ size_t FormDataImporter::ExtractAddressProfiles(
   return num_complete_profiles;
 }
 
+bool FormDataImporter::LogAddressFormImportRequirementMetric(
+    const AutofillProfile& profile,
+    const std::string& predicted_country_code,
+    const std::string& app_locale,
+    LogBuffer* import_log_buffer) {
+  base::flat_set<autofill_metrics::AddressProfileImportRequirementMetric>
+      autofill_profile_requirement_results =
+          GetAutofillProfileRequirementResult(profile, predicted_country_code,
+                                              app_locale_, import_log_buffer);
+
+  for (const auto& requirement_result : autofill_profile_requirement_results) {
+    autofill_metrics::LogAddressFormImportRequirementMetric(requirement_result);
+  }
+
+  autofill_metrics::LogAddressFormImportCountrySpecificFieldRequirementsMetric(
+      autofill_profile_requirement_results.contains(
+          AddressImportRequirement::kZipRequirementViolated),
+      autofill_profile_requirement_results.contains(
+          AddressImportRequirement::kStateRequirementViolated),
+      autofill_profile_requirement_results.contains(
+          AddressImportRequirement::kCityRequirementViolated),
+      autofill_profile_requirement_results.contains(
+          AddressImportRequirement::kLine1RequirementViolated));
+
+  return !base::ranges::any_of(
+      kMinimumAddressRequirementViolations,
+      [&](AddressImportRequirement address_requirement_violation) {
+        return autofill_profile_requirement_results.contains(
+            address_requirement_violation);
+      });
+}
+
 bool FormDataImporter::ExtractAddressProfileFromSection(
     base::span<const AutofillField* const> section_fields,
     const GURL& source_url,
@@ -452,7 +486,7 @@ bool FormDataImporter::ExtractAddressProfileFromSection(
 
     // When `kAutofillImportFromAutocompleteUnrecognized` is enabled, Autofill
     // imports from fields despite an unrecognized autocomplete attribute.
-    if (field->HasPredictionDespiteUnrecognizedAutocompleteAttribute()) {
+    if (field->ShouldSuppressSuggestionsAndFillingByDefault()) {
       if (!features::kAutofillImportFromAutocompleteUnrecognized.Get()) {
         continue;
       }
@@ -597,11 +631,10 @@ bool FormDataImporter::ExtractAddressProfileFromSection(
   RemoveInaccessibleProfileValues(candidate_profile);
 
   // Do not import a profile if any of the requirements is violated.
-  // |IsMinimumAddress()| goes first to collect metrics.
-  bool all_fulfilled =
-      IsMinimumAddress(candidate_profile, predicted_country_code, app_locale_,
-                       import_log_buffer, /*collect_metrics=*/true) &&
-      !has_invalid_information;
+  bool all_fulfilled = LogAddressFormImportRequirementMetric(
+                           candidate_profile, predicted_country_code,
+                           app_locale_, import_log_buffer) &&
+                       !has_invalid_information;
 
   // Collect metrics regarding the requirements for an address profile import.
   autofill_metrics::LogAddressFormImportRequirementMetric(
@@ -699,10 +732,32 @@ bool FormDataImporter::ProcessExtractedCreditCard(
     upi_vpa_save_manager_->OfferLocalSave(*extracted_upi_id);
   }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
   // If no card was successfully extracted from the form, return.
   if (credit_card_import_type_ == CreditCardImportType::kNoCard) {
     return false;
   }
+
+  // If a flow where there was no interactive authentication was completed, we
+  // might need to initiate the re-auth opt-in flow.
+  if (auto* mandatory_reauth_manager =
+          client_->GetOrCreatePaymentsMandatoryReauthManager();
+      mandatory_reauth_manager &&
+      mandatory_reauth_manager->ShouldOfferOptin(
+          extracted_credit_card,
+          card_identifier_if_non_interactive_authentication_flow_completed_,
+          credit_card_import_type_)) {
+    card_identifier_if_non_interactive_authentication_flow_completed_.reset();
+    mandatory_reauth_manager->StartOptInFlow();
+    return true;
+  }
+
+  // If a virtual card was extracted from the form, return as we do not do
+  // anything with virtual cards beyond this point.
+  if (credit_card_import_type_ == CreditCardImportType::kVirtualCard) {
+    return false;
+  }
+
   // Do not offer upload save for google domain.
   if (net::HasGoogleHost(submitted_form.main_frame_origin().GetURL()) &&
       is_credit_card_upstream_enabled) {
@@ -802,9 +857,11 @@ absl::optional<CreditCard> FormDataImporter::ExtractCreditCard(
   if (!candidate.HasValidCardNumber())
     return absl::nullopt;
 
-  // If the imported card is a known virtual card, abort importing.
-  if (fetched_virtual_cards_.contains(candidate.LastFourDigits()))
-    return absl::nullopt;
+  // If the extracted card is a known virtual card, return the extracted card.
+  if (fetched_virtual_cards_.contains(candidate.LastFourDigits())) {
+    credit_card_import_type_ = CreditCardImportType::kVirtualCard;
+    return candidate;
+  }
 
   // Can import one valid card per form. Start by treating it as kNewCard, but
   // overwrite this type if we discover it is already a local or server card.
@@ -827,46 +884,79 @@ absl::optional<CreditCard> FormDataImporter::ExtractCreditCard(
     }
   }
 
-  // Attempt to find a matching server card. If such a server card exists,
-  // return it (rather than the extracted card) because we want the server to be
-  // the source of truth.
-  auto is_matching_server_card = [&cand = candidate](const CreditCard* card) {
-    return (card->record_type() == CreditCard::MASKED_SERVER_CARD &&
-            card->LastFourDigits() == cand.LastFourDigits()) ||
-           (card->record_type() == CreditCard::FULL_SERVER_CARD &&
-            cand.MatchingCardDetails(*card));
-  };
-  auto find_matching_server_card = [&]() {
-    const auto& server_cards = personal_data_manager_->GetServerCreditCards();
-    const auto it =
-        base::ranges::find_if(server_cards, is_matching_server_card);
-    return it != server_cards.end() ? absl::optional<CreditCard>(**it)
-                                    : absl::nullopt;
-  };
-  absl::optional<CreditCard> server_card = find_matching_server_card();
-  if (!server_card)
-    return candidate;
+  // Return `candidate` if no server card is matched but the card in the form is
+  // a valid card.
+  return TryMatchingExistingServerCard(candidate);
+}
 
-  if (candidate.expiration_month() == 0 || candidate.expiration_year() == 0)
-    return absl::nullopt;
+absl::optional<CreditCard> FormDataImporter::TryMatchingExistingServerCard(
+    const CreditCard& candidate) {
+  // Used for logging purposes later if we found a matching masked server card
+  // with the same last four digits, but different expiration date as
+  // `candidate`, and we treat it as a new card.
+  bool same_last_four_but_different_expiration_date = false;
 
-  credit_card_import_type_ = CreditCardImportType::kServerCard;
+  for (auto* server_card : personal_data_manager_->GetServerCreditCards()) {
+    if (!server_card->HasSameNumberAs(candidate)) {
+      continue;
+    }
 
-  if (candidate.expiration_month() == server_card->expiration_month() &&
-      candidate.expiration_year() == server_card->expiration_year()) {
-    AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
-        server_card->record_type() == CreditCard::FULL_SERVER_CARD
-            ? AutofillMetrics::FULL_SERVER_CARD_EXPIRATION_DATE_MATCHED
-            : AutofillMetrics::MASKED_SERVER_CARD_EXPIRATION_DATE_MATCHED);
-  } else {
-    AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
-        server_card->record_type() == CreditCard::FULL_SERVER_CARD
-            ? AutofillMetrics::FULL_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH
-            : AutofillMetrics::
-                  MASKED_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH);
+    // Cards with invalid expiration dates can be uploaded due to the existence
+    // of the expiration date fix flow, however, since a server card with same
+    // number is found, the imported card is treated as invalid card, abort
+    // importing.
+    if (!candidate.HasValidExpirationDate()) {
+      return absl::nullopt;
+    }
+
+    if (server_card->record_type() == CreditCard::FULL_SERVER_CARD) {
+      AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
+          server_card->HasSameExpirationDateAs(candidate)
+              ? AutofillMetrics::FULL_SERVER_CARD_EXPIRATION_DATE_MATCHED
+              : AutofillMetrics::
+                    FULL_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH);
+      // Return that we found a full server card with a matching card number
+      // to `candidate`.
+      credit_card_import_type_ = CreditCardImportType::kServerCard;
+      return *server_card;
+    }
+
+    bool has_same_expiration_date =
+        server_card->HasSameExpirationDateAs(candidate);
+    if (!base::FeatureList::IsEnabled(
+            features::kAutofillOfferToSaveCardWithSameLastFour) ||
+        has_same_expiration_date) {
+      AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
+          has_same_expiration_date
+              ? AutofillMetrics::MASKED_SERVER_CARD_EXPIRATION_DATE_MATCHED
+              : AutofillMetrics::
+                    MASKED_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH);
+
+      // Return that we found a masked server card with matching last four
+      // digits.
+      credit_card_import_type_ = CreditCardImportType::kServerCard;
+      return *server_card;
+    } else {
+      // Keep track of the fact that we found a server card with matching
+      // last four digits as `candidate`, but with a different expiration
+      // date. If we do not end up finding a masked server card with
+      // matching last four digits and the same expiration date as
+      // `candidate`, we will later use
+      // `same_last_four_but_different_expiration_date` for logging
+      // purposes.
+      same_last_four_but_different_expiration_date = true;
+    }
   }
 
-  return server_card;
+  // The only case that this is true is that we found a masked server card has
+  // the same number as `candidate`, but with different expiration dates. Thus
+  // we want to log this information once.
+  if (same_last_four_but_different_expiration_date) {
+    AutofillMetrics::LogSubmittedServerCardExpirationStatusMetric(
+        AutofillMetrics::MASKED_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH);
+  }
+
+  return candidate;
 }
 
 absl::optional<IBAN> FormDataImporter::ExtractIBAN(const FormStructure& form) {
@@ -1020,6 +1110,21 @@ void FormDataImporter::OnBrowsingHistoryCleared(
     const history::DeletionInfo& deletion_info) {
   multistep_importer_.OnBrowsingHistoryCleared(deletion_info);
   form_associator_.OnBrowsingHistoryCleared(deletion_info);
+}
+
+void FormDataImporter::
+    SetCardIdentifierIfNonInteractiveAuthenticationFlowCompleted(
+        absl::optional<absl::variant<CardGuid, CardLastFourDigits>>
+            card_identifier_if_non_interactive_authentication_flow_completed) {
+  card_identifier_if_non_interactive_authentication_flow_completed_ = std::move(
+      card_identifier_if_non_interactive_authentication_flow_completed);
+}
+
+const absl::optional<absl::variant<FormDataImporter::CardGuid,
+                                   FormDataImporter::CardLastFourDigits>>&
+FormDataImporter::GetCardIdentifierIfNonInteractiveAuthenticationFlowCompleted()
+    const {
+  return card_identifier_if_non_interactive_authentication_flow_completed_;
 }
 
 }  // namespace autofill

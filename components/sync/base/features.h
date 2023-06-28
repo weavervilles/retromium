@@ -10,11 +10,6 @@
 
 namespace syncer {
 
-// If enabled, EntitySpecifics will be cached in EntityMetadata in order to
-// prevent data loss caused by older clients dealing with unknown proto fields
-// (introduced later).
-BASE_DECLARE_FEATURE(kCacheBaseEntitySpecificsInMetadata);
-
 // Customizes the delay of a deferred sync startup.
 BASE_DECLARE_FEATURE(kDeferredSyncStartupCustomDelay);
 inline constexpr base::FeatureParam<int>
@@ -51,6 +46,10 @@ inline constexpr base::FeatureParam<base::TimeDelta> kPasswordNotesAuthValidity{
     &kPasswordNotesWithBackup, "authentication_validity_duration",
     base::Minutes(5)};
 
+// Controls whether to enable bootstrapping Public-private keys in Nigori
+// key-bag.
+BASE_DECLARE_FEATURE(kSharingOfferKeyPairBootstrap);
+
 #if BUILDFLAG(IS_ANDROID)
 BASE_DECLARE_FEATURE(kSyncAndroidLimitNTPPromoImpressions);
 inline constexpr base::FeatureParam<int> kSyncAndroidNTPPromoMaxImpressions{
@@ -60,12 +59,6 @@ inline constexpr base::FeatureParam<int> kSyncAndroidNTPPromoMaxImpressions{
 
 // Controls whether to enable syncing of Autofill Wallet Usage Data.
 BASE_DECLARE_FEATURE(kSyncAutofillWalletUsageData);
-
-// Causes the sync engine to count a quota for commits of data types that can
-// be committed by extension JS API. If the quota is depleted, an extra long
-// nudge delay is applied to that data type. As a result, more changes are
-// likely to get combined into one commit message.
-BASE_DECLARE_FEATURE(kSyncExtensionTypesThrottling);
 
 // If enabled, Segmentation data type will be synced.
 BASE_DECLARE_FEATURE(kSyncSegmentationDataType);
@@ -85,24 +78,6 @@ BASE_DECLARE_FEATURE(kSyncChromeOSAppsToggleSharing);
 BASE_DECLARE_FEATURE(kChromeOSSyncedSessionSharing);
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-// Whether the periodic degraded recoverability polling is enabled.
-BASE_DECLARE_FEATURE(kSyncTrustedVaultPeriodicDegradedRecoverabilityPolling);
-inline constexpr base::FeatureParam<base::TimeDelta>
-    kSyncTrustedVaultLongPeriodDegradedRecoverabilityPolling{
-        &kSyncTrustedVaultPeriodicDegradedRecoverabilityPolling,
-        "kSyncTrustedVaultLongPeriodDegradedRecoverabilityPolling",
-        base::Days(7)};
-inline constexpr base::FeatureParam<base::TimeDelta>
-    kSyncTrustedVaultShortPeriodDegradedRecoverabilityPolling{
-        &kSyncTrustedVaultPeriodicDegradedRecoverabilityPolling,
-        "kSyncTrustedVaultShortPeriodDegradedRecoverabilityPolling",
-        base::Hours(1)};
-
-// Enables logging a UMA metric that requires first communicating with the
-// trusted vault server, in order to verify that the local notion of the device
-// being registered is consistent with the server-side state.
-BASE_DECLARE_FEATURE(kSyncTrustedVaultVerifyDeviceRegistration);
-
 // If enabled, the device will register with FCM and listen to new
 // invalidations. Also, FCM token will be set in DeviceInfo, which signals to
 // the server that device listens to new invalidations.
@@ -116,13 +91,6 @@ BASE_DECLARE_FEATURE(kUseSyncInvalidations);
 // TODO(crbug/1365292): Add more information about this feature after
 // upload/download invalidations support from ModelTypeState msg will be added.
 BASE_DECLARE_FEATURE(kSyncPersistInvalidations);
-
-// If enabled, types related to Wallet and Offer will be included in interested
-// data types, and the device will listen to new invalidations for those types
-// (if they are enabled).
-// The device will not register for old invalidations at all.
-// UseSyncInvalidations must be enabled for this to take effect.
-BASE_DECLARE_FEATURE(kUseSyncInvalidationsForWalletAndOffer);
 
 // When enabled, optimization flags (single client and a list of FCM
 // registration tokens) will be disabled if during the current sync cycle
@@ -179,6 +147,7 @@ BASE_DECLARE_FEATURE(kEnablePreferencesAccountStorage);
 // is enabled. If the feature is on, the new approach is used, which leans on
 // the state reported by IdentityManager. If false, the legacy approach is used,
 // which is based on preference prefs::kSyncRequested.
+// TODO(crbug.com/1219990): Remove this.
 BASE_DECLARE_FEATURE(kSyncIgnoreSyncRequestedPreference);
 #endif  // BUILDFLAG(!IS_CHROMEOS_ASH)
 
@@ -205,6 +174,24 @@ BASE_DECLARE_FEATURE(kSyncWebauthnCredentials);
 // If enabled, ignore GetUpdates retry delay command from the server.
 BASE_DECLARE_FEATURE(kSyncIgnoreGetUpdatesRetryDelay);
 
+// If enabled, uses a JsonPrefStore for account preferences.
+BASE_DECLARE_FEATURE(kSyncEnablePersistentStorageForAccountPreferences);
+
+// Wrapper flag to control the nudge delay of the #tab-groups-save feature.
+BASE_DECLARE_FEATURE(kTabGroupsSaveNudgeDelay);
+
+// If provided, changes the amount of time before we send messages to the sync
+// service.
+inline constexpr base::FeatureParam<base::TimeDelta>
+    kTabGroupsSaveCustomNudgeDelay(&kTabGroupsSaveNudgeDelay,
+                                   "TabGroupsSaveCustomNudgeDelay",
+                                   base::Seconds(11));
+
+// Feature flag to replace all sync-related UI with sign-in ones.
+BASE_DECLARE_FEATURE(kReplaceSyncPromosWithSignInPromos);
+
+// Flag to stop call to reconfiguration of datatypes if it's already stopping.
+BASE_DECLARE_FEATURE(kSyncAvoidReconfigurationIfAlreadyStopping);
 }  // namespace syncer
 
 #endif  // COMPONENTS_SYNC_BASE_FEATURES_H_

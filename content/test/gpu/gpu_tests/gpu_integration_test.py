@@ -6,7 +6,11 @@
 
 import collections
 import fnmatch
+import importlib
+import inspect
+import pkgutil
 import logging
+import os
 import re
 import sys
 import types
@@ -18,6 +22,8 @@ from telemetry.testing import serially_executed_browser_test_case
 from telemetry.util import minidump_utils
 from telemetry.util import screenshot
 from typ import json_results
+
+import gpu_path_util
 
 from gpu_tests import common_browser_args as cba
 from gpu_tests import common_typing as ct
@@ -49,6 +55,7 @@ TestTuple = Tuple[str, ct.GeneratedTest]
 TestTupleGenerator = Generator[TestTuple, None, None]
 
 
+# pylint: disable=too-many-public-methods
 class GpuIntegrationTest(
     serially_executed_browser_test_case.SeriallyExecutedBrowserTestCase):
 
@@ -56,6 +63,7 @@ class GpuIntegrationTest(
   _also_run_disabled_tests = False
   _disable_log_uploads = False
   _extra_intel_device_id_with_overlays = None
+  _skip_post_test_cleanup_and_debug_info = False
 
   # Several of the tests in this directory need to be able to relaunch
   # the browser on demand with a new set of command line arguments
@@ -101,6 +109,12 @@ class GpuIntegrationTest(
       artifacts = acw.FullLoggingArtifactImpl()
     super().set_artifacts(artifacts)
 
+  def ShouldPerformMinidumpCleanupOnSetUp(self) -> bool:
+    return not self._skip_post_test_cleanup_and_debug_info
+
+  def ShouldPerformMinidumpCleanupOnTearDown(self) -> bool:
+    return not self._skip_post_test_cleanup_and_debug_info
+
   def CanRunInParallel(self) -> bool:
     """Returns whether a particular test instance can be run in parallel."""
     if not self._SuiteSupportsParallelTests():
@@ -111,7 +125,8 @@ class GpuIntegrationTest(
         return False
     return name not in self._GetSerialTests()
 
-  def _SuiteSupportsParallelTests(self) -> bool:  # pylint: disable=no-self-use
+  @classmethod
+  def _SuiteSupportsParallelTests(cls) -> bool:
     """Returns whether the suite in general supports parallel tests."""
     return False
 
@@ -135,6 +150,8 @@ class GpuIntegrationTest(
 
     This should be called once in SetUpProcess and once in GenerateGpuTests.
     """
+    cls._skip_post_test_cleanup_and_debug_info =\
+        options.skip_post_test_cleanup_and_debug_info
 
   @classmethod
   def SetUpProcess(cls) -> None:
@@ -157,6 +174,14 @@ class GpuIntegrationTest(
     parser.add_option('--extra-intel-device-id-with-overlays',
                       dest='extra_intel_device_id_with_overlays',
                       help='The extra Intel device id with overlays')
+    parser.add_option('--skip-post-test-cleanup-and-debug-info',
+                      action='store_true',
+                      help=('Disables the automatic cleanup of minidumps after '
+                            'each test and prevents collection of debug '
+                            'information such as screenshots when a test '
+                            'fails. This can can speed up local testing at the '
+                            'cost of providing less actionable data when a '
+                            'test does fail.'))
 
   @classmethod
   def GenerateBrowserArgs(cls, additional_args: List[str]) -> List[str]:
@@ -177,6 +202,14 @@ class GpuIntegrationTest(
     default_args = [
         '--disable-metal-test-shaders',
     ]
+    if cls._SuiteSupportsParallelTests():
+      # When running tests in parallel, windows can be treated as occluded if a
+      # newly opened window fully covers a previous one, which can cause issues
+      # in a few tests. This is practically only an issue on Windows since
+      # Linux/Mac stagger new windows, but pass in on all platforms since it
+      # could technically be hit on any platform.
+      default_args.append('--disable-backgrounding-occluded-windows')
+
     return default_args + additional_args
 
   @classmethod
@@ -366,6 +399,11 @@ class GpuIntegrationTest(
       try:
         super(GpuIntegrationTest, cls).StartBrowser()
         cls.tab = cls.browser.tabs[0]
+        # The GPU tests don't function correctly if the screen is not on, so
+        # ensure that this is the case. We do this on browser start instead of
+        # before every test since the overhead can be non-trivial, particularly
+        # when running many small tests like for WebGPU.
+        cls._EnsureScreenOn()
         return
       except Exception as e:  # pylint: disable=broad-except
         last_exception = e
@@ -428,6 +466,13 @@ class GpuIntegrationTest(
       cls.SetBrowserOptions(cls._finder_options)
       cls.StartBrowser()
 
+  @classmethod
+  def _EnsureScreenOn(cls) -> None:
+    """Ensures the screen is on for applicable platforms."""
+    os_name = cls.browser.platform.GetOSName()
+    if os_name == 'android':
+      cls.browser.platform.android_action_runner.TurnScreenOn()
+
   # pylint: disable=no-self-use
   def _ShouldForceRetryOnFailureFirstTest(self) -> bool:
     return False
@@ -476,24 +521,18 @@ class GpuIntegrationTest(
 
   # pylint: enable=no-self-use
 
-  def _EnsureScreenOn(self) -> None:
-    """Ensures the screen is on for applicable platforms."""
-    os_name = self.browser.platform.GetOSName()
-    if os_name == 'android':
-      self.browser.platform.android_action_runner.TurnScreenOn()
-
   def _RunGpuTest(self, url: str, test_name: str, args: ct.TestArgs) -> None:
-    expected_results, should_retry_on_failure = (
-        self.GetExpectationsForTest()[:2])
-    should_retry_on_failure = (
-        should_retry_on_failure
-        or self._DetermineFirstTestRetryWorkaround(test_name))
+    def _GetExpectedResultsAndShouldRetry():
+      expected_results, should_retry_on_failure = (
+          self.GetExpectationsForTest()[:2])
+      should_retry_on_failure = (
+          should_retry_on_failure
+          or self._DetermineFirstTestRetryWorkaround(test_name))
+      return expected_results, should_retry_on_failure
+
     expected_crashes = {}
     try:
       expected_crashes = self.GetExpectedCrashes(args)
-      # The GPU tests don't function correctly if the screen is not on, so
-      # ensure that this is the case.
-      self._EnsureScreenOn()
       self.RunActualGpuTest(url, args)
     except unittest.SkipTest:
       # pylint: disable=attribute-defined-outside-init
@@ -501,6 +540,12 @@ class GpuIntegrationTest(
       # pylint: enable=attribute-defined-outside-init
       raise
     except Exception as e:
+      # We get these values here instead of at the beginning of the function
+      # because it's possible that RunActualGpuTest() will restart the browser
+      # with new browser args, causing any expectation-related data from before
+      # then to become invalid due to different typ tags.
+      (expected_results,
+       should_retry_on_failure) = _GetExpectedResultsAndShouldRetry()
       if not should_retry_on_failure and self._DetermineRetryWorkaround(e):
         should_retry_on_failure = True
         # Notify typ that it should retry this test.
@@ -514,6 +559,8 @@ class GpuIntegrationTest(
         self._HandleUnexpectedFailure(test_name)
       raise
     else:
+      (expected_results,
+       should_retry_on_failure) = _GetExpectedResultsAndShouldRetry()
       self._HandlePass(test_name, expected_crashes, expected_results)
 
   def _HandleExpectedFailureOrFlake(self, test_name: str,
@@ -532,7 +579,7 @@ class GpuIntegrationTest(
       # tracking retries if possible.
       self._flaky_test_tries[test_name] += 1
       if self._flaky_test_tries[test_name] == _MAX_TEST_TRIES:
-        if self.browser is not None:
+        if self._ShouldCollectDebugInfo():
           self.browser.CollectDebugData(logging.ERROR)
       # For robustness, shut down the browser and restart it
       # between flaky test failures, to make sure any state
@@ -556,13 +603,17 @@ class GpuIntegrationTest(
     # expectations, and since minidump symbolization is slow
     # (upwards of one minute on a fast laptop), symbolizing all the
     # stacks could slow down the tests' running time unacceptably.
-    # We also don't do this if the browser failed to startup.
-    if self.browser is not None:
+    if self._ShouldCollectDebugInfo():
       self.browser.CollectDebugData(logging.ERROR)
     # This failure might have been caused by a browser or renderer
     # crash, so restart the browser to make sure any state doesn't
     # propagate to the next test iteration.
     self._RestartBrowser('unexpected test failure')
+
+  def _ShouldCollectDebugInfo(self) -> bool:
+    # We need a browser in order to collect debug info.
+    return (self.browser is not None
+            and not self._skip_post_test_cleanup_and_debug_info)
 
   def _HandlePass(self, test_name: str, expected_crashes: Dict[str, int],
                   expected_results: Set[str]) -> None:
@@ -941,6 +992,15 @@ class GpuIntegrationTest(
         'unknown-gpu-',
     ]
 
+  @classmethod
+  def GetExpectationsFilesRepoPath(cls) -> str:
+    """Gets the path to the repo that the expectation files live in.
+
+    In most cases, this will be Chromium src/, but it's possible that an
+    expectation file lives in a third party repo.
+    """
+    return gpu_path_util.CHROMIUM_SRC_DIR
+
 
 def _ConsolidateBrowserArgs(browser_args: List[str]):
   """Consolidates browser args that require it to work properly.
@@ -981,6 +1041,35 @@ def _ConsolidateBrowserArgs(browser_args: List[str]):
   for k, v in found_args.items():
     consolidated_args.append('%s=%s' % (k, ','.join(v)))
   return consolidated_args
+
+
+def GenerateTestNameMapping() -> Dict[str, Type[GpuIntegrationTest]]:
+  """Generates a mapping from suite name to class of all GPU integration tests.
+
+  Returns:
+    A dict mapping a suite's human-readable name to the class that implements
+    it.
+  """
+  mapping = {}
+  for p in pkgutil.iter_modules(
+      [os.path.join(gpu_path_util.GPU_DIR, 'gpu_tests')]):
+    if p.ispkg:
+      continue
+    module_name = 'gpu_tests.' + p.name
+    try:
+      module = importlib.import_module(module_name)
+    except ImportError:
+      logging.warning(
+          'Unable to import module %s. This is likely due to stale .pyc files '
+          'existing on disk.', module_name)
+      continue
+    for name, obj in inspect.getmembers(module):
+      # Look for cases of GpuIntegrationTest that have Name() overridden. The
+      # name check filters out base classes.
+      if (inspect.isclass(obj) and issubclass(obj, GpuIntegrationTest)
+          and obj.Name() != name):
+        mapping[obj.Name()] = obj
+  return mapping
 
 
 def LoadAllTestsInModule(module: types.ModuleType) -> unittest.TestSuite:

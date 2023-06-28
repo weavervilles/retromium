@@ -43,6 +43,7 @@
 #include "chrome/browser/ui/views/user_education/browser_feature_promo_controller.h"
 #include "chrome/common/buildflags.h"
 #include "components/infobars/core/infobar_container.h"
+#include "components/segmentation_platform/public/result.h"
 #include "components/user_education/common/feature_promo_controller.h"
 #include "components/user_education/common/feature_promo_handle.h"
 #include "components/webapps/browser/banners/app_banner_manager.h"
@@ -77,7 +78,6 @@ class FullscreenControlHost;
 class InfoBarContainerView;
 class LocationBarView;
 class SidePanel;
-class SidePanelCoordinator;
 class StatusBubbleViews;
 class TabSearchBubbleHost;
 class TabStrip;
@@ -165,12 +165,6 @@ class BrowserView : public BrowserWindow,
 
   void SetDownloadShelfForTest(DownloadShelf* download_shelf);
 
-  // Initializes (or re-initializes) the status bubble.  We try to only create
-  // the bubble once and re-use it for the life of the browser, but certain
-  // events (such as changing enabling/disabling Aero on Win) can force a need
-  // to change some of the bubble's creation parameters.
-  void InitStatusBubble();
-
   // Returns the constraining bounding box that should be used to lay out the
   // FindBar within. This is _not_ the size of the find bar, just the bounding
   // box it should be laid out within. The coordinate system of the returned
@@ -192,6 +186,7 @@ class BrowserView : public BrowserWindow,
 
 #if BUILDFLAG(IS_MAC)
   views::Widget* overlay_widget() { return overlay_widget_.get(); }
+  views::View* overlay_view() { return overlay_view_.get(); }
   views::Widget* tab_overlay_widget() { return tab_overlay_widget_.get(); }
   views::View* tab_overlay_view() { return tab_overlay_view_.get(); }
 
@@ -213,10 +208,6 @@ class BrowserView : public BrowserWindow,
   views::View* contents_container() { return contents_container_; }
 
   SidePanel* unified_side_panel() { return unified_side_panel_; }
-
-  SidePanelCoordinator* side_panel_coordinator() {
-    return side_panel_coordinator_.get();
-  }
 
   void set_contents_border_widget(views::Widget* contents_border_widget) {
     GetBrowserViewLayout()->set_contents_border_widget(contents_border_widget);
@@ -403,6 +394,9 @@ class BrowserView : public BrowserWindow,
   // Returns true when an app's effective display mode is borderless.
   bool AppUsesBorderlessMode() const;
 
+  // Returns whether any of the features enabling draggable regions is enabled.
+  bool AreDraggableRegionsEnabled() const;
+
   // Returns true when the window controls overlay should be displayed instead
   // of a full titlebar. This is only supported for desktop web apps.
   bool IsWindowControlsOverlayEnabled() const;
@@ -410,6 +404,9 @@ class BrowserView : public BrowserWindow,
   // Enable or disable the window controls overlay and notify the browser frame
   // view of the update.
   void ToggleWindowControlsOverlayEnabled(base::OnceClosure done);
+
+  bool WidgetOwnedByAnchorContainsPoint(
+      const gfx::Point& point_in_browser_view_coords);
 
   bool borderless_mode_enabled_for_testing() const {
     return borderless_mode_enabled_;
@@ -464,7 +461,6 @@ class BrowserView : public BrowserWindow,
                           int index,
                           int reason) override;
   void OnTabDetached(content::WebContents* contents, bool was_active) override;
-  void OnTabRestored(int command_id) override;
   void ZoomChangedForActiveTab(bool can_show_bubble) override;
   gfx::Rect GetRestoredBounds() const override;
   ui::WindowShowState GetRestoredState() const override;
@@ -520,9 +516,7 @@ class BrowserView : public BrowserWindow,
   bool IsToolbarShowing() const override;
   bool IsLocationBarVisible() const override;
   bool IsBorderlessModeEnabled() const override;
-  void ShowSidePanel(
-      absl::optional<SidePanelEntryId> entry_id,
-      absl::optional<SidePanelOpenTrigger> open_trigger) override;
+  void ShowChromeLabs() override;
 
   SharingDialog* ShowSharingDialog(content::WebContents* contents,
                                    SharingDialogData data) override;
@@ -538,6 +532,9 @@ class BrowserView : public BrowserWindow,
   sharing_hub::ScreenshotCapturedBubble* ShowScreenshotCapturedBubble(
       content::WebContents* contents,
       const gfx::Image& image) override;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  void VerifyUserEligibilityIOSPasswordPromoBubble() override;
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
   qrcode_generator::QRCodeGeneratorBubbleView* ShowQRCodeGeneratorBubble(
       content::WebContents* contents,
       const GURL& url,
@@ -614,18 +611,22 @@ class BrowserView : public BrowserWindow,
   bool IsFeaturePromoActive(const base::Feature& iph_feature) const override;
   bool MaybeShowFeaturePromo(
       const base::Feature& iph_feature,
-      user_education::FeaturePromoSpecification::StringReplacements
-          body_text_replacements = {},
       user_education::FeaturePromoController::BubbleCloseCallback
-          close_callback = base::DoNothing()) override;
+          close_callback = base::DoNothing(),
+      user_education::FeaturePromoSpecification::FormatParameters body_params =
+          user_education::FeaturePromoSpecification::NoSubstitution(),
+      user_education::FeaturePromoSpecification::FormatParameters title_params =
+          user_education::FeaturePromoSpecification::NoSubstitution()) override;
   bool MaybeShowStartupFeaturePromo(
       const base::Feature& iph_feature,
-      user_education::FeaturePromoSpecification::StringReplacements
-          body_text_replacements = {},
       user_education::FeaturePromoController::StartupPromoCallback
           promo_callback = base::DoNothing(),
       user_education::FeaturePromoController::BubbleCloseCallback
-          close_callback = base::DoNothing()) override;
+          close_callback = base::DoNothing(),
+      user_education::FeaturePromoSpecification::FormatParameters body_params =
+          user_education::FeaturePromoSpecification::NoSubstitution(),
+      user_education::FeaturePromoSpecification::FormatParameters title_params =
+          user_education::FeaturePromoSpecification::NoSubstitution()) override;
   bool CloseFeaturePromo(const base::Feature& iph_feature) override;
   user_education::FeaturePromoHandle CloseFeaturePromoAndContinue(
       const base::Feature& iph_feature) override;
@@ -828,6 +829,16 @@ class BrowserView : public BrowserWindow,
   // |contents| can be null.
   bool MaybeShowInfoBar(content::WebContents* contents);
 
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // Decides whether to show the iOS Password Promo Bubble based on segmentation
+  // platform classification results (is passed as a callback to the
+  // segmentation API).
+  void MaybeShowIOSPasswordPromoBubble(
+      const segmentation_platform::ClassificationResult& result);
+  // Shows the iOS Password Promo Bubble.
+  void ShowIOSPasswordPromoBubble();
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+
   // Updates devtools window for given contents. This method will show docked
   // devtools window for inspected |web_contents| that has docked devtools
   // and hide it for null or not inspected |web_contents|. It will also make
@@ -993,7 +1004,7 @@ class BrowserView : public BrowserWindow,
   // The view that manages the tab strip, toolbar, and sometimes the bookmark
   // bar. Stacked top in the view hiearachy so it can be used to slide out
   // the top views in immersive fullscreen.
-  raw_ptr<TopContainerView, DanglingUntriaged> top_container_ = nullptr;
+  raw_ptr<TopContainerView, DanglingAcrossTasks> top_container_ = nullptr;
 
   // Menu button and page status icons. Only used by web-app windows.
   raw_ptr<WebAppFrameToolbarView, DanglingUntriaged> web_app_frame_toolbar_ =
@@ -1006,11 +1017,11 @@ class BrowserView : public BrowserWindow,
   raw_ptr<views::Label, DanglingUntriaged> web_app_window_title_ = nullptr;
 
   // The view that contains the tabstrip, new tab button, and grab handle space.
-  raw_ptr<TabStripRegionView, DanglingUntriaged> tab_strip_region_view_ =
+  raw_ptr<TabStripRegionView, DanglingAcrossTasks> tab_strip_region_view_ =
       nullptr;
 
   // The TabStrip.
-  raw_ptr<TabStrip, DanglingUntriaged> tabstrip_ = nullptr;
+  raw_ptr<TabStrip, DanglingAcrossTasks> tabstrip_ = nullptr;
 
   // the webui based tabstrip, when applicable. see https://crbug.com/989131.
   raw_ptr<WebUITabStripContainerView, DanglingUntriaged> webui_tab_strip_ =
@@ -1024,7 +1035,7 @@ class BrowserView : public BrowserWindow,
   std::unique_ptr<AccessibilityModeObserver> accessibility_mode_observer_;
 
   // The Toolbar containing the navigation buttons, menus and the address bar.
-  raw_ptr<ToolbarView, DanglingUntriaged> toolbar_ = nullptr;
+  raw_ptr<ToolbarView, DanglingAcrossTasks> toolbar_ = nullptr;
 
   // The OverlayView for the widget, which is used to host `top_container_`
   // during immersive reveal.
@@ -1059,7 +1070,7 @@ class BrowserView : public BrowserWindow,
   std::unique_ptr<BookmarkBarView> bookmark_bar_view_;
 
   // Separator between top container and contents.
-  raw_ptr<views::View, DanglingUntriaged> contents_separator_ = nullptr;
+  raw_ptr<views::View, DanglingAcrossTasks> contents_separator_ = nullptr;
 
   // Loading bar (part of top container for / WebUI tab strip).
   raw_ptr<TopContainerLoadingBar, DanglingUntriaged> loading_bar_ = nullptr;
@@ -1067,39 +1078,38 @@ class BrowserView : public BrowserWindow,
   // The do-nothing view which controls the z-order of the find bar widget
   // relative to views which paint into layers and views with an associated
   // NativeView.
-  raw_ptr<View, DanglingUntriaged> find_bar_host_view_ = nullptr;
+  raw_ptr<View, DanglingAcrossTasks> find_bar_host_view_ = nullptr;
 
   // The download shelf.
   raw_ptr<DownloadShelf, DanglingUntriaged> download_shelf_ = nullptr;
 
   // The InfoBarContainerView that contains InfoBars for the current tab.
-  raw_ptr<InfoBarContainerView, DanglingUntriaged> infobar_container_ = nullptr;
+  raw_ptr<InfoBarContainerView, DanglingAcrossTasks> infobar_container_ =
+      nullptr;
 
   // The view that contains the selected WebContents.
-  raw_ptr<ContentsWebView, DanglingUntriaged> contents_web_view_ = nullptr;
+  raw_ptr<ContentsWebView, DanglingAcrossTasks> contents_web_view_ = nullptr;
 
   // The view that contains devtools window for the selected WebContents.
-  raw_ptr<views::WebView, DanglingUntriaged> devtools_web_view_ = nullptr;
+  raw_ptr<views::WebView, DanglingAcrossTasks> devtools_web_view_ = nullptr;
 
   // The view managing the devtools and contents positions.
   // Handled by ContentsLayoutManager.
-  raw_ptr<views::View, DanglingUntriaged> contents_container_ = nullptr;
+  raw_ptr<views::View, DanglingAcrossTasks> contents_container_ = nullptr;
 
   // The side panel aligned to the left or the right side of the browser window
   // depending on the kSidePanelHorizontalAlignment pref's value.
-  raw_ptr<SidePanel, DanglingUntriaged> unified_side_panel_ = nullptr;
-  raw_ptr<views::View, DanglingUntriaged> right_aligned_side_panel_separator_ =
-      nullptr;
+  raw_ptr<SidePanel, DanglingAcrossTasks> unified_side_panel_ = nullptr;
+  raw_ptr<views::View, DanglingAcrossTasks>
+      right_aligned_side_panel_separator_ = nullptr;
 
   // The side search side panel.
-  raw_ptr<views::View, DanglingUntriaged> left_aligned_side_panel_separator_ =
+  raw_ptr<views::View, DanglingAcrossTasks> left_aligned_side_panel_separator_ =
       nullptr;
-
-  std::unique_ptr<SidePanelCoordinator> side_panel_coordinator_;
 
   // Provides access to the toolbar buttons this browser view uses. Buttons may
   // appear in a hosted app frame or in a tabbed UI toolbar.
-  raw_ptr<ToolbarButtonProvider, DanglingUntriaged> toolbar_button_provider_ =
+  raw_ptr<ToolbarButtonProvider, DanglingAcrossTasks> toolbar_button_provider_ =
       nullptr;
 
   // The handler responsible for showing autofill bubbles.

@@ -32,7 +32,10 @@ source_set("common") {
   ]
 
   if (is_chromeos_ash) {
-    deps += [ "//components/user_manager" ]
+    deps += [
+      "//components/account_id",
+      "//components/user_manager",
+    ]
   }
 
   if (is_chromeos_lacros) {

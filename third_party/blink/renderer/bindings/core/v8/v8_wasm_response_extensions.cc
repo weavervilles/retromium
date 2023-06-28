@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_wasm_response_extensions.h"
 
+#include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
@@ -205,7 +206,9 @@ class FetchDataLoaderForWasmStreaming final : public FetchDataLoader,
   void OnStateChange() override {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
                  "v8.wasm.compileConsume");
-    while (true) {
+    // Continue reading until we either finished, aborted, or no data is
+    // available any more (handled below).
+    while (streaming_) {
       // |buffer| is owned by |consumer_|.
       const char* buffer = nullptr;
       size_t available = 0;
@@ -215,7 +218,7 @@ class FetchDataLoaderForWasmStreaming final : public FetchDataLoader,
         return;
       if (result == BytesConsumer::Result::kOk) {
         // Ignore more bytes after an abort (streaming == nullptr).
-        if (available > 0 && streaming_) {
+        if (available > 0) {
           if (code_cache_state_ == CodeCacheState::kBeforeFirstByte)
             code_cache_state_ = MaybeConsumeCodeCache();
 
@@ -238,10 +241,6 @@ class FetchDataLoaderForWasmStreaming final : public FetchDataLoader,
         case BytesConsumer::Result::kOk:
           break;
         case BytesConsumer::Result::kDone: {
-          // Ignore this event if we already aborted.
-          if (!streaming_) {
-            return;
-          }
           TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
                        "v8.wasm.compileConsumeDone");
           {
@@ -252,9 +251,25 @@ class FetchDataLoaderForWasmStreaming final : public FetchDataLoader,
           streaming_.reset();
           return;
         }
-        case BytesConsumer::Result::kError: {
-          return AbortCompilation();
-        }
+        case BytesConsumer::Result::kError:
+          switch (consumer_->GetPublicState()) {
+            case BytesConsumer::PublicState::kClosed:
+              AbortCompilation("Download cancelled");
+              break;
+            case BytesConsumer::PublicState::kErrored:
+              // Store the debug name of the BytesConsumer to debug
+              // https://crbug.com/1449546.
+              // TODO(clemensb): Remove this after resolving the issue.
+              static crash_reporter::CrashKeyString<128> detail_key(
+                  "v8-wasm-bytes-consumer-debug-name");
+              detail_key.Set(consumer_->DebugName().Utf8().c_str());
+              AbortCompilation("Network error: " +
+                               consumer_->GetError().Message());
+              break;
+            default:
+              NOTREACHED();
+          }
+          break;
       }
     }
   }
@@ -263,7 +278,7 @@ class FetchDataLoaderForWasmStreaming final : public FetchDataLoader,
 
   void Cancel() override {
     consumer_->Cancel();
-    return AbortCompilation();
+    return AbortCompilation("Cancellation requested");
   }
 
   void Trace(Visitor* visitor) const override {
@@ -303,7 +318,7 @@ class FetchDataLoaderForWasmStreaming final : public FetchDataLoader,
  private:
   // TODO(ahaas): replace with spec-ed error types, once spec clarifies
   // what they are.
-  void AbortCompilation() {
+  void AbortCompilation(String reason) {
     // Ignore a repeated abort request, or abort after successfully finishing.
     if (!streaming_) {
       return;
@@ -311,7 +326,8 @@ class FetchDataLoaderForWasmStreaming final : public FetchDataLoader,
     if (script_state_->ContextIsValid()) {
       ScriptState::Scope scope(script_state_);
       streaming_->Abort(V8ThrowException::CreateTypeError(
-          script_state_->GetIsolate(), "Could not download wasm module"));
+          script_state_->GetIsolate(),
+          "WebAssembly compilation aborted: " + reason));
     } else {
       // We are not allowed to execute a script, which indicates that we should
       // not reject the promise of the streaming compilation. By passing no
@@ -539,8 +555,7 @@ void StreamFromResponseCallback(
     kMaxValue = kValidOtherProtocol
   };
 
-  Response* response =
-      V8Response::ToImplWithTypeCheck(args.GetIsolate(), args[0]);
+  Response* response = V8Response::ToWrappable(args.GetIsolate(), args[0]);
   if (!response) {
     base::UmaHistogramEnumeration("V8.WasmStreamingInputType",
                                   WasmStreamingInputType::kNoResponse);

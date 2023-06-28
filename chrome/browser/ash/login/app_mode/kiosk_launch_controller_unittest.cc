@@ -6,12 +6,16 @@
 
 #include <memory>
 
+#include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
+#include "ash/public/cpp/login_accelerators.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/repeating_test_future.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/task_environment.h"
 #include "chrome/browser/ash/app_mode/fake_kiosk_app_launcher.h"
@@ -25,6 +29,7 @@
 #include "chrome/browser/ash/crosapi/force_installed_tracker_ash.h"
 #include "chrome/browser/ash/crosapi/idle_service_ash.h"
 #include "chrome/browser/ash/crosapi/test_crosapi_dependency_registry.h"
+#include "chrome/browser/ash/login/app_mode/network_ui_controller.h"
 #include "chrome/browser/ash/login/app_mode/test/kiosk_test_helpers.h"
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/ash/policy/core/device_local_account.h"
@@ -42,7 +47,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "chromeos/ash/components/install_attributes/stub_install_attributes.h"
-#include "chromeos/ash/components/standalone_browser/browser_support.h"
+#include "chromeos/ash/components/network/network_handler.h"
+#include "chromeos/ash/components/sync_wifi/network_test_helper.h"
 #include "components/account_id/account_id.h"
 #include "components/crash/core/common/crash_key.h"
 #include "components/policy/core/browser/browser_policy_connector_base.h"
@@ -69,6 +75,7 @@ const char kInvalidExtensionId[] = "invalid-extension-id";
 const char kExtensionName[] = "extension_name";
 const char kTestDomain[] = "test.com";
 const char kDeviceId[] = "123";
+const char kDefaultNetwork[] = "default-network";
 
 // URL of Chrome Web Store.
 const char kWebStoreExtensionUpdateUrl[] =
@@ -82,6 +89,42 @@ auto BuildExtension(std::string extension_name, std::string extension_id) {
       .SetID(extension_id)
       .Build();
 }
+
+class FakeNetworkMonitor : public ash::NetworkUiController::NetworkMonitor {
+ public:
+  using Observer = ash::NetworkUiController::NetworkMonitor::Observer;
+  using State = ash::NetworkUiController::NetworkMonitor::State;
+
+  FakeNetworkMonitor() = default;
+  ~FakeNetworkMonitor() override = default;
+
+  void AddObserver(Observer* observer) override { observer_ = observer; }
+
+  void RemoveObserver(Observer* observer) override { observer_ = nullptr; }
+
+  State GetState() const override {
+    return online_ ? State::ONLINE : State::OFFLINE;
+  }
+
+  std::string GetNetworkName() const override { return kDefaultNetwork; }
+
+  void SetOnline(bool online) {
+    online_ = online;
+    if (observer_) {
+      observer_->UpdateState(
+          NetworkError::ErrorReason::ERROR_REASON_NETWORK_STATE_CHANGED);
+    }
+  }
+
+  base::WeakPtr<FakeNetworkMonitor> GetWeakPtr() {
+    return weak_ptr_factory_.GetWeakPtr();
+  }
+
+ private:
+  bool online_ = false;
+  ash::NetworkUiController::NetworkMonitor::Observer* observer_;
+  base::WeakPtrFactory<FakeNetworkMonitor> weak_ptr_factory_{this};
+};
 
 }  // namespace
 
@@ -128,11 +171,14 @@ class KioskLaunchControllerTest : public extensions::ExtensionServiceTestBase {
         KioskLaunchController::DisableLoginOperationsForTesting();
 
     view_ = std::make_unique<FakeAppLaunchSplashScreenHandler>();
+    auto network_monitor_unique = std::make_unique<FakeNetworkMonitor>();
+    network_monitor_ = network_monitor_unique->GetWeakPtr();
     controller_ = std::make_unique<KioskLaunchController>(
         /*host=*/nullptr, view_.get(),
         base::BindRepeating(
             &KioskLaunchControllerTest::BuildFakeKioskAppLauncher,
-            base::Unretained(this)));
+            base::Unretained(this)),
+        std::move(network_monitor_unique));
 
     // We can't call `crash_reporter::ResetCrashKeysForTesting()` to reset crash
     // keys since it destroys the storage for static crash keys. Instead we set
@@ -189,7 +235,7 @@ class KioskLaunchControllerTest : public extensions::ExtensionServiceTestBase {
     task_environment()->FastForwardBy(kDefaultKioskSplashScreenMinTime);
   }
 
-  void SetOnline(bool online) { view_->SetNetworkReady(online); }
+  void SetOnline(bool online) { network_monitor_->SetOnline(online); }
 
   void OnNetworkConfigRequested() { controller().OnNetworkConfigRequested(); }
 
@@ -208,6 +254,8 @@ class KioskLaunchControllerTest : public extensions::ExtensionServiceTestBase {
     EXPECT_EQ(crash_reporter::GetCrashKeyValue(kKioskLaunchStateCrashKey),
               KioskLaunchStateToString(state));
   }
+
+  void CancelAppLaunch() { controller_->HandleAccelerator(kAppLaunchBailout); }
 
  private:
   void SetDeviceEnterpriseManaged() {
@@ -248,6 +296,8 @@ class KioskLaunchControllerTest : public extensions::ExtensionServiceTestBase {
   std::unique_ptr<FakeAppLaunchSplashScreenHandler> view_;
   raw_ptr<FakeKioskAppLauncher, ExperimentalAsh> app_launcher_ =
       nullptr;  // owned by `controller_`.
+  base::WeakPtr<FakeNetworkMonitor>
+      network_monitor_;  // owned by `controller_`.
   int app_launchers_created_ = 0;
   std::unique_ptr<KioskLaunchController> controller_;
   KioskAppId kiosk_app_id_;
@@ -760,8 +810,12 @@ class KioskLaunchControllerUsingLacrosTest : public testing::Test {
 
   KioskLaunchControllerUsingLacrosTest()
       : fake_user_manager_(new FakeChromeUserManager()),
-        scoped_user_manager_(base::WrapUnique(fake_user_manager_)) {
-    scoped_feature_list_.InitAndEnableFeature(features::kWebKioskEnableLacros);
+        scoped_user_manager_(base::WrapUnique(fake_user_manager_.get())) {
+    scoped_feature_list_.InitWithFeatures(
+        {::features::kWebKioskEnableLacros, ash::features::kLacrosSupport,
+         ash::features::kLacrosPrimary, ash::features::kLacrosOnly,
+         ash::features::kLacrosProfileMigrationForceOff},
+        {});
   }
 
   void SetUp() override {
@@ -786,7 +840,8 @@ class KioskLaunchControllerUsingLacrosTest : public testing::Test {
         /*host=*/nullptr, view_.get(),
         base::BindRepeating(
             &KioskLaunchControllerUsingLacrosTest::BuildFakeKioskAppLauncher,
-            base::Unretained(this)));
+            base::Unretained(this)),
+        std::make_unique<FakeNetworkMonitor>());
 
     SetUpKioskAppInAppManager();
   }
@@ -809,6 +864,7 @@ class KioskLaunchControllerUsingLacrosTest : public testing::Test {
   void RunUntilAppPrepared() {
     controller().Start(kiosk_app_id(), /*auto_launch=*/false);
     profile_controls().OnProfileLoaded(profile());
+    EXPECT_TRUE(WaitForNextAppLauncherCreation());
     launcher().observers().NotifyAppInstalling();
     launcher().observers().NotifyAppPrepared();
   }
@@ -832,6 +888,16 @@ class KioskLaunchControllerUsingLacrosTest : public testing::Test {
     return crosapi_manager_->crosapi_ash()->force_installed_tracker_ash();
   }
 
+  int num_launchers_created() { return app_launchers_created_; }
+
+  [[nodiscard]] bool WaitForNextAppLauncherCreation() {
+    while (!launcher_waiter_.IsEmpty()) {
+      launcher_waiter_.Take();
+    }
+
+    return launcher_waiter_.Wait();
+  }
+
  private:
   void SetUpKioskAppId() {
     std::string email = policy::GenerateDeviceLocalAccountUserId(
@@ -850,9 +916,10 @@ class KioskLaunchControllerUsingLacrosTest : public testing::Test {
       Profile*,
       const KioskAppId& kiosk_app_id,
       KioskAppLauncher::NetworkDelegate*) {
-    app_launchers_created_++;
     auto app_launcher = std::make_unique<FakeKioskAppLauncher>();
     app_launcher_ = app_launcher.get();
+    app_launchers_created_++;
+    launcher_waiter_.AddValue(true);
     return std::move(app_launcher);
   }
 
@@ -862,8 +929,8 @@ class KioskLaunchControllerUsingLacrosTest : public testing::Test {
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   TestingProfileManager testing_profile_manager_{
       TestingBrowserProcess::GetGlobal()};
-  Profile* profile_;
-  FakeChromeUserManager* fake_user_manager_;
+  raw_ptr<Profile, ExperimentalAsh> profile_;
+  raw_ptr<FakeChromeUserManager, ExperimentalAsh> fake_user_manager_;
   user_manager::ScopedUserManager scoped_user_manager_;
   crosapi::FakeBrowserManager browser_manager_;
 
@@ -875,26 +942,36 @@ class KioskLaunchControllerUsingLacrosTest : public testing::Test {
   std::unique_ptr<base::AutoReset<bool>>
       disable_wait_timer_and_login_operations_for_testing_;
   std::unique_ptr<FakeAppLaunchSplashScreenHandler> view_;
-  FakeKioskAppLauncher* app_launcher_ = nullptr;  // owned by `controller_`.
+  raw_ptr<FakeKioskAppLauncher, ExperimentalAsh> app_launcher_ =
+      nullptr;  // owned by `controller_`.
   int app_launchers_created_ = 0;
+  base::test::RepeatingTestFuture<bool> launcher_waiter_;
   std::unique_ptr<KioskLaunchController> controller_;
   KioskAppId kiosk_app_id_;
 
-  base::AutoReset<bool> set_lacros_enabled_ =
-      standalone_browser::BrowserSupport::SetLacrosEnabledForTest(true);
-  base::AutoReset<absl::optional<bool>> set_lacros_primary_ =
-      crosapi::browser_util::SetLacrosPrimaryBrowserForTest(true);
   base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<crosapi::CrosapiManager> crosapi_manager_;
 };
 
 TEST_F(KioskLaunchControllerUsingLacrosTest,
-       LacrosShouldBeLaunchedAfterAppPrepared) {
-  EXPECT_FALSE(fake_browser_manager().IsRunning());
+       LacrosShouldBeLaunchedAfterProfileLoaded) {
+  controller().Start(kiosk_app_id(), /*auto_launch=*/false);
 
-  RunUntilAppPrepared();
+  EXPECT_FALSE(fake_browser_manager().IsRunning());
+  profile_controls().OnProfileLoaded(profile());
 
   EXPECT_TRUE(fake_browser_manager().IsRunning());
+}
+
+TEST_F(KioskLaunchControllerUsingLacrosTest,
+       LauncherShouldGetInitializedAfterLacrosLaunched) {
+  controller().Start(kiosk_app_id(), /*auto_launch=*/false);
+
+  EXPECT_EQ(num_launchers_created(), 0);
+  profile_controls().OnProfileLoaded(profile());
+
+  EXPECT_TRUE(WaitForNextAppLauncherCreation());
+  EXPECT_TRUE(launcher().initialize_called());
 }
 
 TEST_F(KioskLaunchControllerUsingLacrosTest,

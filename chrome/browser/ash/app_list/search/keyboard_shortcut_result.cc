@@ -11,6 +11,7 @@
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
 #include "ash/shortcut_viewer/keyboard_shortcut_viewer_metadata.h"
 #include "ash/shortcut_viewer/strings/grit/shortcut_viewer_strings.h"
+#include "ash/webui/shortcut_customization_ui/backend/search/search.mojom.h"
 #include "base/i18n/rtl.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,8 +20,10 @@
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/ash/app_list/search/common/icon_constants.h"
 #include "chrome/browser/ash/app_list/search/common/search_result_util.h"
+#include "chrome/browser/ash/app_list/search/search_features.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/ash/components/string_matching/fuzzy_tokenized_string_match.h"
 #include "chromeos/ash/components/string_matching/tokenized_string.h"
 #include "chromeos/ash/components/string_matching/tokenized_string_match.h"
 #include "chromeos/ui/vector_icons/vector_icons.h"
@@ -32,6 +35,7 @@ namespace app_list {
 
 namespace {
 
+using ::ash::string_matching::FuzzyTokenizedStringMatch;
 using ::ash::string_matching::TokenizedString;
 using ::ash::string_matching::TokenizedStringMatch;
 using TextVector = ChromeSearchResult::TextVector;
@@ -39,6 +43,15 @@ using IconCode = ::ash::SearchResultTextItem::IconCode;
 using ::ui::KeyboardCode;
 
 constexpr char kKeyboardShortcutScheme[] = "keyboard_shortcut://";
+
+// Parameters for FuzzyTokenizedStringMatch.
+constexpr bool kUseWeightedRatio = false;
+
+// Flag to enable/disable diacritics stripping
+constexpr bool kStripDiacritics = true;
+
+// Flag to enable/disable acronym matcher.
+constexpr bool kUseAcronymMatcher = true;
 
 }  // namespace
 
@@ -145,6 +158,50 @@ TextVector KeyboardShortcutResult::CreateTextVectorFromTemplateString(
     }
   }
   return text_vector;
+}
+
+void KeyboardShortcutResult::PopulateTextVector(
+    TextVector* text_vector,
+    const ui::Accelerator& accelerator) {
+  CHECK(text_vector);
+
+  std::vector<KeyboardCode> key_codes;
+  // Insert keys by the order of CTRL, ALT, SHIFT, SEARCH, and then key, to be
+  // consistent with existing hardcoded shortcuts search.
+  if (accelerator.IsCtrlDown()) {
+    key_codes.push_back(KeyboardCode::VKEY_CONTROL);
+  }
+  if (accelerator.IsAltDown()) {
+    key_codes.push_back(KeyboardCode::VKEY_LMENU);
+  }
+  if (accelerator.IsShiftDown()) {
+    key_codes.push_back(KeyboardCode::VKEY_SHIFT);
+  }
+  if (accelerator.IsCmdDown()) {
+    key_codes.push_back(KeyboardCode::VKEY_COMMAND);
+  }
+  key_codes.push_back(accelerator.key_code());
+
+  int counter = 0;
+  for (auto key_code : key_codes) {
+    if (++counter > 1) {
+      // Add a + between two keys.
+      text_vector->push_back(CreateStringTextItem(u" + "));
+    }
+    const absl::optional<IconCode> icon_code =
+        GetIconCodeFromKeyboardCode(key_code);
+    if (icon_code) {
+      // The KeyboardCode has a corresponding IconCode, and therefore an
+      // icon image is supported by the front-end.
+      text_vector->push_back(CreateIconCodeTextItem(icon_code.value()));
+    } else {
+      // KeyboardCode does not have a corresponding IconCode. The
+      // key text will be styled to look like an icon ("iconified
+      // text").
+      text_vector->push_back(
+          CreateIconifiedTextTextItem(ash::GetStringForKeyboardCode(key_code)));
+    }
+  }
 }
 
 KeyboardShortcutResult::KeyboardShortcutResult(Profile* profile,
@@ -263,6 +320,63 @@ KeyboardShortcutResult::KeyboardShortcutResult(Profile* profile,
   SetKeyboardShortcutTextVector(text_vector);
 }
 
+KeyboardShortcutResult::KeyboardShortcutResult(
+    Profile* profile,
+    const ash::shortcut_customization::mojom::SearchResultPtr& search_result)
+    : profile_(profile) {
+  // TODO(xiangdongkong): implement set_id.
+  set_relevance(search_result->relevance_score);
+  SetTitle(search_result->accelerator_layout_info->description);
+  SetResultType(ResultType::kKeyboardShortcut);
+  SetMetricsType(ash::KEYBOARD_SHORTCUT);
+  SetDisplayType(DisplayType::kList);
+  SetCategory(Category::kHelp);
+  UpdateIcon();
+
+  // Set the details to the display name of the Keyboard Shortcut Viewer app.
+  std::u16string sanitized_name = base::CollapseWhitespace(
+      l10n_util::GetStringUTF16(IDS_INTERNAL_APP_KEYBOARD_SHORTCUT_VIEWER),
+      true);
+  base::i18n::SanitizeUserSuppliedString(&sanitized_name);
+  SetDetails(sanitized_name);
+
+  // TODO(xiangdongkong): generate the accessible_string.
+  std::u16string accessible_string;
+  TextVector text_vector;
+
+  int counter = 0;
+  for (auto& accelerator_info : search_result->accelerator_infos) {
+    if (++counter > 1) {
+      // TODO(xiangdongkong): localize the separator.
+      // Add a separator when there are multiple accelerators.
+      text_vector.push_back(CreateStringTextItem(u" or "));
+    }
+    if (accelerator_info->layout_properties->is_standard_accelerator()) {
+      ash::mojom::StandardAcceleratorPropertiesPtr& standard_accelerator =
+          accelerator_info->layout_properties->get_standard_accelerator();
+      PopulateTextVector(&text_vector, standard_accelerator->accelerator);
+    } else {
+      ash::mojom::TextAcceleratorPropertiesPtr& text_accelerator =
+          accelerator_info->layout_properties->get_text_accelerator();
+      // Example:
+      //  press
+      //  ctrl
+      //  shift
+      //   and click a link
+      //
+      // TODO(xiangdongkong): Generate text vector. For now, just show the
+      // shortcut text.
+      for (auto& part : text_accelerator->parts) {
+        text_vector.push_back(CreateStringTextItem(part->text));
+      }
+    }
+  }
+
+  SetAccessibleName(
+      base::StrCat({title(), u", ", details(), u", ", accessible_string}));
+  SetKeyboardShortcutTextVector(text_vector);
+}
+
 KeyboardShortcutResult::~KeyboardShortcutResult() = default;
 
 void KeyboardShortcutResult::Open(int event_flags) {
@@ -289,13 +403,20 @@ double KeyboardShortcutResult::CalculateRelevance(
     return kDefaultRelevance;
   }
 
-  TokenizedStringMatch match;
-  return match.Calculate(query_tokenized, target_tokenized);
+  if (search_features::IsLauncherFuzzyMatchAcrossProvidersEnabled()) {
+    FuzzyTokenizedStringMatch fuzzy_match;
+    return fuzzy_match.Relevance(query_tokenized, target_tokenized,
+                                 kUseWeightedRatio, kStripDiacritics,
+                                 kUseAcronymMatcher);
+  } else {
+    TokenizedStringMatch match;
+    return match.Calculate(query_tokenized, target_tokenized);
+  }
 }
 
 void KeyboardShortcutResult::UpdateIcon() {
-  gfx::ImageSkia icon = gfx::CreateVectorIcon(
-      chromeos::kKeyboardShortcutsIcon, kAppIconDimension, SK_ColorTRANSPARENT);
+  ui::ImageModel icon = ui::ImageModel::FromVectorIcon(
+      chromeos::kKeyboardShortcutsIcon, SK_ColorTRANSPARENT, kAppIconDimension);
   SetIcon(IconInfo(icon, kAppIconDimension));
 }
 

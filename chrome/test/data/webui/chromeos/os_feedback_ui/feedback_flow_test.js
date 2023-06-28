@@ -29,7 +29,7 @@ export function FeedbackFlowTestSuite() {
   let feedbackServiceProvider = null;
 
   setup(() => {
-    document.body.innerHTML = '';
+    document.body.innerHTML = trustedTypes.emptyHTML;
     // Create helpContentProvider.
     helpContentProvider = new FakeHelpContentProvider();
     // Setup search response.
@@ -425,6 +425,84 @@ export function FeedbackFlowTestSuite() {
         activePage.shadowRoot.querySelector('#bluetoothCheckboxContainer');
     assertTrue(!!bluetoothCheckbox);
     assertFalse(isVisible(bluetoothCheckbox));
+  });
+
+  // Test the link cross device dogfood feedback checkbox will not show up if
+  // not logged with an Internal google account.
+  test(
+      'LinkCrossDeviceDogfoodFeedbackHiddenWithoutInternalAccount',
+      async () => {
+        await initializePage();
+
+        // Enable flag.
+        loadTimeData.overrideValues(
+            {'enableLinkCrossDeviceDogfoodFeedbackFlag': true});
+
+        // Set input description related to cross device.
+        let activePage = page.shadowRoot.querySelector('.iron-selected');
+
+        activePage.shadowRoot.querySelector('textarea').value = 'phone';
+        activePage.shadowRoot.querySelector('#buttonContinue').click();
+        await flushTasks();
+
+        activePage = page.shadowRoot.querySelector('.iron-selected');
+        assertEquals('shareDataPage', activePage.id);
+        const linkCrossDeviceDogfoodFeedbackCheckbox =
+            activePage.shadowRoot.querySelector(
+                '#linkCrossDeviceDogfoodFeedbackCheckboxContainer');
+        assertTrue(!!linkCrossDeviceDogfoodFeedbackCheckbox);
+        assertFalse(isVisible(linkCrossDeviceDogfoodFeedbackCheckbox));
+      });
+
+  // Test the "Link Cross Device Dogfood Feedback" checkbox will only show up
+  // when 'enableLinkCrossDeviceDogfoodFeedbackFlag' is enabled.
+  test('LinkCrossDeviceDogfoodFeedbackTestingFlag', async () => {
+    testWithInternalAccount();
+    await initializePage();
+
+    // Enable flag and check that the checkbox appears.
+    loadTimeData.overrideValues(
+        {'enableLinkCrossDeviceDogfoodFeedbackFlag': true});
+
+    // Set input description related to cross device.
+    let activePage = page.shadowRoot.querySelector('.iron-selected');
+
+    activePage.shadowRoot.querySelector('textarea').value = 'phone';
+    activePage.shadowRoot.querySelector('#buttonContinue').click();
+    await flushTasks();
+
+    activePage = page.shadowRoot.querySelector('.iron-selected');
+    assertEquals('shareDataPage', activePage.id);
+    const linkCrossDeviceDogfoodFeedbackCheckbox =
+        activePage.shadowRoot.querySelector(
+            '#linkCrossDeviceDogfoodFeedbackCheckboxContainer');
+    assertTrue(!!linkCrossDeviceDogfoodFeedbackCheckbox);
+    assertTrue(isVisible(linkCrossDeviceDogfoodFeedbackCheckbox));
+
+    activePage.shadowRoot.querySelector('#buttonBack').click();
+    await flushTasks();
+
+    // Go back to search page and set description input related to cross device.
+    activePage = page.shadowRoot.querySelector('.iron-selected');
+    assertTrue(!!activePage);
+    assertEquals('searchPage', activePage.id);
+
+    const descriptionElement = activePage.shadowRoot.querySelector('textarea');
+    descriptionElement.value = 'phone';
+
+    // Disable flag and check that the checkbox doesn't appear.
+    loadTimeData.overrideValues(
+        {'enableLinkCrossDeviceDogfoodFeedbackFlag': false});
+
+    activePage.shadowRoot.querySelector('#buttonContinue').click();
+    await flushTasks();
+
+    activePage = page.shadowRoot.querySelector('.iron-selected');
+    assertTrue(!!activePage);
+    assertEquals('shareDataPage', activePage.id);
+
+    assertTrue(!!linkCrossDeviceDogfoodFeedbackCheckbox);
+    assertFalse(isVisible(linkCrossDeviceDogfoodFeedbackCheckbox));
   });
 
   // Test the assistant logs will show up if logged with internal account and
@@ -930,7 +1008,7 @@ export function FeedbackFlowTestSuite() {
         assertTrue(link.href.includes(disabledUrl));
 
         // Reset app element.
-        document.body.innerHTML = '';
+        document.body.innerHTML = trustedTypes.emptyHTML;
         page.remove();
         page = null;
 

@@ -200,6 +200,12 @@ public interface WebContents extends Parcelable {
     int getVisibility();
 
     /**
+     * Updates WebContents Visibility and notifies all the observers about Visibility change event.
+     * See native WebContents::UpdateWebContentsVisibility.
+     */
+    void updateWebContentsVisibility(@Visibility int visibility);
+
+    /**
      * @return The title for the current visible page.
      */
     String getTitle();
@@ -437,6 +443,12 @@ public interface WebContents extends Parcelable {
      * @param stylusWritingHandler the object that implements StylusWritingHandler interface.
      */
     void setStylusWritingHandler(StylusWritingHandler stylusWritingHandler);
+
+    /**
+     * @return {@link StylusWritingImeCallback} which is used to implement the
+     * IME functionality for the Stylus handwriting feature.
+     */
+    StylusWritingImeCallback getStylusWritingImeCallback();
 
     /**
      * Returns {@link EventForwarder} which is used to forward input/view events

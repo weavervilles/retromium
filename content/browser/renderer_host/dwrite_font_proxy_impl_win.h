@@ -64,6 +64,7 @@ class CONTENT_EXPORT DWriteFontProxyImpl
                      MapCharactersCallback callback) override;
   void MatchUniqueFont(const std::u16string& unique_font_name,
                        MatchUniqueFontCallback callback) override;
+<<<<<<< HEAD
 
   void GetUniqueFontLookupMode(
       GetUniqueFontLookupModeCallback callback) override;
@@ -79,6 +80,8 @@ class CONTENT_EXPORT DWriteFontProxyImpl
       const std::string& locale_name,
       uint32_t codepoint,
       FallbackFamilyAndStyleForCodepointCallback callback) override;
+=======
+>>>>>>> 4abd918b29516f4a97125e618c490f82492b935b
 
   void InitializeDirectWrite();
 

@@ -13,8 +13,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/task/task_runner.h"
+#include "chrome/browser/enterprise/connectors/device_trust/attestation/browser/google_keys.h"
 #include "chrome/browser/enterprise/connectors/device_trust/attestation/common/attestation_service.h"
-#include "chrome/browser/enterprise/connectors/device_trust/attestation/desktop/google_keys.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace policy {
@@ -78,7 +78,7 @@ class DesktopAttestationService : public AttestationService {
   // Owned by the CBCMController, which is eventually owned by the browser
   // process. Since the current service is owned at the profile level, this
   // respects the browser shutdown sequence.
-  raw_ptr<DeviceTrustKeyManager> key_manager_;
+  raw_ptr<DeviceTrustKeyManager, DanglingUntriaged> key_manager_;
 
   // Used for retrieving a managed devices customer ID.
   const raw_ptr<policy::CloudPolicyStore> browser_cloud_policy_store_;

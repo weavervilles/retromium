@@ -4,10 +4,13 @@
 
 #include "chrome/browser/performance_manager/public/user_tuning/user_performance_tuning_manager.h"
 
+#include <utility>
+
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
+#include "base/notreached.h"
 #include "base/power_monitor/battery_state_sampler.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_observer.h"
@@ -25,9 +28,11 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/frame_rate_throttling.h"
+#include "content/public/browser/web_contents.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_features.h"
 #include "chromeos/dbus/power/power_manager_client.h"
 #endif
 
@@ -97,39 +102,49 @@ class HighEfficiencyModeDelegateImpl
     : public performance_manager::user_tuning::UserPerformanceTuningManager::
           HighEfficiencyModeDelegate {
  public:
-  void ToggleHighEfficiencyMode(bool enabled) override {
+  void ToggleHighEfficiencyMode(HighEfficiencyModeState state) override {
     performance_manager::PerformanceManager::CallOnGraph(
         FROM_HERE,
         base::BindOnce(
-            [](bool enabled, performance_manager::Graph* graph) {
-              if (base::FeatureList::IsEnabled(
-                      performance_manager::features::kHeuristicMemorySaver)) {
-                CHECK(policies::HeuristicMemorySaverPolicy::GetInstance());
-                policies::HeuristicMemorySaverPolicy::GetInstance()->SetActive(
-                    enabled);
-              } else {
-                CHECK(policies::HighEfficiencyModePolicy::GetInstance());
-                policies::HighEfficiencyModePolicy::GetInstance()
-                    ->OnHighEfficiencyModeChanged(enabled);
+            [](HighEfficiencyModeState state) {
+              auto* heuristic_memory_saver_policy =
+                  policies::HeuristicMemorySaverPolicy::GetInstance();
+              CHECK(heuristic_memory_saver_policy);
+              auto* high_efficiency_mode_policy =
+                  policies::HighEfficiencyModePolicy::GetInstance();
+              CHECK(high_efficiency_mode_policy);
+              switch (state) {
+                case HighEfficiencyModeState::kDisabled:
+                  heuristic_memory_saver_policy->SetActive(false);
+                  high_efficiency_mode_policy->OnHighEfficiencyModeChanged(
+                      false);
+                  return;
+                case HighEfficiencyModeState::kEnabled:
+                  heuristic_memory_saver_policy->SetActive(true);
+                  high_efficiency_mode_policy->OnHighEfficiencyModeChanged(
+                      false);
+                  return;
+                case HighEfficiencyModeState::kEnabledOnTimer:
+                  heuristic_memory_saver_policy->SetActive(false);
+                  high_efficiency_mode_policy->OnHighEfficiencyModeChanged(
+                      true);
+                  return;
               }
+              NOTREACHED_NORETURN();
             },
-            enabled));
+            state));
   }
 
   void SetTimeBeforeDiscard(base::TimeDelta time_before_discard) override {
     performance_manager::PerformanceManager::CallOnGraph(
-        FROM_HERE,
-        base::BindOnce(
-            [](base::TimeDelta time_before_discard,
-               performance_manager::Graph* graph) {
-              if (!base::FeatureList::IsEnabled(
-                      performance_manager::features::kHeuristicMemorySaver)) {
-                CHECK(policies::HighEfficiencyModePolicy::GetInstance());
-                policies::HighEfficiencyModePolicy::GetInstance()
-                    ->SetTimeBeforeDiscard(time_before_discard);
-              }
-            },
-            time_before_discard));
+        FROM_HERE, base::BindOnce(
+                       [](base::TimeDelta time_before_discard) {
+                         auto* policy =
+                             policies::HighEfficiencyModePolicy::GetInstance();
+                         CHECK(policy);
+                         policy->SetTimeBeforeDiscard(time_before_discard);
+                       },
+                       time_before_discard));
   }
 
   ~HighEfficiencyModeDelegateImpl() override = default;
@@ -409,11 +424,27 @@ class ChromeOSBatterySaverProvider
 
 const uint64_t UserPerformanceTuningManager::kLowBatteryThresholdPercent = 20;
 
-const char UserPerformanceTuningManager::kTimeBeforeDiscardInMinutesSwitch[] =
-    "time-before-discard-in-minutes";
-
 const char UserPerformanceTuningManager::kForceDeviceHasBatterySwitch[] =
     "force-device-has-battery";
+
+WEB_CONTENTS_USER_DATA_KEY_IMPL(
+    UserPerformanceTuningManager::ResourceUsageTabHelper);
+
+UserPerformanceTuningManager::ResourceUsageTabHelper::
+    ~ResourceUsageTabHelper() = default;
+
+void UserPerformanceTuningManager::ResourceUsageTabHelper::PrimaryPageChanged(
+    content::Page&) {
+  // Reset memory usage count when we navigate to another site since the
+  // memory usage reported will be outdated.
+  resource_usage_->set_memory_usage_in_bytes(0);
+}
+
+UserPerformanceTuningManager::ResourceUsageTabHelper::ResourceUsageTabHelper(
+    content::WebContents* contents)
+    : content::WebContentsObserver(contents),
+      content::WebContentsUserData<ResourceUsageTabHelper>(*contents),
+      resource_usage_(base::MakeRefCounted<TabResourceUsage>()) {}
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(
     UserPerformanceTuningManager::PreDiscardResourceUsage);
@@ -518,33 +549,6 @@ int UserPerformanceTuningManager::SampledBatteryPercentage() const {
              : -1;
 }
 
-// static
-void UserPerformanceTuningManager::SetDefaultTimeBeforeDiscardFromSwitch(
-    PrefService* local_state) {
-  // TODO(https://crbug.com/1424220): remove this function after multistate
-  // memory saver UI is available as the discard time pref will be configurable
-  // by the user
-  const PrefService::Preference* time_before_discard_pref =
-      local_state->FindPreference(
-          performance_manager::user_tuning::prefs::
-              kHighEfficiencyModeTimeBeforeDiscardInMinutes);
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (time_before_discard_pref->IsDefaultValue() &&
-      command_line->HasSwitch(kTimeBeforeDiscardInMinutesSwitch)) {
-    int time_before_discard_in_minutes;
-    std::string time_before_discard_in_minutes_string =
-        command_line->GetSwitchValueASCII(kTimeBeforeDiscardInMinutesSwitch);
-    if (base::StringToInt(time_before_discard_in_minutes_string,
-                          &time_before_discard_in_minutes) &&
-        time_before_discard_in_minutes > 0) {
-      local_state->SetDefaultPrefValue(
-          performance_manager::user_tuning::prefs::
-              kHighEfficiencyModeTimeBeforeDiscardInMinutes,
-          base::Value(time_before_discard_in_minutes));
-    }
-  }
-}
-
 UserPerformanceTuningManager::UserPerformanceTuningReceiverImpl::
     ~UserPerformanceTuningReceiverImpl() = default;
 
@@ -571,14 +575,31 @@ void UserPerformanceTuningManager::UserPerformanceTuningReceiverImpl::
 }
 
 void UserPerformanceTuningManager::UserPerformanceTuningReceiverImpl::
-    NotifyMemoryMetricsRefreshed() {
+    NotifyMemoryMetricsRefreshed(ProxyAndPmfKbVector proxies_and_pmf) {
   content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce([]() {
-        // Hitting this CHECK would mean this task is running after
-        // PostMainMessageLoopRun, which shouldn't happen.
-        CHECK(g_user_performance_tuning_manager);
-        GetInstance()->NotifyMemoryMetricsRefreshed();
-      }));
+      FROM_HERE,
+      base::BindOnce(
+          [](ProxyAndPmfKbVector web_contents_memory_usage) {
+            if (base::FeatureList::IsEnabled(
+                    performance_manager::features::kMemoryUsageInHovercards)) {
+              for (const auto& [contents_proxy, pmf] :
+                   web_contents_memory_usage) {
+                content::WebContents* web_contents = contents_proxy.Get();
+                if (web_contents) {
+                  ResourceUsageTabHelper* helper =
+                      ResourceUsageTabHelper::FromWebContents(web_contents);
+                  if (helper) {
+                    helper->SetMemoryUsageInBytes(pmf * 1024);
+                  }
+                }
+              }
+            }
+            // Hitting this CHECK would mean this task is running after
+            // PostMainMessageLoopRun, which shouldn't happen.
+            CHECK(g_user_performance_tuning_manager);
+            GetInstance()->NotifyMemoryMetricsRefreshed();
+          },
+          std::move(proxies_and_pmf)));
 }
 
 void UserPerformanceTuningManager::NotifyOnBatterySaverModeChanged(
@@ -636,8 +657,6 @@ UserPerformanceTuningManager::UserPerformanceTuningManager(
   performance_manager::user_tuning::prefs::MigrateHighEfficiencyModePref(
       local_state);
 
-  SetDefaultTimeBeforeDiscardFromSwitch(local_state);
-
   pref_change_registrar_.Init(local_state);
 }
 
@@ -663,7 +682,7 @@ void UserPerformanceTuningManager::Start() {
   OnHighEfficiencyModePrefChanged();
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  if (base::FeatureList::IsEnabled(features::kUseDeviceBatterySaverChromeOS)) {
+  if (ash::features::IsBatterySaverAvailable()) {
     battery_saver_provider_ =
         std::make_unique<ChromeOSBatterySaverProvider>(this);
   } else {
@@ -677,9 +696,25 @@ void UserPerformanceTuningManager::Start() {
 }
 
 void UserPerformanceTuningManager::OnHighEfficiencyModePrefChanged() {
-  high_efficiency_mode_delegate_->ToggleHighEfficiencyMode(
-      IsHighEfficiencyModeActive());
-
+  HighEfficiencyModeState state =
+      prefs::GetCurrentHighEfficiencyModeState(pref_change_registrar_.prefs());
+  if (!base::FeatureList::IsEnabled(features::kHighEfficiencyMultistateMode)) {
+    if (!IsHighEfficiencyModeManaged() &&
+        base::FeatureList::IsEnabled(features::kForceHeuristicMemorySaver)) {
+      // Set the heuristic policy for experimentation regardless of the pref.
+      state = base::FeatureList::IsEnabled(features::kHeuristicMemorySaver)
+                  ? HighEfficiencyModeState::kEnabled
+                  : HighEfficiencyModeState::kDisabled;
+    } else if (state != HighEfficiencyModeState::kDisabled) {
+      // The user has enabled high efficiency mode, but without the multistate
+      // UI they didn't choose a policy. The feature controls which policy to
+      // use.
+      state = base::FeatureList::IsEnabled(features::kHeuristicMemorySaver)
+                  ? HighEfficiencyModeState::kEnabled
+                  : HighEfficiencyModeState::kEnabledOnTimer;
+    }
+  }
+  high_efficiency_mode_delegate_->ToggleHighEfficiencyMode(state);
   for (auto& obs : observers_) {
     obs.OnHighEfficiencyModeChanged();
   }

@@ -235,12 +235,21 @@ void ConfigureUpstartJobs(std::deque<JobDesc> jobs,
 // Gets the ArcVmDataMigrationStatus profile preference.
 ArcVmDataMigrationStatus GetArcVmDataMigrationStatus(PrefService* prefs);
 
+// Gets the ArcVmDatamigrationStrategy profile preference.
+ArcVmDataMigrationStrategy GetArcVmDataMigrationStrategy(PrefService* prefs);
+
 // Sets the ArcVmDataMigrationStatus profile preference.
 void SetArcVmDataMigrationStatus(PrefService* prefs,
                                  ArcVmDataMigrationStatus status);
 
 // Returns whether ARCVM should use virtio-blk for /data.
 bool ShouldUseVirtioBlkData(PrefService* prefs);
+
+// Returns true if ARC should use KeyMint. Returns false if ARC should use
+// Keymaster. It is based on the lsb-release value. If missing lsb-release
+// value (e.g. in unit tests), it returns false. Use
+// `SetChromeOSVersionInfoForTest` to set ARC version in unit test, if needed.
+bool ShouldUseArcKeyMint();
 
 // Returns ARCVM /data migration should be done within how many days. When the
 // migration has not started, the value is calculated from the time when the
@@ -258,15 +267,17 @@ bool ArcVmDataMigrationShouldBeDismissible(int days_until_deadline);
 // ARCVM /data migration based on the size of the source (existing Android
 // /data) and free disk space.
 uint64_t GetDesiredDiskImageSizeForArcVmDataMigrationInBytes(
-    uint64_t android_data_size,
-    uint64_t free_disk_space);
+    uint64_t android_data_size_in_bytes,
+    uint64_t free_disk_space_in_bytes);
 
 // Calculates and returns how much free disk space should be there to start
-// ARCVM /data migration based on the size of existing Android /data and free
+// ARCVM /data migration based on the disk space allocated for pre-migration
+// Android /data, estimated disk space allocated for migrated /data, and free
 // disk space.
 uint64_t GetRequiredFreeDiskSpaceForArcVmDataMigrationInBytes(
-    uint64_t android_data_size,
-    uint64_t free_disk_space);
+    uint64_t android_data_size_src_in_bytes,
+    uint64_t android_data_size_dest_in_bytes,
+    uint64_t free_disk_space_in_bytes);
 
 // Returns true if ARC app permissions should be shown as read-only in the App
 // Management page.

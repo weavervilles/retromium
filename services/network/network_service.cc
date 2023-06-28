@@ -32,6 +32,7 @@
 #include "build/chromeos_buildflags.h"
 #include "components/network_session_configurator/common/network_features.h"
 #include "components/os_crypt/sync/os_crypt.h"
+#include "components/privacy_sandbox/masked_domain_list/masked_domain_list.pb.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "mojo/public/cpp/bindings/scoped_message_error_crash_key.h"
 #include "mojo/public/cpp/bindings/shared_remote.h"
@@ -71,6 +72,7 @@
 #include "services/network/net_log_exporter.h"
 #include "services/network/net_log_proxy_sink.h"
 #include "services/network/network_context.h"
+#include "services/network/network_service_proxy_allow_list.h"
 #include "services/network/public/cpp/crash_keys.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/initiator_lock_compatibility.h"
@@ -358,6 +360,11 @@ void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
 
   initialized_ = true;
 
+#if BUILDFLAG(IS_ANDROID)
+  base::UmaHistogramTimes("NetworkService.InitializedTime",
+                          base::Time::Now().since_origin());
+#endif
+
 #if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_ARMEL)
   // Make sure OpenSSL is initialized before using it to histogram data.
   crypto::EnsureOpenSSLInit();
@@ -447,6 +454,9 @@ void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
 
   first_party_sets_manager_ =
       std::make_unique<FirstPartySetsManager>(params->first_party_sets_enabled);
+
+  network_service_proxy_allow_list_ =
+      std::make_unique<NetworkServiceProxyAllowList>();
 
 #if BUILDFLAG(IS_CT_SUPPORTED)
   constexpr size_t kMaxSCTAuditingCacheEntries = 1024;
@@ -617,6 +627,15 @@ void NetworkService::SetSSLKeyLogFile(base::File file) {
 void NetworkService::CreateNetworkContext(
     mojo::PendingReceiver<mojom::NetworkContext> receiver,
     mojom::NetworkContextParamsPtr params) {
+  // If a custom proxy config is already set, the Masked Domain List proxy
+  // configs should not be used.
+  if (network_service_proxy_allow_list_->IsEnabled() &&
+      params->initial_custom_proxy_config.is_null() &&
+      !params->custom_proxy_config_client_receiver.is_valid()) {
+    params->initial_custom_proxy_config =
+        network_service_proxy_allow_list_->GetCustomProxyConfig();
+  }
+
   owned_network_contexts_.emplace(std::make_unique<NetworkContext>(
       this, std::move(receiver), std::move(params),
       base::BindOnce(&NetworkService::OnNetworkContextConnectionClosed,
@@ -748,8 +767,12 @@ void NetworkService::GetNetworkList(
                      std::move(callback)));
 }
 
-void NetworkService::OnCertDBChanged() {
-  net::CertDatabase::GetInstance()->NotifyObserversCertDBChanged();
+void NetworkService::OnTrustStoreChanged() {
+  net::CertDatabase::GetInstance()->NotifyObserversTrustStoreChanged();
+}
+
+void NetworkService::OnClientCertStoreChanged() {
+  net::CertDatabase::GetInstance()->NotifyObserversClientCertStoreChanged();
 }
 
 void NetworkService::SetEncryptionKey(const std::string& encryption_key) {
@@ -769,8 +792,11 @@ void NetworkService::OnPeerToPeerConnectionsCountChange(uint32_t count) {
 #if BUILDFLAG(IS_ANDROID)
 void NetworkService::OnApplicationStateChange(
     base::android::ApplicationState state) {
-  for (auto* network_context : network_contexts_)
-    network_context->app_status_listener()->Notify(state);
+  for (auto* network_context : network_contexts_) {
+    for (auto const& listener : network_context->app_status_listeners()) {
+      listener->Notify(state);
+    }
+  }
 }
 #endif
 
@@ -870,6 +896,15 @@ void NetworkService::UpdateKeyPinsList(mojom::PinListPtr pin_list,
     if (state) {
       state->UpdatePinList(pinsets_, host_pins_, pins_list_update_time_);
     }
+  }
+}
+
+void NetworkService::UpdateMaskedDomainList(const std::string& raw_mdl) {
+  auto mdl = masked_domain_list::MaskedDomainList();
+  if (mdl.ParseFromString(raw_mdl)) {
+    network_service_proxy_allow_list_->UseMaskedDomainList(mdl);
+  } else {
+    LOG(ERROR) << "Unable to parse MDL in NetworkService";
   }
 }
 

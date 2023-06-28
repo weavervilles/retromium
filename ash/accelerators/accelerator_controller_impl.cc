@@ -22,6 +22,7 @@
 #include "ash/ime/ime_switch_type.h"
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/multi_profile_uma.h"
+#include "ash/public/cpp/accelerator_actions.h"
 #include "ash/public/cpp/accelerator_configuration.h"
 #include "ash/public/cpp/accelerators.h"
 #include "ash/shell.h"
@@ -31,12 +32,15 @@
 #include "ash/wm/screen_pinning_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_state.h"
+#include "base/check.h"
 #include "base/containers/contains.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/strings/strcat.h"
 #include "base/system/sys_info.h"
 #include "chromeos/ash/components/audio/cras_audio_handler.h"
+#include "chromeos/ash/components/dbus/biod/fake_biod_client.h"
 #include "ui/aura/env.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accelerators/accelerator_manager.h"
@@ -44,8 +48,56 @@
 #include "ui/base/ui_base_features.h"
 #include "ui/display/manager/managed_display_info.h"
 #include "ui/events/ash/keyboard_layout_util.h"
+#include "ui/events/event_constants.h"
 
 namespace ash {
+
+/*
+The encoding schema is as the following:
+
+- The low 16 bits represent the key code.
+- The modifiers are stored in the high 16 bits. Only the following 4 bits are
+being used:
+  - The 31 bit: Command key
+  - The 30 bit: Alt key
+  - The 29 bit: Control key
+  - The 28 bit: Shift key
+
+Examples:
+  ctl+Z:        0001'0000'0000'0000'0000'0000'0101'1010
+  alt+shift+A:  0010'1000'0000'0000'0000'0000'0100'0001
+  */
+int GetEncodedShortcut(const ui::Accelerator& accelerator) {
+  // EF_SHIFT_DOWN: 28th bit.
+  const int kShiftDown = 1 << 27;
+  // EF_CONTROL_DOWN: 29th bit.
+  const int kControlDown = 1 << 28;
+  // EF_ALT_DOWN: 30th bit.
+  const int kAltDown = 1 << 29;
+  // EF_COMMAND_DOWN: 31th bit.
+  const int kCommandDown = 1 << 30;
+
+  int encoded_modifier = 0;
+  if (accelerator.IsShiftDown()) {
+    encoded_modifier |= kShiftDown;
+  }
+  if (accelerator.IsCtrlDown()) {
+    encoded_modifier |= kControlDown;
+  }
+  if (accelerator.IsAltDown()) {
+    encoded_modifier |= kAltDown;
+  }
+  if (accelerator.IsCmdDown()) {
+    encoded_modifier |= kCommandDown;
+  }
+
+  // Currently KeyboardCode only has 2^8 values. It will be a long time until we
+  // get to 2^16. But if KeyboardCode has 2^28+ values for some reason, the top
+  // 5 bits will be overwritten.
+  DCHECK((0xF800 & accelerator.key_code()) == 0);
+  return encoded_modifier | accelerator.key_code();
+}
+
 namespace {
 
 using ::base::UserMetricsAction;
@@ -84,6 +136,13 @@ void RecordUmaHistogram(const char* histogram_name,
       histogram_name, 1, DEPRECATED_USAGE_COUNT, DEPRECATED_USAGE_COUNT + 1,
       base::HistogramBase::kUmaTargetedHistogramFlag);
   histogram->Add(sample);
+}
+
+void RecordActionUmaHistogram(AcceleratorAction action,
+                              const ui::Accelerator& accelerator) {
+  base::UmaHistogramSparse(base::StrCat({"Ash.Accelerators.Actions.",
+                                         GetAcceleratorActionName(action)}),
+                           GetEncodedShortcut(accelerator));
 }
 
 void RecordImeSwitchByAccelerator() {
@@ -177,6 +236,13 @@ bool CanHandleToggleAppList(
     const ui::Accelerator& accelerator,
     const ui::Accelerator& previous_accelerator,
     const std::set<ui::KeyboardCode>& currently_pressed_keys) {
+  // Check if the accelerator pressed is a RWIN/LWIN, if so perform a
+  // secondary check.
+  if (accelerator.key_code() != ui::VKEY_LWIN &&
+      accelerator.key_code() != ui::VKEY_RWIN) {
+    return true;
+  }
+
   for (auto key : currently_pressed_keys) {
     // The AppList accelerator is triggered on search(VKEY_LWIN) key release.
     // Sometimes users will press and release the search key while holding other
@@ -645,6 +711,7 @@ bool AcceleratorControllerImpl::CanPerformAction(
     case AcceleratorAction::kDebugToggleWallpaperMode:
     case AcceleratorAction::kDebugTriggerCrash:
     case AcceleratorAction::kDebugToggleHudDisplay:
+    case AcceleratorAction::kDebugToggleVirtualTrackpad:
       return debug::DebugAcceleratorsEnabled();
     case AcceleratorAction::kDevAddRemoveDisplay:
     case AcceleratorAction::kDevToggleAppList:
@@ -677,6 +744,8 @@ bool AcceleratorControllerImpl::CanPerformAction(
       return accelerators::CanShowStylusTools();
     case AcceleratorAction::kStartAssistant:
       return true;
+    case AcceleratorAction::kStopScreenRecording:
+      return accelerators::CanStopScreenRecording();
     case AcceleratorAction::kSwapPrimaryDisplay:
       return accelerators::CanSwapPrimaryDisplay();
     case AcceleratorAction::kSwitchIme:
@@ -716,6 +785,8 @@ bool AcceleratorControllerImpl::CanPerformAction(
       return true;
     case AcceleratorAction::kToggleOverview:
       return accelerators::CanToggleOverview();
+    case AcceleratorAction::kToggleSnapGroupWindowsGroupAndUngroup:
+      return accelerators::CanGroupOrUngroupWindows();
     case AcceleratorAction::kToggleSnapGroupWindowsMinimizeAndRestore:
       return accelerators::CanMinimizeSnapGroupWindows();
     case AcceleratorAction::kToggleMultitaskMenu:
@@ -743,9 +814,6 @@ bool AcceleratorControllerImpl::CanPerformAction(
       return accelerators::CanToggleProjectorMarker();
     case AcceleratorAction::kToggleResizeLockMenu:
       return accelerators::CanToggleResizeLockMenu();
-    case AcceleratorAction::kDebugTuckFloatedWindowLeft:
-    case AcceleratorAction::kDebugTuckFloatedWindowRight:
-      return debug::CanTuckFloatedWindow();
     case AcceleratorAction::kDebugToggleVideoConferenceCameraTrayIcon:
       return true;
 
@@ -807,6 +875,10 @@ bool AcceleratorControllerImpl::CanPerformAction(
     case AcceleratorAction::kVolumeUp:
     case AcceleratorAction::kWindowMinimize:
       return true;
+    case AcceleratorAction::kTouchFingerprintSensor1:
+    case AcceleratorAction::kTouchFingerprintSensor2:
+    case AcceleratorAction::kTouchFingerprintSensor3:
+      return FakeBiodClient::Get() != nullptr;
   }
 }
 
@@ -927,6 +999,7 @@ void AcceleratorControllerImpl::PerformAction(
     case AcceleratorAction::kDebugToggleWallpaperMode:
     case AcceleratorAction::kDebugTriggerCrash:
     case AcceleratorAction::kDebugToggleHudDisplay:
+    case AcceleratorAction::kDebugToggleVirtualTrackpad:
       debug::PerformDebugActionIfEnabled(action);
       break;
     case AcceleratorAction::kDevAddRemoveDisplay:
@@ -1190,6 +1263,9 @@ void AcceleratorControllerImpl::PerformAction(
       base::RecordAction(UserMetricsAction("Accel_Swap_Primary_Display"));
       accelerators::ShiftPrimaryDisplay();
       break;
+    case AcceleratorAction::kStopScreenRecording:
+      accelerators::StopScreenRecording();
+      break;
     case AcceleratorAction::kSwitchIme:
       HandleSwitchIme(accelerator);
       break;
@@ -1248,10 +1324,6 @@ void AcceleratorControllerImpl::PerformAction(
       base::RecordAction(UserMetricsAction("Accel_Toggle_Docked_Magnifier"));
       accelerators::ToggleDockedMagnifier();
       break;
-    case AcceleratorAction::kDebugTuckFloatedWindowLeft:
-    case AcceleratorAction::kDebugTuckFloatedWindowRight:
-      debug::PerformDebugActionIfEnabled(action);
-      break;
     case AcceleratorAction::kToggleFloating:
       // UMA metrics are recorded in the function.
       accelerators::ToggleFloating();
@@ -1290,6 +1362,9 @@ void AcceleratorControllerImpl::PerformAction(
     case AcceleratorAction::kToggleOverview:
       base::RecordAction(base::UserMetricsAction("Accel_Overview_F5"));
       accelerators::ToggleOverview();
+      break;
+    case AcceleratorAction::kToggleSnapGroupWindowsGroupAndUngroup:
+      accelerators::GroupOrUngroupWindowsInSnapGroup();
       break;
     case AcceleratorAction::kToggleSnapGroupWindowsMinimizeAndRestore:
       base::RecordAction(base::UserMetricsAction(
@@ -1354,8 +1429,18 @@ void AcceleratorControllerImpl::PerformAction(
           base::UserMetricsAction("Accel_Minimize_Top_Window_On_Back"));
       accelerators::TopWindowMinimizeOnBack();
       break;
+    case kTouchFingerprintSensor1:
+      accelerators::TouchFingerprintSensor(1);
+      break;
+    case kTouchFingerprintSensor2:
+      accelerators::TouchFingerprintSensor(2);
+      break;
+    case kTouchFingerprintSensor3:
+      accelerators::TouchFingerprintSensor(3);
+      break;
   }
 
+  RecordActionUmaHistogram(action, accelerator);
   NotifyActionPerformed(action);
 
   // Reset any in progress composition.
@@ -1450,7 +1535,7 @@ AcceleratorControllerImpl::MaybeDeprecatedAcceleratorPressed(
   ShowDeprecatedAcceleratorNotification(
       deprecated_data->uma_histogram_name,
       deprecated_data->notification_message_id,
-      deprecated_data->old_shortcut_id, deprecated_data->new_shortcut_id);
+      deprecated_data->new_shortcut_id);
 
   if (!deprecated_data->deprecated_enabled)
     return AcceleratorProcessingStatus::STOP;

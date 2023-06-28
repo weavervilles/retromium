@@ -5,6 +5,7 @@
 #include "ash/webui/camera_app_ui/camera_app_ui.h"
 
 #include "ash/public/cpp/window_properties.h"
+#include "ash/system/camera/camera_app_prefs.h"
 #include "ash/webui/camera_app_ui/camera_app_helper_impl.h"
 #include "ash/webui/camera_app_ui/resources.h"
 #include "ash/webui/camera_app_ui/url_constants.h"
@@ -17,6 +18,7 @@
 #include "base/task/thread_pool.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/media_device_salt/media_device_salt_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -50,30 +52,29 @@ void HandleLocalOverrideRequest(
   base::ThreadPool::CreateSequencedTaskRunner(
       {base::TaskPriority::USER_BLOCKING,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN, base::MayBlock()})
-      ->PostTask(
-          FROM_HERE,
-          base::BindOnce(
-              [](const std::string& url,
-                 content::WebUIDataSource::GotDataCallback callback) {
-                // The url passed in only contain path and query part.
-                auto parsed_url = GURL(kChromeUICameraAppURL + url);
-                // parsed_url.path() includes the leading "/" but
-                // FilePath::Append only allows relative path.
-                base::FilePath file_path =
-                    base::FilePath(kCCALocalOverrideDirectoryPath)
-                        .Append(base::TrimString(
-                            parsed_url.path_piece(), "/",
-                            base::TrimPositions::TRIM_LEADING));
-                std::string result;
-                if (base::ReadFileToString(file_path, &result)) {
-                  std::move(callback).Run(
-                      base::MakeRefCounted<base::RefCountedString>(
-                          std::move(result)));
-                } else {
-                  std::move(callback).Run(nullptr);
-                }
-              },
-              url, std::move(callback)));
+      ->PostTask(FROM_HERE,
+                 base::BindOnce(
+                     [](const std::string& url,
+                        content::WebUIDataSource::GotDataCallback callback) {
+                       // The url passed in only contain path and query part.
+                       auto parsed_url = GURL(kChromeUICameraAppURL + url);
+                       // parsed_url.path() includes the leading "/" but
+                       // FilePath::Append only allows relative path.
+                       base::FilePath file_path =
+                           base::FilePath(kCCALocalOverrideDirectoryPath)
+                               .Append(base::TrimString(
+                                   parsed_url.path_piece(), "/",
+                                   base::TrimPositions::TRIM_LEADING));
+                       std::string result;
+                       if (base::ReadFileToString(file_path, &result)) {
+                         std::move(callback).Run(
+                             base::MakeRefCounted<base::RefCountedString>(
+                                 std::move(result)));
+                       } else {
+                         std::move(callback).Run(nullptr);
+                       }
+                     },
+                     url, std::move(callback)));
 }
 
 void CreateAndAddCameraAppUIHTMLSource(content::BrowserContext* browser_context,
@@ -115,12 +116,11 @@ void CreateAndAddCameraAppUIHTMLSource(content::BrowserContext* browser_context,
       std::string("object-src 'self';"));
 }
 
-// Translates the renderer-side source ID to video device id.
-void TranslateVideoDeviceId(
-    const std::string& salt,
+void GotSalt(
     const url::Origin& origin,
     const std::string& source_id,
-    base::OnceCallback<void(const absl::optional<std::string>&)> callback) {
+    base::OnceCallback<void(const absl::optional<std::string>&)> callback,
+    const std::string& salt) {
   auto callback_on_io_thread = base::BindOnce(
       [](const std::string& salt, const url::Origin& origin,
          const std::string& source_id,
@@ -134,6 +134,24 @@ void TranslateVideoDeviceId(
       salt, std::move(origin), source_id, std::move(callback));
   content::GetIOThreadTaskRunner({})->PostTask(
       FROM_HERE, std::move(callback_on_io_thread));
+}
+
+// Translates the renderer-side source ID to video device id.
+void TranslateVideoDeviceId(
+    content::BrowserContext* browser_context,
+    media_device_salt::MediaDeviceSaltService* salt_service,
+    const url::Origin& origin,
+    const std::string& source_id,
+    base::OnceCallback<void(const absl::optional<std::string>&)> callback) {
+  if (salt_service) {
+    salt_service->GetSalt(
+        base::BindOnce(&GotSalt, origin, source_id, std::move(callback)));
+  } else {
+    // If the embedder does not provide a salt service, use the browser
+    // context's unique ID as salt.
+    GotSalt(origin, source_id, std::move(callback),
+            browser_context->UniqueId());
+  }
 }
 
 void HandleCameraResult(
@@ -157,10 +175,10 @@ void SendNewCaptureBroadcast(content::BrowserContext* context,
 }
 
 std::unique_ptr<media::CameraAppDeviceProviderImpl>
-CreateCameraAppDeviceProvider(const url::Origin& security_origin,
-                              content::BrowserContext* context) {
-  auto media_device_id_salt = context->GetMediaDeviceIDSalt();
-
+CreateCameraAppDeviceProvider(
+    content::BrowserContext* browser_context,
+    media_device_salt::MediaDeviceSaltService* salt_service,
+    const url::Origin& security_origin) {
   mojo::PendingRemote<cros::mojom::CameraAppDeviceBridge> device_bridge;
   auto device_bridge_receiver = device_bridge.InitWithNewPipeAndPassReceiver();
 
@@ -169,8 +187,8 @@ CreateCameraAppDeviceProvider(const url::Origin& security_origin,
       std::move(device_bridge_receiver));
 
   auto mapping_callback =
-      base::BindRepeating(&TranslateVideoDeviceId, media_device_id_salt,
-                          std::move(security_origin));
+      base::BindRepeating(&TranslateVideoDeviceId, browser_context,
+                          salt_service, std::move(security_origin));
 
   return std::make_unique<media::CameraAppDeviceProviderImpl>(
       std::move(device_bridge), std::move(mapping_callback));
@@ -251,7 +269,7 @@ CameraAppUI::CameraAppUI(content::WebUI* web_ui,
   // Add ability to request chrome-untrusted: URLs
   web_ui->AddRequestableScheme(content::kChromeUIUntrustedScheme);
 
-  if (app_window_manager()->IsDevToolsEnabled()) {
+  if (camera_app_prefs::ShouldDevToolsOpen()) {
     delegate_->OpenDevToolsWindow(web_ui->GetWebContents());
   }
 
@@ -264,9 +282,11 @@ CameraAppUI::~CameraAppUI() {
 
 void CameraAppUI::BindInterface(
     mojo::PendingReceiver<cros::mojom::CameraAppDeviceProvider> receiver) {
+  content::BrowserContext* browser_context =
+      web_ui()->GetWebContents()->GetBrowserContext();
   provider_ = CreateCameraAppDeviceProvider(
-      url::Origin::Create(GURL(kChromeUICameraAppURL)),
-      web_ui()->GetWebContents()->GetBrowserContext());
+      browser_context, delegate_->GetMediaDeviceSaltService(browser_context),
+      url::Origin::Create(GURL(kChromeUICameraAppURL)));
   provider_->Bind(std::move(receiver));
 }
 
@@ -282,7 +302,7 @@ void CameraAppUI::BindInterface(
     mojo::PendingReceiver<color_change_listener::mojom::PageHandler> receiver) {
   views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window());
   // Camera app is always dark.
-  widget->SetColorModeOverride(ui::ColorProviderManager::ColorMode::kDark);
+  widget->SetColorModeOverride(ui::ColorProviderKey::ColorMode::kDark);
 
   color_provider_handler_ = std::make_unique<ui::ColorChangeHandler>(
       web_ui()->GetWebContents(), std::move(receiver));
@@ -290,10 +310,6 @@ void CameraAppUI::BindInterface(
 
 aura::Window* CameraAppUI::window() {
   return web_ui()->GetWebContents()->GetTopLevelNativeWindow();
-}
-
-CameraAppWindowManager* CameraAppUI::app_window_manager() {
-  return CameraAppWindowManager::GetInstance();
 }
 
 const GURL& CameraAppUI::url() {
@@ -308,7 +324,7 @@ void CameraAppUI::DevToolsAgentHostAttached(
           kChromeUICameraAppMainURL)) {
     return;
   }
-  app_window_manager()->SetDevToolsEnabled(true);
+  camera_app_prefs::SetDevToolsOpenState(true);
 }
 
 void CameraAppUI::DevToolsAgentHostDetached(
@@ -319,7 +335,7 @@ void CameraAppUI::DevToolsAgentHostDetached(
           kChromeUICameraAppMainURL)) {
     return;
   }
-  app_window_manager()->SetDevToolsEnabled(false);
+  camera_app_prefs::SetDevToolsOpenState(false);
 }
 
 bool CameraAppUI::IsJavascriptErrorReportingEnabled() {

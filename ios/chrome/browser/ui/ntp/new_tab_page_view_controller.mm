@@ -16,7 +16,6 @@
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_feature.h"
 #import "ios/chrome/browser/ui/content_suggestions/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
-#import "ios/chrome/browser/ui/gestures/view_revealing_vertical_pan_handler.h"
 #import "ios/chrome/browser/ui/ntp/discover_feed_constants.h"
 #import "ios/chrome/browser/ui/ntp/feed_header_view_controller.h"
 #import "ios/chrome/browser/ui/ntp/feed_wrapper_view_controller.h"
@@ -386,7 +385,6 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
         -([self stickyOmniboxHeight] + [self feedHeaderHeight]);
     [self.contentSuggestionsViewController.view setNeedsLayout];
     [self.contentSuggestionsViewController.view layoutIfNeeded];
-    [self.ntpContentDelegate reloadContentSuggestions];
   }
 
   if (previousTraitCollection.preferredContentSizeCategory !=
@@ -453,8 +451,6 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
                                      kContentSuggestionsReset];
   }
 
-  [self addViewControllerAboveFeed:self.contentSuggestionsViewController];
-
   // Adds the feed top section to the view hierarchy if it exists.
   if (self.feedTopSectionViewController) {
     [self addViewControllerAboveFeed:self.feedTopSectionViewController];
@@ -466,6 +462,8 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
   if (self.feedHeaderViewController) {
     [self addViewControllerAboveFeed:self.feedHeaderViewController];
   }
+
+  [self addViewControllerAboveFeed:self.contentSuggestionsViewController];
 
   [self addViewControllerAboveFeed:self.headerViewController];
 
@@ -526,15 +524,15 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
   [self updateFakeOmniboxForScrollPosition];
 }
 
-- (void)updateHeightAboveFeedAndScrollToTopIfNeeded {
-  if (self.viewDidFinishLoading &&
-      !self.hasSavedOffsetFromPreviousScrollState) {
-    // Do not scroll to the top if there is a saved scroll state. Also,
-    // `-setContentOffsetToTop` potentially updates constaints, and if
-    // viewDidLoad has not finished, some views may not in the view hierarchy
-    // yet.
+- (void)updateHeightAboveFeed {
+  if (self.viewDidFinishLoading) {
+    CGFloat oldHeightAboveFeed = self.collectionView.contentInset.top;
+    CGFloat oldOffset = self.collectionView.contentOffset.y;
     [self updateFeedInsetsForContentAbove];
-    [self setContentOffsetToTop];
+    CGFloat change = self.collectionView.contentInset.top - oldHeightAboveFeed;
+    // Offset the change by subtracting it from the content offset, in order to
+    // visually keep the same scroll position.
+    [self setContentOffset:oldOffset - change];
   }
 }
 
@@ -677,7 +675,6 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
     return;
   }
   [self.overscrollActionsController scrollViewDidScroll:scrollView];
-  [self.panGestureHandler scrollViewDidScroll:scrollView];
   [self updateFakeOmniboxForScrollPosition];
 
   [self updateScrolledToMinimumHeight];
@@ -695,7 +692,6 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
   // scroll position can now be overriden.
   self.hasSavedOffsetFromPreviousScrollState = NO;
   [self.overscrollActionsController scrollViewWillBeginDragging:scrollView];
-  [self.panGestureHandler scrollViewWillBeginDragging:scrollView];
   self.scrollStartPosition = scrollView.contentOffset.y;
 }
 
@@ -706,9 +702,6 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
       scrollViewWillEndDragging:scrollView
                    withVelocity:velocity
             targetContentOffset:targetContentOffset];
-  [self.panGestureHandler scrollViewWillEndDragging:scrollView
-                                       withVelocity:velocity
-                                targetContentOffset:targetContentOffset];
 }
 
 - (void)scrollViewDidEndDragging:(UIScrollView*)scrollView
@@ -731,7 +724,6 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
 
 - (void)scrollViewDidEndDecelerating:(UIScrollView*)scrollView {
   // TODO(crbug.com/1114792): Handle scrolling.
-  [self.panGestureHandler scrollViewDidEndDecelerating:scrollView];
 }
 
 - (void)scrollViewDidEndScrollingAnimation:(UIScrollView*)scrollView {
@@ -753,23 +745,6 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
   // Unfocus omnibox without scrolling back.
   [self unfocusOmnibox];
   return YES;
-}
-
-#pragma mark - ThumbStripSupporting
-
-- (BOOL)isThumbStripEnabled {
-  return self.panGestureHandler != nil;
-}
-
-- (void)thumbStripEnabledWithPanHandler:
-    (ViewRevealingVerticalPanHandler*)panHandler {
-  DCHECK(!self.thumbStripEnabled);
-  self.panGestureHandler = panHandler;
-}
-
-- (void)thumbStripDisabled {
-  DCHECK(self.thumbStripEnabled);
-  self.panGestureHandler = nil;
 }
 
 #pragma mark - UIGestureRecognizerDelegate
@@ -1174,12 +1149,14 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
 
 // Sets an top inset to the feed collection view to fit the content above it.
 - (void)updateFeedInsetsForContentAbove {
-  self.collectionView.contentInset = UIEdgeInsetsMake(
-      [self heightAboveFeed], 0, self.collectionView.contentInset.bottom, 0);
+  CGFloat heightAboveFeed = [self heightAboveFeed];
   // Updates `additionalOffset` using the content above the feed.
-  self.additionalOffset = [self heightAboveFeed];
-  // Update `scrolledToMinimumHeight` after updating `additionalOffset`.
-  [self updateScrolledToMinimumHeight];
+  self.additionalOffset = heightAboveFeed;
+  // Setting the contentInset will cause a scroll, which will call
+  // scrollViewDidScroll which calls updateScrolledToMinimumHeight. So no need
+  // to call here.
+  self.collectionView.contentInset = UIEdgeInsetsMake(
+      heightAboveFeed, 0, self.collectionView.contentInset.bottom, 0);
 }
 
 // Checks whether the feed top section is visible and updates the
@@ -1399,6 +1376,22 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
   _backgroundGradientView.hidden = style == UIUserInterfaceStyleLight;
 }
 
+// Signal to the ViewController that the height above the feed needs to be
+// recalculated and thus also likely needs to be scrolled up to accommodate for
+// the new height. Nothing may happen if the ViewController determines that the
+// current scroll state should not change.
+- (void)updateHeightAboveFeedAndScrollToTopIfNeeded {
+  if (self.viewDidFinishLoading &&
+      !self.hasSavedOffsetFromPreviousScrollState) {
+    // Do not scroll to the top if there is a saved scroll state. Also,
+    // `-setContentOffsetToTop` potentially updates constaints, and if
+    // viewDidLoad has not finished, some views may not in the view hierarchy
+    // yet.
+    [self updateFeedInsetsForContentAbove];
+    [self setContentOffsetToTop];
+  }
+}
+
 #pragma mark - Helpers
 
 - (UIViewController*)contentSuggestionsViewController {
@@ -1479,17 +1472,12 @@ const CGFloat kShiftTilesUpAnimationDuration = 0.1;
 // The y-position content offset for when the fake omnibox
 // should stick to the top of the NTP.
 - (CGFloat)offsetToStickOmnibox {
-  CGFloat offset =
-      -(self.headerViewController.view.frame.size.height -
-        [self stickyOmniboxHeight] -
-        [self.feedHeaderViewController customSearchEngineViewHeight]);
-  if (IsSplitToolbarMode(self)) {
-    offset -= [self contentSuggestionsContentHeight];
-  }
-  if (self.feedTopSectionViewController) {
-    offset -= self.feedTopSectionViewController.view.frame.size.height;
-  }
-  return offset;
+  // Do not need to factor in safeAreaInsets.top because the fake omnibox sticks
+  // below it, so it is effectively just the scroll distance between top of
+  // NTPHeader and the top of the Fake Omnibox.
+  return -([self heightAboveFeed] -
+           [self.headerViewController
+                   offsetToBeginFakeOmniboxExpansionForSplitMode]);
 }
 
 // Whether the collection view has attained its minimum height.

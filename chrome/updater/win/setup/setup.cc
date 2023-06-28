@@ -28,7 +28,6 @@
 #include "chrome/updater/util/util.h"
 #include "chrome/updater/util/win_util.h"
 #include "chrome/updater/win/setup/setup_util.h"
-#include "chrome/updater/win/task_scheduler.h"
 #include "chrome/updater/win/win_constants.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -79,6 +78,11 @@ int Setup(UpdaterScope scope) {
     LOG(ERROR) << "GetVersionedInstallDirectory failed.";
     return kErrorNoVersionedDirectory;
   }
+
+  // Stop any processes that may be running under the versioned path before
+  // installation.
+  StopProcessesUnderPath(*versioned_dir, base::Seconds(15));
+
   base::FilePath exe_path;
   if (!base::PathService::Get(base::FILE_EXE, &exe_path)) {
     LOG(ERROR) << "PathService failed.";

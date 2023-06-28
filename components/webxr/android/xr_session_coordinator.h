@@ -13,11 +13,18 @@
 
 namespace webxr {
 
+using ActivityReadyCallback = base::OnceCallback<void(
+    const base::android::JavaParamRef<jobject>& activity)>;
+
 class XrSessionCoordinator : public device::XrJavaCoordinator {
  public:
   // Used to return the ContextUtils.applicationContext, which may not be the
   // activity.
   static base::android::ScopedJavaLocalRef<jobject> GetApplicationContext();
+
+  // Used to query the current Activity from the specified WebContents.
+  static base::android::ScopedJavaLocalRef<jobject> GetActivity(
+      base::android::ScopedJavaLocalRef<jobject> web_contents);
 
   explicit XrSessionCoordinator();
   ~XrSessionCoordinator() override;
@@ -44,6 +51,8 @@ class XrSessionCoordinator : public device::XrJavaCoordinator {
   base::android::ScopedJavaLocalRef<jobject> GetCurrentActivityContext()
       override;
 
+  void RequestXrSession(ActivityReadyCallback ready_callback);
+
   // Methods called from the Java side.
   void OnDrawingSurfaceReady(
       JNIEnv* env,
@@ -63,6 +72,10 @@ class XrSessionCoordinator : public device::XrJavaCoordinator {
   void OnDrawingSurfaceDestroyed(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
+  void OnXrHostActivityReady(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& activity);
 
  private:
   base::android::ScopedJavaGlobalRef<jobject> j_xr_session_coordinator_;
@@ -70,6 +83,7 @@ class XrSessionCoordinator : public device::XrJavaCoordinator {
   device::SurfaceReadyCallback surface_ready_callback_;
   device::SurfaceTouchCallback surface_touch_callback_;
   device::SurfaceDestroyedCallback surface_destroyed_callback_;
+  ActivityReadyCallback activity_ready_callback_;
 };
 
 }  // namespace webxr

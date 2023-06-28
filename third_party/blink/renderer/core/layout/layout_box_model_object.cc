@@ -61,25 +61,6 @@ inline bool IsOutOfFlowPositionedWithImplicitHeight(
          !child->StyleRef().LogicalBottom().IsAuto();
 }
 
-// Inclusive of |from|, exclusive of |to|.
-PaintLayer* FindFirstStickyBetween(LayoutObject* from, LayoutObject* to) {
-  LayoutObject* maybe_sticky_ancestor = from;
-  while (maybe_sticky_ancestor && maybe_sticky_ancestor != to) {
-    if (maybe_sticky_ancestor->StyleRef().HasStickyConstrainedPosition()) {
-      return To<LayoutBoxModelObject>(maybe_sticky_ancestor)->Layer();
-    }
-
-    // We use LocationContainer here to find the nearest sticky ancestor which
-    // shifts the given element's position so that the sticky positioning code
-    // is aware ancestor sticky position shifts.
-    maybe_sticky_ancestor =
-        maybe_sticky_ancestor->IsLayoutInline()
-            ? maybe_sticky_ancestor->Container()
-            : To<LayoutBox>(maybe_sticky_ancestor)->LocationContainer();
-  }
-  return nullptr;
-}
-
 void MarkBoxForRelayoutAfterSplit(LayoutBoxModelObject* box) {
   // FIXME: The table code should handle that automatically. If not,
   // we should fix it and remove the table part checks.
@@ -103,6 +84,21 @@ void CollapseLoneAnonymousBlockChild(LayoutBox* parent, LayoutObject* child) {
   if (!parent_block_flow)
     return;
   parent_block_flow->CollapseAnonymousBlockChild(child_block_flow);
+}
+
+bool NeedsAnchorScrollData(Element& element, const ComputedStyle& style) {
+  // `anchor-scroll` has no effect if the element is not absolutely positioned
+  // or when the property value is `none`.
+  if (!style.HasOutOfFlowPosition() || !style.AnchorScroll()) {
+    return false;
+  }
+  // There's an explicitly set `anchor-scroll` or `anchor-default` value.
+  if (!style.AnchorScroll()->IsDefault() || style.AnchorDefault()) {
+    return true;
+  }
+  // Now we have `anchor-scroll: default` and `anchor-default: implicit`. We
+  // need AnchorScrollData only if there's an implicit anchor element.
+  return element.ImplicitAnchorElement();
 }
 
 }  // namespace
@@ -328,10 +324,11 @@ void LayoutBoxModelObject::StyleDidChange(StyleDifference diff,
   }
 
   if (Element* element = DynamicTo<Element>(GetNode())) {
-    if (IsOutOfFlowPositioned() && StyleRef().AnchorScroll())
+    if (NeedsAnchorScrollData(*element, StyleRef())) {
       element->EnsureAnchorScrollData();
-    else
+    } else {
       element->RemoveAnchorScrollData();
+    }
   }
 }
 
@@ -542,10 +539,6 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight()
         return false;
     }
   }
-  if (this_box && this_box->IsCustomItem() &&
-      (this_box->HasOverrideContainingBlockContentLogicalHeight())) {
-    return false;
-  }
 
   if ((logical_height_length.IsAutoOrContentOrIntrinsic() ||
        logical_height_length.IsFillAvailable()) &&
@@ -557,12 +550,8 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight()
     // resolve the block-size of the descendant, except when in quirks mode.
     // Flexboxes follow strict behavior even in quirks mode, though.
     if (!GetDocument().InQuirksMode() || cb->IsFlexibleBoxIncludingNG()) {
-      if (this_box &&
-          this_box->HasOverrideContainingBlockContentLogicalHeight()) {
-        return this_box->OverrideContainingBlockContentLogicalHeight() ==
-               LayoutUnit(-1);
-      } else if (this_box && this_box->GetSingleCachedLayoutResult() &&
-                 !this_box->GetBoxLayoutExtraInput()) {
+      if (this_box && this_box->GetSingleCachedLayoutResult() &&
+          !this_box->GetBoxLayoutExtraInput()) {
         return this_box->GetSingleCachedLayoutResult()
                    ->GetConstraintSpaceForCaching()
                    .AvailableSize()
@@ -694,6 +683,9 @@ bool LayoutBoxModelObject::UpdateStickyPositionConstraints() {
   PhysicalRect sticky_box_rect;
   if (IsLayoutInline()) {
     sticky_box_rect = To<LayoutInline>(this)->PhysicalLinesBoundingBox();
+  } else if (RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()) {
+    const LayoutBox& box = To<LayoutBox>(*this);
+    sticky_box_rect = PhysicalRect(box.PhysicalLocation(), box.Size());
   } else {
     sticky_box_rect =
         sticky_container->FlipForWritingMode(To<LayoutBox>(this)->FrameRect());
@@ -721,9 +713,9 @@ bool LayoutBoxModelObject::UpdateStickyPositionConstraints() {
   // The respective search ranges are [container, containingBlock) and
   // [containingBlock, scrollAncestor).
   constraints->nearest_sticky_layer_shifting_sticky_box =
-      FindFirstStickyBetween(location_container, sticky_container);
+      location_container->FindFirstStickyContainer(sticky_container);
   constraints->nearest_sticky_layer_shifting_containing_block =
-      FindFirstStickyBetween(sticky_container, &scroll_container);
+      sticky_container->FindFirstStickyContainer(&scroll_container);
 
   // We skip the right or top sticky offset if there is not enough space to
   // honor both the left/right or top/bottom offsets.
@@ -966,12 +958,6 @@ void LayoutBoxModelObject::MoveChildTo(
     LayoutObject* before_child,
     bool full_remove_insert) {
   NOT_DESTROYED();
-  // We assume that callers have cleared their positioned objects list for child
-  // moves (!fullRemoveInsert) so the positioned layoutObject maps don't become
-  // stale. It would be too slow to do the map lookup on each call.
-  DCHECK(!full_remove_insert || !IsLayoutBlock() ||
-         !To<LayoutBlock>(this)->HasPositionedObjects());
-
   DCHECK_EQ(this, child->Parent());
   DCHECK(!before_child || to_box_model_object == before_child->Parent());
 

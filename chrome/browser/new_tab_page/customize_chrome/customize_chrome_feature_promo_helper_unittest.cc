@@ -65,10 +65,11 @@ class CustomizeChromeFeaturePromoHelperTest : public BrowserWithTestWindowTest {
 
  private:
   feature_engagement::test::ScopedIphFeatureList iph_feature_list_;
-  raw_ptr<content::WebContents> tab_;
-  raw_ptr<testing::NiceMock<feature_engagement::test::MockTracker>>
+  raw_ptr<content::WebContents, DanglingUntriaged> tab_;
+  raw_ptr<testing::NiceMock<feature_engagement::test::MockTracker>,
+          DanglingUntriaged>
       mock_tracker_;
-  raw_ptr<user_education::test::MockFeaturePromoController>
+  raw_ptr<user_education::test::MockFeaturePromoController, DanglingUntriaged>
       mock_promo_controller_ = nullptr;
 
   static std::unique_ptr<KeyedService> MakeTestTracker(
@@ -95,7 +96,7 @@ TEST_F(CustomizeChromeFeaturePromoHelperTest,
       *mock_promo_controller(),
       MaybeShowPromo(
           testing::Ref(feature_engagement::kIPHDesktopCustomizeChromeFeature),
-          testing::_, testing::_))
+          testing::_, testing::_, testing::_))
       .Times(1)
       .WillOnce(testing::Return(true));
   CustomizeChromeFeaturePromoHelper customize_chrome_feature_promo_helper;

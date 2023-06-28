@@ -126,12 +126,20 @@ bool CanSameSiteMainFrameNavigationsChangeRenderFrameHosts();
 // only a subset that satisfies some conditions, e.g. BFCache eligibilty.
 bool WillSameSiteNavigationsChangeRenderFrameHosts();
 
+// Same as above but also returns true even if only subframe navigations will
+// change RenderFrameHosts (main frame navigations might reuse RFHs still).
+bool WillSameSiteSubframeNavigationsChangeRenderFrameHosts();
+
 // Whether same-site navigations might result in a change of SiteInstances -
 // this will happen when ProactivelySwapBrowsingInstance or back-forward cache
 // is enabled on same-site main frame navigations.
 // Note that unlike CanSameSiteMainFrameNavigationsChangeRenderFrameHosts()
 // above, this will not be true when RenderDocument for main-frame is enabled.
 bool CanSameSiteMainFrameNavigationsChangeSiteInstances();
+
+// Returns true if navigation queueing is fully enabled, where we will queue new
+// navigations that happen when there is an existing pending commit navigation.
+bool IsNavigationQueueingEnabled();
 
 // Makes sure that navigations that start in |rfh| won't result in a proactive
 // BrowsingInstance swap (note they might still result in a normal

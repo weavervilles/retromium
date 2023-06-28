@@ -50,7 +50,7 @@ struct OriginRequestSummary {
 struct PageRequestSummary {
   PageRequestSummary(ukm::SourceId ukm_source_id,
                      const GURL& main_frame_url,
-                     base::TimeTicks creation_time);
+                     base::TimeTicks navigation_started);
   PageRequestSummary(const PageRequestSummary& other);
   ~PageRequestSummary();
   void UpdateOrAddResource(
@@ -58,12 +58,12 @@ struct PageRequestSummary {
   void AddPreconnectAttempt(const GURL& preconnect_url);
   void AddPrefetchAttempt(const GURL& prefetch_url);
 
-  ukm::SourceId ukm_source_id;
+  const ukm::SourceId ukm_source_id;
   GURL main_frame_url;
-  GURL initial_url;
-  base::TimeTicks navigation_started;
-  base::TimeTicks navigation_committed;
-  base::TimeTicks first_contentful_paint;
+  const GURL initial_url;
+  const base::TimeTicks navigation_started;
+  base::TimeTicks navigation_committed{base::TimeTicks::Max()};
+  base::TimeTicks first_contentful_paint{base::TimeTicks::Max()};
 
   // Map of origin -> OriginRequestSummary. Only one instance of each origin
   // is kept per navigation, but the summary is updated several times.
@@ -81,6 +81,9 @@ struct PageRequestSummary {
   // The time for which the first resource prefetch was initiated for the
   // navigation.
   absl::optional<base::TimeTicks> first_prefetch_initiated;
+
+  // The encoded position of the previously seen LCP element in the document.
+  std::string lcp_element_locator;
 
  private:
   void UpdateOrAddToOrigins(
@@ -133,6 +136,10 @@ class LoadingDataCollector {
       NavigationId navigation_id,
       base::TimeTicks first_contentful_paint);
 
+  // Called when the main frame discovers LCP element.
+  virtual void RecordLCPElementLocator(NavigationId navigaiton_id,
+                                       base::StringPiece lcp_element_locator);
+
  private:
   using NavigationMap =
       std::map<NavigationId, std::unique_ptr<PageRequestSummary>>;
@@ -157,6 +164,7 @@ class LoadingDataCollector {
                            RecordPreconnectInitiatedNoInflightNavigation);
   FRIEND_TEST_ALL_PREFIXES(LoadingDataCollectorTest,
                            RecordPrefetchInitiatedNoInflightNavigation);
+  FRIEND_TEST_ALL_PREFIXES(LoadingDataCollectorTest, WithAndWithoutLCPPSignals);
 
   static void SetAllowPortInUrlsForTesting(bool state);
 
@@ -171,7 +179,7 @@ class LoadingDataCollector {
   // Cleanup inflight_navigations_ and call a cleanup for stats_collector_.
   void CleanupAbandonedNavigations(NavigationId navigation_id);
 
-  const raw_ptr<ResourcePrefetchPredictor> predictor_;
+  const raw_ptr<ResourcePrefetchPredictor, DanglingUntriaged> predictor_;
   const raw_ptr<LoadingStatsCollector> stats_collector_;
   const LoadingPredictorConfig config_;
 

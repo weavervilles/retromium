@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://os-settings/chromeos/lazy_load.js';
+import 'chrome://os-settings/lazy_load.js';
 
-import {SettingsMultideviceFeatureItemElement, SettingsMultideviceFeatureToggleElement} from 'chrome://os-settings/chromeos/lazy_load.js';
-import {CrToggleElement, LocalizedLinkElement, MultiDeviceFeature, MultiDeviceFeatureState, MultiDeviceSettingsMode, PhoneHubFeatureAccessProhibitedReason, PhoneHubFeatureAccessStatus, Route, Router, routes} from 'chrome://os-settings/chromeos/os_settings.js';
+import {SettingsMultideviceFeatureItemElement, SettingsMultideviceFeatureToggleElement} from 'chrome://os-settings/lazy_load.js';
+import {CrToggleElement, LocalizedLinkElement, MultiDeviceFeature, MultiDeviceFeatureState, MultiDeviceSettingsMode, PhoneHubFeatureAccessProhibitedReason, PhoneHubFeatureAccessStatus, Route, Router, routes} from 'chrome://os-settings/os_settings.js';
 import {IronIconElement} from 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
@@ -89,8 +89,8 @@ suite('<settings-multidevice-feature-item>', () => {
     crToggle = featureToggle.$.toggle;
 
     initialRoute = routes.MULTIDEVICE_FEATURES;
-    const FREE_CANDY = routes.BASIC.createSection('/freeCandy', 'freeCandy');
-    featureItem.subpageRoute = FREE_CANDY;
+    const dummyRoute = new Route('/freeCandy');
+    featureItem.subpageRoute = dummyRoute;
 
     resetFeatureData();
     Router.getInstance().navigateTo(initialRoute);

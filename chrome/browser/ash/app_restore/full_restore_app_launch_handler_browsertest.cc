@@ -38,9 +38,9 @@
 #include "chrome/browser/ash/app_restore/full_restore_service.h"
 #include "chrome/browser/ash/arc/arc_util.h"
 #include "chrome/browser/ash/crosapi/browser_util.h"
+#include "chrome/browser/ash/system_web_apps/apps/os_url_handler_system_web_app_info.h"
 #include "chrome/browser/ash/system_web_apps/system_web_app_manager.h"
 #include "chrome/browser/ash/system_web_apps/test_support/system_web_app_integration_test.h"
-#include "chrome/browser/ash/web_applications/os_url_handler_system_web_app_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -106,6 +106,7 @@ constexpr char kRestoreIdPrefName[] = "browser_restore_id";
 // Test values for a test WindowInfo object.
 constexpr int kActivationIndex = 2;
 constexpr int kDeskId = 2;
+const base::Uuid kDeskUuid = base::Uuid::GenerateRandomV4();
 constexpr gfx::Rect kCurrentBounds(500, 200);
 constexpr chromeos::WindowStateType kWindowStateType =
     chromeos::WindowStateType::kPrimarySnapped;
@@ -165,6 +166,7 @@ class TestAppRestoreInfoObserver
 
 // Creates a WindowInfo object and then saves it.
 void CreateAndSaveWindowInfo(int desk_id,
+                             const base::Uuid& desk_uuid,
                              const gfx::Rect& current_bounds,
                              chromeos::WindowStateType window_state_type,
                              ui::WindowShowState pre_minimized_show_state,
@@ -180,6 +182,7 @@ void CreateAndSaveWindowInfo(int desk_id,
   ::app_restore::WindowInfo window_info;
   window_info.window = window.get();
   window_info.desk_id = desk_id;
+  window_info.desk_guid = desk_uuid;
   window_info.current_bounds = current_bounds;
   window_info.window_state_type = window_state_type;
 
@@ -202,6 +205,7 @@ void SaveWindowInfo(aura::Window* window) {
   window_info.window = window;
   window_info.activation_index = kActivationIndex;
   window_info.desk_id = kDeskId;
+  window_info.desk_guid = kDeskUuid;
   window_info.current_bounds = kCurrentBounds;
   window_info.window_state_type = WindowState::Get(window)->GetStateType();
   ::full_restore::SaveWindowInfo(window_info);
@@ -215,6 +219,7 @@ void SaveWindowInfo(
   window_info.window = window;
   window_info.activation_index = activation_index;
   window_info.desk_id = kDeskId;
+  window_info.desk_guid = kDeskUuid;
   window_info.current_bounds = kCurrentBounds;
   window_info.window_state_type = window_state_type;
   ::full_restore::SaveWindowInfo(window_info);
@@ -283,7 +288,7 @@ class FullRestoreAppLaunchHandlerBrowserTest
   }
 
   void CreateWebApp() {
-    auto web_app_install_info = std::make_unique<WebAppInstallInfo>();
+    auto web_app_install_info = std::make_unique<web_app::WebAppInstallInfo>();
     web_app_install_info->start_url = GURL("https://example.org");
     web_app::AppId app_id = web_app::test::InstallWebApp(
         profile(), std::move(web_app_install_info));
@@ -433,7 +438,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
           WindowOpenDisposition::NEW_WINDOW, display::kDefaultDisplayId,
           std::vector<base::FilePath>{}, nullptr));
   CreateAndSaveWindowInfo(
-      kDeskId, kCurrentBounds, chromeos::WindowStateType::kMinimized,
+      kDeskId, kDeskUuid, kCurrentBounds, chromeos::WindowStateType::kMinimized,
       ui::SHOW_STATE_MAXIMIZED, kWindowId2, /*snap_percentage=*/0);
 
   WaitForAppLaunchInfoSaved();
@@ -503,6 +508,29 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
 
   // Verify there is a new browser launched.
   EXPECT_EQ(count + 1, BrowserList::GetInstance()->size());
+}
+
+IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
+                       FullRestoreMetrics) {
+  base::HistogramTester histogram_tester;
+
+  // Add app launch infos.
+  ::full_restore::SaveAppLaunchInfo(
+      profile()->GetPath(), std::make_unique<::app_restore::AppLaunchInfo>(
+                                app_constants::kChromeAppId, kWindowId1));
+  ::full_restore::SaveAppLaunchInfo(
+      profile()->GetPath(), std::make_unique<::app_restore::AppLaunchInfo>(
+                                app_constants::kChromeAppId, kWindowId2));
+  WaitForAppLaunchInfoSaved();
+
+  // Create FullRestoreAppLaunchHandler and launch the browser.
+  auto app_launch_handler =
+      std::make_unique<FullRestoreAppLaunchHandler>(profile());
+  app_launch_handler->LaunchBrowserWhenReady(/*first_run_full_restore=*/false);
+  SetShouldRestore(app_launch_handler.get());
+  content::RunAllTasksUntilIdle();
+
+  histogram_tester.ExpectBucketCount("Apps.FullRestoreWindowCount", 2, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest, NotRestore) {
@@ -896,7 +924,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
                                 app_constants::kChromeAppId, kWindowId1));
 
   constexpr uint32_t kSnapPercentage = 75;
-  CreateAndSaveWindowInfo(kDeskId, kCurrentBounds, kWindowStateType,
+  CreateAndSaveWindowInfo(kDeskId, kDeskUuid, kCurrentBounds, kWindowStateType,
                           ui::SHOW_STATE_DEFAULT, kWindowId1, kSnapPercentage);
   WaitForAppLaunchInfoSaved();
 
@@ -914,6 +942,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
   window->SetProperty(::app_restore::kRestoreWindowIdKey, kWindowId1);
   auto stored_window_info = GetWindowInfo(window.get());
   EXPECT_EQ(kDeskId, *stored_window_info->desk_id);
+  EXPECT_EQ(kDeskUuid, stored_window_info->desk_guid);
   EXPECT_EQ(kCurrentBounds, *stored_window_info->current_bounds);
   EXPECT_EQ(kWindowStateType, *stored_window_info->window_state_type);
   EXPECT_EQ(kSnapPercentage, *stored_window_info->snap_percentage);
@@ -968,7 +997,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
       std::make_unique<::app_restore::AppLaunchInfo>(
           app_constants::kChromeAppId, previous_browser_id));
   CreateAndSaveWindowInfo(
-      kDeskId, kCurrentBounds, chromeos::WindowStateType::kNormal,
+      kDeskId, kDeskUuid, kCurrentBounds, chromeos::WindowStateType::kNormal,
       ui::SHOW_STATE_DEFAULT, previous_browser_id, /*snap_percentage=*/0);
   WaitForAppLaunchInfoSaved();
 
@@ -1001,7 +1030,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
       profile()->GetPath(), std::make_unique<::app_restore::AppLaunchInfo>(
                                 app_constants::kLacrosAppId, kWindowId1));
   CreateAndSaveWindowInfo(
-      kDeskId, prerestore_bounds, chromeos::WindowStateType::kNormal,
+      kDeskId, kDeskUuid, prerestore_bounds, chromeos::WindowStateType::kNormal,
       ui::SHOW_STATE_DEFAULT, kWindowId1, /*snap_percentage=*/0);
   WaitForAppLaunchInfoSaved();
 
@@ -1154,6 +1183,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerChromeAppBrowserTest,
   AutotestDesksApi().CreateNewDesk();
   AutotestDesksApi().CreateNewDesk();
   AutotestDesksApi().CreateNewDesk();
+  ActivateDesk(2);
 
   ::full_restore::SetActiveProfilePath(profile()->GetPath());
 

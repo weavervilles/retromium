@@ -13,6 +13,11 @@ namespace content {
 // whenever this is changed.
 // These are also mapped onto the first content internal range of
 // `PreloadingEligibility` and onto `PreloadingFailureReason`.
+//
+// If you change this, please follow the process
+// https://docs.google.com/document/d/1PnrfowsZMt62PX1EvvTp2Nqs3ji1zrklrAEe1JYbkTk
+// to ensure failure reasons are correctly shown in the DevTools
+// frontend.
 enum class PrefetchStatus {
   // Deprecated. Replaced by `kPrefetchResponseUsed`.
   //
@@ -195,8 +200,18 @@ enum class PrefetchStatus {
   // that require the prefetch proxy to be made.
   kPrefetchNotEligibleSameSiteCrossOriginPrefetchRequiredProxy = 46,
 
+  // The prefetch was not made because the `Battery Saver` setting was enabled.
+  kPrefetchNotEligibleBatterySaverEnabled = 47,
+
+  // The prefetch was not made because preloading was disabled.
+  kPrefetchNotEligiblePreloadingDisabled = 48,
+
+  // The prefetch was evicted to make room for a newer prefetch. This currently
+  // only happens when |kPrefetchNewLimits| is enabled.
+  kPrefetchEvicted = 49,
+
   // The max value of the PrefetchStatus. Update this when new enums are added.
-  kMaxValue = kPrefetchNotEligibleSameSiteCrossOriginPrefetchRequiredProxy,
+  kMaxValue = kPrefetchEvicted,
 };
 
 }  // namespace content

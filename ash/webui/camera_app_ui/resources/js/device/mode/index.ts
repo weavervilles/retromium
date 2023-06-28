@@ -17,6 +17,7 @@ import {
 } from '../../type.js';
 import {getFpsRangeFromConstraints} from '../../util.js';
 import {StreamConstraints} from '../stream_constraints.js';
+import {StreamManagerChrome} from '../stream_manager_chrome.js';
 
 import {
   ModeBase,
@@ -71,7 +72,7 @@ interface CaptureParams {
 interface ModeConfig {
   /**
    * @return Resolves to boolean indicating whether the mode is supported by
-   *     video device with specified device id.
+   *     video device with specified `deviceId`.
    */
   isSupported(deviceId: string|null): Promise<boolean>;
 
@@ -127,7 +128,7 @@ export class Modes {
     }
 
     /**
-     * Prepare the device for the specific resolution and capture intent.
+     * Prepares the device for the specific `resolution` and `captureIntent`.
      */
     async function prepareDeviceForPhoto(
         constraints: StreamConstraints, resolution: Resolution,
@@ -164,6 +165,19 @@ export class Modes {
               expert.isEnabled(
                   expert.ExpertOption.ENABLE_MULTISTREAM_RECORDING),
           );
+          if (expert.isEnabled(
+                  expert.ExpertOption.ENABLE_MULTISTREAM_RECORDING_CHROME)) {
+            const captureResolution =
+                assertExists(this.getCaptureParams().captureResolution);
+            await StreamManagerChrome.getInstance().prepare({
+              ...constraints,
+              video: {
+                ...constraints.video,
+                width: captureResolution.width,
+                height: captureResolution.height,
+              },
+            });
+          }
 
           if (await deviceOperator.isBlobVideoSnapshotEnabled(deviceId)) {
             await deviceOperator.setStillCaptureResolution(
@@ -212,7 +226,7 @@ export class Modes {
         },
         isSupportPTZ: checkSupportPTZForPhotoMode,
         prepareDevice: async (constraints, resolution) => prepareDeviceForPhoto(
-            constraints, resolution, CaptureIntent.STILL_CAPTURE),
+            constraints, resolution, CaptureIntent.PORTRAIT_CAPTURE),
         fallbackMode: Mode.PHOTO,
       },
       [Mode.SCAN]: {
@@ -263,7 +277,7 @@ export class Modes {
   }
 
   /**
-   * Gets factory to create mode capture object.
+   * Gets factory to create `mode` capture object.
    */
   getModeFactory(mode: Mode): ModeFactory {
     return this.allModes[mode].getCaptureFactory();
@@ -336,8 +350,6 @@ export class Modes {
 
   /**
    * Checks whether to save image metadata or not.
-   *
-   * @return Promise for the operation.
    */
   private async updateSaveMetadata(): Promise<void> {
     if (expert.isEnabled(expert.ExpertOption.SAVE_METADATA)) {
@@ -349,8 +361,6 @@ export class Modes {
 
   /**
    * Enables save metadata of subsequent photos in the current mode.
-   *
-   * @return Promise for the operation.
    */
   private async enableSaveMetadata(): Promise<void> {
     if (this.current !== null) {

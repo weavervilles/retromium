@@ -45,8 +45,13 @@ std::string GetCurrentSystemVersion();
 // Reset the focus to |view|.
 void ResetFocusTo(views::View* view);
 
+// Return true if |code| is not allowed to bind.
+bool IsReservedDomCode(ui::DomCode code);
+
 // TODO(b/253646354): This will be removed when removing the flag.
 bool IsBeta();
+// TODO(b/288155422): This will be removed when removing the flag.
+bool IsGameDashboardFlagOn();
 
 }  // namespace arc::input_overlay
 

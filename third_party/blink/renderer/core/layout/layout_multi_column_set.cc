@@ -413,13 +413,6 @@ unsigned LayoutMultiColumnSet::ActualColumnCount() const {
   return FirstFragmentainerGroup().ActualColumnCount();
 }
 
-void LayoutMultiColumnSet::PaintObject(
-    const PaintInfo& paint_info,
-    const PhysicalOffset& paint_offset) const {
-  NOT_DESTROYED();
-  NOTREACHED_NORETURN();
-}
-
 LayoutRect LayoutMultiColumnSet::FragmentsBoundingBox(
     const LayoutRect& bounding_box_in_flow_thread) const {
   NOT_DESTROYED();
@@ -460,6 +453,9 @@ void LayoutMultiColumnSet::AddVisualOverflowFromChildren() {
     rect.Move(group.OffsetFromColumnSet());
     overflow_rect.Unite(rect);
   }
+  if (RuntimeEnabledFeatures::LayoutNGNoLocationEnabled()) {
+    overflow_rect = FlipForWritingMode(overflow_rect).ToLayoutRect();
+  }
   AddContentsVisualOverflow(overflow_rect);
 }
 
@@ -481,7 +477,7 @@ LayoutPoint LayoutMultiColumnSet::Location() const {
   return frame_location_;
 }
 
-LayoutSize LayoutMultiColumnSet::Size() const {
+PhysicalSize LayoutMultiColumnSet::Size() const {
   NOT_DESTROYED();
   UpdateGeometryIfNeeded();
   return frame_size_;
@@ -545,8 +541,7 @@ void LayoutMultiColumnSet::UpdateGeometry() {
           // pending_column_set at this point). Say hello to the column set that
           // shouldn't exist, so that it gets some initialization.
           SetIsIgnoredByNG();
-          frame_size_ =
-              ToPhysicalSize(logical_size, writing_mode).ToLayoutSize();
+          frame_size_ = ToPhysicalSize(logical_size, writing_mode);
           return;
         }
         if (previous_placeholder &&
@@ -563,7 +558,7 @@ void LayoutMultiColumnSet::UpdateGeometry() {
   }
   if (!iter.IsValid()) {
     SetIsIgnoredByNG();
-    frame_size_ = ToPhysicalSize(logical_size, writing_mode).ToLayoutSize();
+    frame_size_ = ToPhysicalSize(logical_size, writing_mode);
     return;
   }
   // Found the first column box after previous_placeholder.
@@ -623,7 +618,7 @@ void LayoutMultiColumnSet::UpdateGeometry() {
     }
     AppendNewFragmentainerGroup();
   }
-  frame_size_ = ToPhysicalSize(logical_size, writing_mode).ToLayoutSize();
+  frame_size_ = ToPhysicalSize(logical_size, writing_mode);
 }
 
 void LayoutMultiColumnSet::AttachToFlowThread() {

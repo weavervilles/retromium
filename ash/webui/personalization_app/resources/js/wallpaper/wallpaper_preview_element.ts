@@ -16,7 +16,8 @@ import '../../css/cros_button_style.css.js';
 
 import {assert} from 'chrome://resources/js/assert_ts.js';
 
-import {CurrentWallpaper, WallpaperType} from '../../personalization_app.mojom-webui.js';
+import {CurrentAttribution, CurrentWallpaper, WallpaperType} from '../../personalization_app.mojom-webui.js';
+import {isPersonalizationJellyEnabled} from '../load_time_booleans.js';
 import {Paths, PersonalizationRouter} from '../personalization_router_element.js';
 import {WithPersonalizationStore} from '../personalization_store.js';
 import {isNonEmptyArray} from '../utils.js';
@@ -36,25 +37,49 @@ export class WallpaperPreview extends WithPersonalizationStore {
 
   static get properties() {
     return {
+      attribution_: {
+        type: Object,
+        value: null,
+      },
       image_: {
         type: Object,
         value: null,
       },
       imageLoading_: Boolean,
+      loading_: {
+        type: Boolean,
+        computed: 'computeLoading_(imageLoading_, image_)',
+      },
+      policyControlled_: {
+        type: Boolean,
+        computed: 'isPolicyControlled_(image_)',
+      },
+      isPersonalizationJellyEnabled_: {
+        type: Boolean,
+        value() {
+          return isPersonalizationJellyEnabled();
+        },
+      },
     };
   }
 
+  private attribution_: CurrentAttribution|null;
   private image_: CurrentWallpaper|null;
   private imageLoading_: boolean;
+  private loading_: boolean;
+  private policyControlled_: boolean;
+  private isPersonalizationJellyEnabled_: boolean;
 
   override connectedCallback() {
     super.connectedCallback();
     WallpaperObserver.initWallpaperObserverIfNeeded();
+    this.watch('attribution_', state => state.wallpaper.attribution);
     this.watch('image_', state => state.wallpaper.currentSelected);
     this.watch(
         'imageLoading_',
         state => state.wallpaper.loading.setImage > 0 ||
-            state.wallpaper.loading.selected ||
+            state.wallpaper.loading.selected.image ||
+            state.wallpaper.loading.selected.attribution ||
             state.wallpaper.loading.refreshWallpaper);
     this.updateFromStore();
   }
@@ -71,36 +96,34 @@ export class WallpaperPreview extends WithPersonalizationStore {
     return getWallpaperSrc(image);
   }
 
-  private getImageAltDescription_(image: CurrentWallpaper|null): string {
-    if (!image) {
+  private getImageAltDescription_(
+      image: CurrentWallpaper|null,
+      attribution: CurrentAttribution|null): string {
+    if (!image || !attribution || image.key !== attribution.key) {
       return `${this.i18n('currentlySet')} ${
           this.i18n('unknownImageAttribution')}`;
     }
     if (image.type === WallpaperType.kDefault) {
       return `${this.i18n('currentlySet')} ${this.i18n('defaultWallpaper')}`;
     }
-    if (isNonEmptyArray(image.attribution)) {
-      return [this.i18n('currentlySet'), ...image.attribution].join(' ');
+    if (isNonEmptyArray(attribution.attribution)) {
+      return [this.i18n('currentlySet'), ...attribution.attribution].join(' ');
     }
     // Fallback to cached attribution.
-    const attribution = getLocalStorageAttribution(image.key);
-    if (isNonEmptyArray(attribution)) {
-      return [this.i18n('currentlySet'), ...attribution].join(' ');
+    const cachedAttribution = getLocalStorageAttribution(image.key);
+    if (isNonEmptyArray(cachedAttribution)) {
+      return [this.i18n('currentlySet'), ...cachedAttribution].join(' ');
     }
     return `${this.i18n('currentlySet')} ${
         this.i18n('unknownImageAttribution')}`;
   }
 
-  /**
-   * Returns visible state of loading placeholder.
-   */
-  private showPlaceholders_(
-      imageLoading: boolean, image: CurrentWallpaper|null): boolean {
-    return imageLoading || !image;
+  private computeLoading_(): boolean {
+    return this.imageLoading_ || !this.image_;
   }
 
-  private isPolicyControlled_(image: CurrentWallpaper|null): boolean {
-    return !!image && image.type === WallpaperType.kPolicy;
+  private isPolicyControlled_(): boolean {
+    return !!this.image_ && this.image_.type === WallpaperType.kPolicy;
   }
 }
 

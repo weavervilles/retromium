@@ -8,6 +8,8 @@
 
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
+#include "content/browser/preloading/preloading.h"
+#include "content/browser/preloading/preloading_config.h"
 #include "content/browser/preloading/prerender/prerender_final_status.h"
 #include "content/browser/preloading/prerender/prerender_host.h"
 #include "content/browser/preloading/speculation_rules/speculation_host_impl.h"
@@ -297,6 +299,33 @@ TEST_F(PrerenderHostRegistryTest, CreateAndStartHost_Embedder_DirectURLInput) {
   // should be recorded on every prerender activation.
   histogram_tester().ExpectTotalCount(
       "Navigation.TimeToActivatePrerender.Embedder_DirectURLInput", 1u);
+}
+
+TEST_F(PrerenderHostRegistryTest, CreateAndStartHost_PreloadingConfigHoldback) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeatureWithParameters(features::kPreloadingConfig,
+                                              {{"preloading_config", R"(
+  [{
+    "preloading_type": "Prerender",
+    "preloading_predictor": "SpeculationRules",
+    "holdback": true
+  }]
+  )"}});
+  PreloadingConfig& config = PreloadingConfig::GetInstance();
+  config.ParseConfig();
+  const GURL kPrerenderingUrl("https://example.com/next");
+  auto* preloading_data = PreloadingData::GetOrCreateForWebContents(contents());
+  PreloadingURLMatchCallback same_url_matcher =
+      PreloadingData::GetSameURLMatcher(kPrerenderingUrl);
+  PreloadingAttempt* preloading_attempt = preloading_data->AddPreloadingAttempt(
+      content_preloading_predictor::kSpeculationRules,
+      PreloadingType::kPrerender, std::move(same_url_matcher));
+  const int prerender_frame_tree_node_id = registry().CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  contents()->GetPrimaryMainFrame()),
+      preloading_attempt);
+  ASSERT_EQ(prerender_frame_tree_node_id, kNoFrameTreeNodeId);
 }
 
 TEST_F(PrerenderHostRegistryTest, CreateAndStartHostForSameURL) {
@@ -651,22 +680,29 @@ TEST_F(PrerenderHostRegistryTest,
   EXPECT_NE(registry().FindHostByUrlForTesting(kPrerenderingUrl), nullptr);
 }
 
+// Tests that prerendering should be canceled if the trigger is in the
+// background and its type is kEmbedder.
+// For the case where the trigger type is speculation rules,
+// browsertests `TestSequentialPrerenderingInBackground` covers it.
 TEST_F(PrerenderHostRegistryTest,
-       DontStartPrerenderWhenTriggerIsAlreadyHidden) {
-  // The visibility state to be HIDDEN will cause prerendering not started.
+       DontStartPrerenderWhenEmbedderTriggerIsAlreadyHidden) {
+  // The visibility state to be HIDDEN will cause prerendering not started when
+  // trigger type is kEmbedder.
   contents()->WasHidden();
 
   const GURL kPrerenderingUrl = GURL("https://example.com/empty.html");
   RenderFrameHostImpl* initiator_rfh = contents()->GetPrimaryMainFrame();
   const int prerender_frame_tree_node_id =
       registry().CreateAndStartHost(GeneratePrerenderAttributes(
-          kPrerenderingUrl, PrerenderTriggerType::kSpeculationRule, "",
+          kPrerenderingUrl, PrerenderTriggerType::kEmbedder, "DirectURLInput",
           initiator_rfh));
   EXPECT_EQ(prerender_frame_tree_node_id, RenderFrameHost::kNoFrameTreeNodeId);
   PrerenderHost* prerender_host =
       registry().FindNonReservedHostById(prerender_frame_tree_node_id);
   EXPECT_EQ(prerender_host, nullptr);
-  ExpectUniqueSampleOfFinalStatus(PrerenderFinalStatus::kTriggerBackgrounded);
+  histogram_tester().ExpectUniqueSample(
+      "Prerender.Experimental.PrerenderHostFinalStatus.Embedder_DirectURLInput",
+      PrerenderFinalStatus::kTriggerBackgrounded, 1u);
 }
 
 // -------------------------------------------------

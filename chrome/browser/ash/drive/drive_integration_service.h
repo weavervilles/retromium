@@ -148,6 +148,8 @@ class DriveIntegrationService : public KeyedService,
   void SetEnabled(bool enabled);
   bool is_enabled() const { return enabled_; }
 
+  bool IsOnline() const;
+
   bool IsMounted() const;
 
   bool mount_failed() const { return mount_failed_; }
@@ -169,8 +171,9 @@ class DriveIntegrationService : public KeyedService,
   bool IsSharedDrive(const base::FilePath& local_path) const;
 
   // Adds and removes the observer.
-  void AddObserver(DriveIntegrationServiceObserver* observer);
-  void RemoveObserver(DriveIntegrationServiceObserver* observer);
+  using Observer = DriveIntegrationServiceObserver;
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
 
   // MountObserver implementation.
   void OnMounted(const base::FilePath& mount_path) override;
@@ -322,6 +325,10 @@ class DriveIntegrationService : public KeyedService,
       mojo::PendingRemote<crosapi::mojom::DriveFsNativeMessageHostBridge>
           bridge);
 
+  // Gets counts of files in docs offline extension.
+  void GetDocsOfflineStats(
+      drivefs::mojom::DriveFs::GetDocsOfflineStatsCallback callback);
+
  private:
   enum State {
     NOT_INITIALIZED,
@@ -404,6 +411,10 @@ class DriveIntegrationService : public KeyedService,
   // Enable or disable DriveFS bulk pinning.
   void ToggleBulkPinning();
 
+  // Regularly samples the bulk-pinning preference and stores the result in a
+  // UMA histogram.
+  void SampleBulkPinningPref();
+
   void OnGetOfflineItemsPage(
       int64_t total_size,
       mojo::Remote<drivefs::mojom::SearchQuery> search_query,
@@ -442,6 +453,10 @@ class DriveIntegrationService : public KeyedService,
   bool enabled_;
   bool mount_failed_ = false;
   bool in_clear_cache_ = false;
+
+  // Is the bulk-pinning preference sampling task currently scheduled?
+  bool bulk_pinning_pref_sampling_ = false;
+
   // Custom mount point name that can be injected for testing in constructor.
   std::string mount_point_name_;
 
@@ -453,7 +468,7 @@ class DriveIntegrationService : public KeyedService,
   std::unique_ptr<internal::ResourceMetadataStorage, util::DestroyHelper>
       metadata_storage_;
 
-  base::ObserverList<DriveIntegrationServiceObserver> observers_;
+  base::ObserverList<Observer> observers_;
 
   std::unique_ptr<DriveFsHolder> drivefs_holder_;
   std::unique_ptr<PreferenceWatcher> preference_watcher_;

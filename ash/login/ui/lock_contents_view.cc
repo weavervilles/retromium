@@ -66,6 +66,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/ash/components/login/auth/auth_events_recorder.h"
 #include "chromeos/ash/components/proximity_auth/public/mojom/auth_type.mojom.h"
+#include "chromeos/constants/chromeos_features.h"
 #include "chromeos/strings/grit/chromeos_strings.h"
 #include "chromeos/ui/vector_icons/vector_icons.h"
 #include "components/user_manager/known_user.h"
@@ -78,6 +79,7 @@
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/base/user_activity/user_activity_observer.h"
 #include "ui/chromeos/devicetype_utils.h"
+#include "ui/chromeos/styles/cros_tokens_color_mappings.h"
 #include "ui/compositor/layer.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/display_manager.h"
@@ -384,13 +386,6 @@ LockContentsView::LockContentsView(
       AddChildView(std::make_unique<LoginErrorBubble>());
   detachable_base_error_bubble_->set_persistent(true);
 
-  tooltip_bubble_ = AddChildView(std::make_unique<LoginTooltipView>(
-      u"" /*message*/, nullptr /*anchor_view*/));
-  tooltip_bubble_->set_positioning_strategy(
-      LoginBaseBubbleView::PositioningStrategy::kTryBeforeThenAfter);
-  tooltip_bubble_->SetPadding(kHorizontalPaddingLoginTooltipViewDp,
-                              kVerticalPaddingLoginTooltipViewDp);
-
   management_bubble_ = AddChildView(std::make_unique<ManagementBubble>(
       l10n_util::GetStringFUTF16(IDS_ASH_LOGIN_ENTERPRISE_MANAGED_POP_UP,
                                  ui::GetChromeOSDeviceName(),
@@ -647,6 +642,12 @@ bool LockContentsView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 }
 
 void LockContentsView::OnUsersChanged(const std::vector<LoginUserInfo>& users) {
+  if (Shell::Get()->login_screen_controller()->IsAuthenticating()) {
+    // TODO(b/276246832): We should avoid re-layouting during Authentication.
+    LOG(WARNING)
+        << "LockContentsView::OnUsersChanged called during Authentication.";
+  }
+  AuthEventsRecorder::Get()->OnLockContentsViewUpdate();
   // The debug view will potentially call this method many times. Make sure to
   // invalidate any child references.
   primary_big_view_ = nullptr;
@@ -966,26 +967,6 @@ void LockContentsView::OnSetTpmLockedState(const AccountId& user,
   }
 }
 
-void LockContentsView::OnTapToUnlockEnabledForUserChanged(const AccountId& user,
-                                                          bool enabled) {
-  if (base::FeatureList::IsEnabled(ash::features::kSmartLockUIRevamp)) {
-    return;
-  }
-
-  UserState* state = FindStateForUser(user);
-  if (!state) {
-    LOG(ERROR) << "Unable to find user enabling click to auth";
-    return;
-  }
-  state->enable_tap_auth = enabled;
-
-  LoginBigUserView* big_user =
-      TryToFindBigUser(user, true /*require_auth_active*/);
-  if (big_user && big_user->auth_user()) {
-    LayoutAuth(big_user, nullptr /*opt_to_hide*/, true /*animate*/);
-  }
-}
-
 void LockContentsView::OnForceOnlineSignInForUser(const AccountId& user) {
   UserState* state = FindStateForUser(user);
   if (!state) {
@@ -998,40 +979,6 @@ void LockContentsView::OnForceOnlineSignInForUser(const AccountId& user) {
       TryToFindBigUser(user, true /*require_auth_active*/);
   if (big_user && big_user->auth_user()) {
     LayoutAuth(big_user, nullptr /*opt_to_hide*/, true /*animate*/);
-  }
-}
-
-void LockContentsView::OnShowEasyUnlockIcon(
-    const AccountId& user,
-    const EasyUnlockIconInfo& icon_info) {
-  if (base::FeatureList::IsEnabled(ash::features::kSmartLockUIRevamp)) {
-    return;
-  }
-
-  UserState* state = FindStateForUser(user);
-  if (!state) {
-    return;
-  }
-
-  state->easy_unlock_icon_info = icon_info;
-  UpdateEasyUnlockIconForUser(user);
-
-  // Show tooltip only if the user is actively showing auth.
-  LoginBigUserView* big_user =
-      TryToFindBigUser(user, true /*require_auth_active*/);
-  if (!big_user || !big_user->auth_user()) {
-    return;
-  }
-
-  if (tooltip_bubble_->GetVisible()) {
-    tooltip_bubble_->Hide();
-  }
-
-  if (icon_info.autoshow_tooltip) {
-    tooltip_bubble_->SetAnchorView(big_user->auth_user()->GetActiveInputView());
-    tooltip_bubble_->set_text(icon_info.tooltip);
-    tooltip_bubble_->Show();
-    tooltip_bubble_->SetVisible(true);
   }
 }
 
@@ -1907,9 +1854,6 @@ void LockContentsView::LayoutAuth(LoginBigUserView* to_update,
         if (state->show_pin) {
           to_update_auth |= LoginAuthUserView::AUTH_PIN;
         }
-        if (state->enable_tap_auth) {
-          to_update_auth |= LoginAuthUserView::AUTH_TAP;
-        }
         if (state->fingerprint_state != FingerprintState::UNAVAILABLE) {
           to_update_auth |= LoginAuthUserView::AUTH_FINGERPRINT;
         }
@@ -2011,10 +1955,6 @@ void LockContentsView::OnBigUserChanged() {
 
   Shell::Get()->login_screen_controller()->OnFocusPod(big_user_account_id);
 
-  if (!base::FeatureList::IsEnabled(ash::features::kSmartLockUIRevamp)) {
-    UpdateEasyUnlockIconForUser(big_user_account_id);
-  }
-
   // The new auth user might have different last used detachable base - make
   // sure the detachable base pairing error is updated if needed.
   OnDetachableBasePairingStatusChanged(
@@ -2023,36 +1963,6 @@ void LockContentsView::OnBigUserChanged() {
   if (!detachable_base_error_bubble_->GetVisible()) {
     CurrentBigUserView()->RequestFocus();
   }
-}
-
-void LockContentsView::UpdateEasyUnlockIconForUser(const AccountId& user) {
-  // Try to find an big view for |user|. If there is none, there is no state to
-  // update.
-  LoginBigUserView* big_view =
-      TryToFindBigUser(user, false /*require_auth_active*/);
-  if (!big_view || !big_view->auth_user()) {
-    return;
-  }
-
-  UserState* state = FindStateForUser(user);
-  DCHECK(state);
-
-  // Hide easy unlock icon if there is no data available.
-  if (!state->easy_unlock_icon_info) {
-    big_view->auth_user()->SetEasyUnlockIcon(EasyUnlockIconState::NONE,
-                                             std::u16string());
-    return;
-  }
-
-  // TODO(jdufault): Make easy unlock backend always send aria_label, right now
-  // it is only sent if there is no tooltip.
-  std::u16string accessibility_label = state->easy_unlock_icon_info->aria_label;
-  if (accessibility_label.empty()) {
-    accessibility_label = state->easy_unlock_icon_info->tooltip;
-  }
-
-  big_view->auth_user()->SetEasyUnlockIcon(
-      state->easy_unlock_icon_info->icon_state, accessibility_label);
 }
 
 LoginBigUserView* LockContentsView::CurrentBigUserView() {
@@ -2196,24 +2106,6 @@ void LockContentsView::HideAuthErrorMessage() {
   }
 }
 
-void LockContentsView::OnEasyUnlockIconHovered() {
-  LoginBigUserView* big_view = CurrentBigUserView();
-  if (!big_view->auth_user()) {
-    return;
-  }
-
-  UserState* state =
-      FindStateForUser(big_view->GetCurrentUser().basic_user_info.account_id);
-  DCHECK(state);
-  DCHECK(state->easy_unlock_icon_info);
-
-  if (!state->easy_unlock_icon_info->tooltip.empty()) {
-    tooltip_bubble_->SetAnchorView(big_view->auth_user()->GetActiveInputView());
-    tooltip_bubble_->set_text(state->easy_unlock_icon_info->tooltip);
-    tooltip_bubble_->Show();
-  }
-}
-
 void LockContentsView::OnParentAccessValidationFinished(
     const AccountId& account_id,
     bool access_granted) {
@@ -2298,8 +2190,6 @@ std::unique_ptr<LoginBigUserView> LockContentsView::AllocateLoginBigUserView(
                           base::Unretained(this), is_primary);
   auth_user_callbacks.on_remove = base::BindRepeating(
       &LockContentsView::RemoveUser, base::Unretained(this), is_primary);
-  auth_user_callbacks.on_easy_unlock_icon_hovered = base::BindRepeating(
-      &LockContentsView::OnEasyUnlockIconHovered, base::Unretained(this));
   auth_user_callbacks.on_auth_factor_is_hiding_password_changed =
       base::BindRepeating(
           &LockContentsView::OnAuthFactorIsHidingPasswordChanged,
@@ -2447,20 +2337,38 @@ void LockContentsView::UpdateSystemInfoColors() {
 }
 
 void LockContentsView::UpdateBottomStatusIndicatorColors() {
+  const bool jelly_style = chromeos::features::IsJellyrollEnabled();
   switch (bottom_status_indicator_state_) {
     case BottomIndicatorState::kNone:
       return;
     case BottomIndicatorState::kManagedDevice: {
-      bottom_status_indicator_->SetIcon(chromeos::kEnterpriseIcon,
-                                        kColorAshIconColorPrimary);
-      bottom_status_indicator_->SetEnabledTextColorIds(
-          kColorAshTextColorPrimary);
+      if (jelly_style) {
+        bottom_status_indicator_->SetIcon(chromeos::kEnterpriseIcon,
+                                          cros_tokens::kCrosSysOnSurface, 20);
+        bottom_status_indicator_->SetEnabledTextColorIds(
+            cros_tokens::kCrosSysOnSurface);
+        bottom_status_indicator_->SetImageLabelSpacing(16);
+      } else {
+        bottom_status_indicator_->SetIcon(chromeos::kEnterpriseIcon,
+                                          kColorAshIconColorPrimary);
+        bottom_status_indicator_->SetEnabledTextColorIds(
+            kColorAshTextColorPrimary);
+      }
       break;
     }
     case BottomIndicatorState::kAdbSideLoadingEnabled: {
-      bottom_status_indicator_->SetIcon(kLockScreenAlertIcon,
-                                        kColorAshIconColorAlert);
-      bottom_status_indicator_->SetEnabledTextColorIds(kColorAshTextColorAlert);
+      if (jelly_style) {
+        bottom_status_indicator_->SetIcon(kLockScreenAlertIcon,
+                                          cros_tokens::kCrosSysError, 20);
+        bottom_status_indicator_->SetEnabledTextColorIds(
+            cros_tokens::kCrosSysError);
+        bottom_status_indicator_->SetImageLabelSpacing(16);
+      } else {
+        bottom_status_indicator_->SetIcon(kLockScreenAlertIcon,
+                                          kColorAshIconColorAlert);
+        bottom_status_indicator_->SetEnabledTextColorIds(
+            kColorAshTextColorAlert);
+      }
       break;
     }
   }
@@ -2513,7 +2421,7 @@ void LockContentsView::SetKioskLicenseModeForTesting(
 void LockContentsView::RecordAndResetPasswordAttempts(
     AuthEventsRecorder::AuthenticationOutcome outcome,
     AccountId account_id) {
-  AuthEventsRecorder::Get()->OnExistingUserLoginExit(
+  AuthEventsRecorder::Get()->OnExistingUserLoginScreenExit(
       outcome, unlock_attempt_by_user_[account_id]);
   unlock_attempt_by_user_[account_id] = 0;
 }

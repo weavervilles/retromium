@@ -7,13 +7,16 @@
 
 #include <memory>
 
+#include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
 #include "base/time/time.h"
 #include "chrome/browser/performance_manager/user_tuning/user_performance_tuning_notifier.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom-shared.h"
+#include "components/performance_manager/public/user_tuning/prefs.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
 class ChromeBrowserMainExtraPartsPerformanceManager;
@@ -39,9 +42,6 @@ class UserPerformanceTuningManager {
   // would be `20` for 20%.
   static const uint64_t kLowBatteryThresholdPercent;
 
-  // Command line switch for setting the discard time.
-  static const char kTimeBeforeDiscardInMinutesSwitch[];
-
   class FrameThrottlingDelegate {
    public:
     virtual void StartThrottlingAllFrameSinks() = 0;
@@ -52,7 +52,8 @@ class UserPerformanceTuningManager {
 
   class HighEfficiencyModeDelegate {
    public:
-    virtual void ToggleHighEfficiencyMode(bool enabled) = 0;
+    virtual void ToggleHighEfficiencyMode(
+        prefs::HighEfficiencyModeState state) = 0;
     virtual void SetTimeBeforeDiscard(base::TimeDelta time_before_discard) = 0;
     virtual ~HighEfficiencyModeDelegate() = default;
   };
@@ -105,6 +106,56 @@ class UserPerformanceTuningManager {
     virtual void OnMemoryMetricsRefreshed() {}
   };
 
+  class TabResourceUsage : public base::RefCounted<TabResourceUsage> {
+   public:
+    TabResourceUsage() = default;
+
+    uint64_t memory_usage_in_bytes() const { return memory_usage_bytes_; }
+
+    void set_memory_usage_in_bytes(uint64_t memory_usage_bytes) {
+      memory_usage_bytes_ = memory_usage_bytes;
+    }
+
+   private:
+    friend class base::RefCounted<TabResourceUsage>;
+    ~TabResourceUsage() = default;
+
+    uint64_t memory_usage_bytes_ = 0;
+  };
+
+  // Per-tab class to keep track of current memory usage for each tab.
+  class ResourceUsageTabHelper
+      : public content::WebContentsObserver,
+        public content::WebContentsUserData<ResourceUsageTabHelper> {
+   public:
+    ResourceUsageTabHelper(const ResourceUsageTabHelper&) = delete;
+    ResourceUsageTabHelper& operator=(const ResourceUsageTabHelper&) = delete;
+
+    ~ResourceUsageTabHelper() override;
+
+    // content::WebContentsObserver
+    void PrimaryPageChanged(content::Page& page) override;
+
+    uint64_t GetMemoryUsageInBytes() {
+      return resource_usage_->memory_usage_in_bytes();
+    }
+
+    void SetMemoryUsageInBytes(uint64_t memory_usage_bytes) {
+      resource_usage_->set_memory_usage_in_bytes(memory_usage_bytes);
+    }
+
+    scoped_refptr<const TabResourceUsage> resource_usage() const {
+      return resource_usage_;
+    }
+
+   private:
+    friend class content::WebContentsUserData<ResourceUsageTabHelper>;
+    explicit ResourceUsageTabHelper(content::WebContents* contents);
+    WEB_CONTENTS_USER_DATA_KEY_DECL();
+
+    scoped_refptr<TabResourceUsage> resource_usage_;
+  };
+
   class PreDiscardResourceUsage
       : public content::WebContentsUserData<PreDiscardResourceUsage> {
    public:
@@ -116,6 +167,11 @@ class UserPerformanceTuningManager {
     // Returns the resource usage estimate in kilobytes.
     uint64_t memory_footprint_estimate_kb() const {
       return memory_footprint_estimate_;
+    }
+
+    void SetMemoryFootprintEstimateKbForTesting(
+        uint64_t memory_footprint_estimate) {
+      memory_footprint_estimate_ = memory_footprint_estimate;
     }
 
     ::mojom::LifecycleUnitDiscardReason discard_reason() const {
@@ -156,10 +212,6 @@ class UserPerformanceTuningManager {
 
   // Enables high efficiency mode and sets the relevant prefs accordingly.
   void SetHighEfficiencyModeEnabled(bool enabled);
-
-  // Sets the default value of the discard time pref using the command line
-  // switch, if the pref is in the default state.
-  static void SetDefaultTimeBeforeDiscardFromSwitch(PrefService* local_state);
 
   // Discards the given WebContents with the same mechanism as one that is
   // discarded through a natural timeout
@@ -212,7 +264,7 @@ class UserPerformanceTuningManager {
 
     void NotifyTabCountThresholdReached() override;
     void NotifyMemoryThresholdReached() override;
-    void NotifyMemoryMetricsRefreshed() override;
+    void NotifyMemoryMetricsRefreshed(ProxyAndPmfKbVector) override;
   };
 
   explicit UserPerformanceTuningManager(

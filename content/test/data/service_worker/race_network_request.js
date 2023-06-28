@@ -17,6 +17,12 @@ const composeCustomResponse = () => {
 };
 
 self.addEventListener('install', e => {
+  if (e.registerRouter) {
+    e.registerRouter({
+      condition: {urlPattern: "/service_worker/race_network_and_fetch"},
+      source: "race-network-and-fetch-handler"
+    });
+  }
   self.skipWaiting();
 });
 
@@ -48,5 +54,13 @@ self.addEventListener("fetch", async e => {
         return composeCustomResponse();
       })()
     );
+  }
+
+  if (url.search.includes('sw_pass_through')) {
+    e.respondWith(fetch(request));
+  }
+
+  if (url.search.includes('sw_clone_pass_through')) {
+    e.respondWith(fetch(request.clone()));
   }
 });

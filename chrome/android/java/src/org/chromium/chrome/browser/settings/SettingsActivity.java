@@ -30,16 +30,18 @@ import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
-import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.IntentUtils;
+import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ApplicationLifetime;
-import org.chromium.chrome.browser.BackPressHelper;
 import org.chromium.chrome.browser.ChromeBaseAppCompatActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.accessibility.settings.ChromeAccessibilitySettingsDelegate;
+import org.chromium.chrome.browser.back_press.BackPressHelper;
 import org.chromium.chrome.browser.back_press.BackPressManager;
+import org.chromium.chrome.browser.back_press.SecondaryActivityBackPressUma.SecondaryActivity;
 import org.chromium.chrome.browser.browsing_data.ClearBrowsingDataFragmentBasic;
 import org.chromium.chrome.browser.feedback.FragmentHelpAndFeedbackLauncher;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
@@ -55,6 +57,7 @@ import org.chromium.chrome.browser.password_check.PasswordCheckComponentUiFactor
 import org.chromium.chrome.browser.password_check.PasswordCheckFragmentView;
 import org.chromium.chrome.browser.password_entry_edit.CredentialEditUiFactory;
 import org.chromium.chrome.browser.password_entry_edit.CredentialEntryFragmentViewBase;
+import org.chromium.chrome.browser.password_manager.settings.PasswordSettings;
 import org.chromium.chrome.browser.privacy_guide.PrivacyGuideFragment;
 import org.chromium.chrome.browser.privacy_sandbox.AdMeasurementFragment;
 import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxSettingsBaseFragment;
@@ -66,11 +69,13 @@ import org.chromium.chrome.browser.safety_check.SafetyCheckUpdatesDelegateImpl;
 import org.chromium.chrome.browser.search_engines.settings.SearchEngineSettings;
 import org.chromium.chrome.browser.signin.SyncConsentActivityLauncherImpl;
 import org.chromium.chrome.browser.site_settings.ChromeSiteSettingsDelegate;
+import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.components.browser_ui.accessibility.AccessibilitySettings;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetControllerFactory;
+import org.chromium.components.browser_ui.bottomsheet.ManagedBottomSheetController;
 import org.chromium.components.browser_ui.modaldialog.AppModalPresenter;
 import org.chromium.components.browser_ui.settings.CustomDividerFragment;
 import org.chromium.components.browser_ui.settings.FragmentSettingsLauncher;
@@ -118,7 +123,10 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
 
     private ScrimCoordinator mScrim;
 
-    private BottomSheetController mBottomSheetController;
+    private ManagedBottomSheetController mBottomSheetController;
+
+    private OneshotSupplierImpl<BottomSheetController> mBottomSheetControllerSupplier =
+            new OneshotSupplierImpl<>();
 
     @Nullable
     private UiConfig mUiConfig;
@@ -266,6 +274,8 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
                 () -> mScrim, (sheet) -> {}, getWindow(),
                 KeyboardVisibilityDelegate.getInstance(), () -> sheetContainer);
         // clang-format on
+
+        mBottomSheetControllerSupplier.set(mBottomSheetController);
     }
 
     // OnPreferenceStartFragmentCallback:
@@ -394,16 +404,42 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
     }
 
     private void initBackPressHandler() {
+        // Handlers registered last will be called first.
+        registerMainFragmentBackPressHandler();
+        if (ChromeFeatureList.sPrivacyGuidePostMVP.isEnabled()) {
+            registerBottomSheetBackPressHandler();
+        }
+    }
+
+    private void registerMainFragmentBackPressHandler() {
         Fragment activeFragment = getMainFragment();
         if (BackPressManager.isSecondaryActivityEnabled()) {
             if (activeFragment instanceof BackPressHandler) {
                 BackPressHelper.create(activeFragment.getViewLifecycleOwner(),
-                        getOnBackPressedDispatcher(), (BackPressHandler) activeFragment);
+                        getOnBackPressedDispatcher(), (BackPressHandler) activeFragment,
+                        SecondaryActivity.SETTINGS);
             }
         } else if (activeFragment instanceof BackPressHelper.ObsoleteBackPressedHandler) {
             BackPressHelper.create(activeFragment.getViewLifecycleOwner(),
                     getOnBackPressedDispatcher(),
-                    (BackPressHelper.ObsoleteBackPressedHandler) activeFragment);
+                    (BackPressHelper.ObsoleteBackPressedHandler) activeFragment,
+                    SecondaryActivity.SETTINGS);
+        }
+    }
+
+    private void registerBottomSheetBackPressHandler() {
+        if (mBottomSheetController == null) return;
+
+        BackPressHandler bottomSheetBackPressHandler =
+                mBottomSheetController.getBottomSheetBackPressHandler();
+        if (bottomSheetBackPressHandler != null) {
+            if (BackPressManager.isSecondaryActivityEnabled()) {
+                BackPressHelper.create(this, getOnBackPressedDispatcher(),
+                        bottomSheetBackPressHandler, SecondaryActivity.SETTINGS);
+            } else {
+                BackPressHelper.create(this, getOnBackPressedDispatcher(),
+                        mBottomSheetController::handleBackPress, SecondaryActivity.SETTINGS);
+            }
         }
     }
 
@@ -433,7 +469,8 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
         if (fragment instanceof SafetyCheckSettingsFragment) {
             SafetyCheckCoordinator.create((SafetyCheckSettingsFragment) fragment,
                     new SafetyCheckUpdatesDelegateImpl(), mSettingsLauncher,
-                    SyncConsentActivityLauncherImpl.get(), getModalDialogManagerSupplier());
+                    SyncConsentActivityLauncherImpl.get(), getModalDialogManagerSupplier(),
+                    SyncServiceFactory.getForProfile(mProfile));
         }
         if (fragment instanceof PasswordCheckFragmentView) {
             PasswordCheckComponentUiFactory.create((PasswordCheckFragmentView) fragment,
@@ -472,7 +509,7 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
                 assert ChromeFeatureList.isEnabled(ChromeFeatureList.PRIVACY_SANDBOX_SETTINGS_4)
                     : "PrivacySandboxSettings4 is disabled";
                 SiteSettingsHelper.showCategorySettings(
-                        context, SiteSettingsCategory.Type.THIRD_PARTY_COOKIES);
+                        context, mProfile, SiteSettingsCategory.Type.THIRD_PARTY_COOKIES);
             });
         }
         if (fragment instanceof AdMeasurementFragment) {
@@ -500,14 +537,17 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
         }
         if (fragment instanceof PrivacyGuideFragment) {
             PrivacyGuideFragment pgFragment = (PrivacyGuideFragment) fragment;
-            pgFragment.setBottomSheetController(mBottomSheetController);
+            pgFragment.setBottomSheetControllerSupplier(mBottomSheetControllerSupplier);
             pgFragment.setCustomTabIntentHelper(
                     LaunchIntentDispatcher::createCustomTabActivityIntent);
             pgFragment.setSettingsLauncher(mSettingsLauncher);
         }
         if (fragment instanceof AccessibilitySettings) {
             ((AccessibilitySettings) fragment)
-                    .setDelegate(new ChromeAccessibilitySettingsDelegate());
+                    .setDelegate(new ChromeAccessibilitySettingsDelegate(mProfile));
+        }
+        if (fragment instanceof PasswordSettings) {
+            ((PasswordSettings) fragment).setBottomSheetController(mBottomSheetController);
         }
     }
 
@@ -538,21 +578,20 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
      */
     private void setStatusBarColor() {
         // On P+, the status bar color is set via the XML theme.
-        if ((!DeviceFormFactor.isNonMultiDisplayContextOnTablet(this)
-                    && VERSION.SDK_INT >= Build.VERSION_CODES.P)
-                || (DeviceFormFactor.isNonMultiDisplayContextOnTablet(this)
-                        && !ChromeFeatureList.sTabStripRedesign.isEnabled()
-                        && VERSION.SDK_INT >= Build.VERSION_CODES.P)) {
+        if (VERSION.SDK_INT >= Build.VERSION_CODES.P && !BuildInfo.getInstance().isAutomotive
+                && (!DeviceFormFactor.isNonMultiDisplayContextOnTablet(this)
+                        || (DeviceFormFactor.isNonMultiDisplayContextOnTablet(this)
+                                && !ChromeFeatureList.sTabStripRedesign.isEnabled()))) {
             return;
         }
 
         if (UiUtils.isSystemUiThemingDisabled()) return;
 
         // Use transparent color, so the AppBarLayout can color the status bar on scroll.
-        ApiCompatibilityUtils.setStatusBarColor(getWindow(), Color.TRANSPARENT);
+        UiUtils.setStatusBarColor(getWindow(), Color.TRANSPARENT);
 
         // Set status bar icon color according to background color.
-        ApiCompatibilityUtils.setStatusBarIconColor(getWindow().getDecorView().getRootView(),
+        UiUtils.setStatusBarIconColor(getWindow().getDecorView().getRootView(),
                 getResources().getBoolean(R.bool.window_light_status_bar));
     }
 
@@ -570,10 +609,5 @@ public class SettingsActivity extends ChromeBaseAppCompatActivity
         ta.recycle();
 
         return divider;
-    }
-
-    @Override
-    protected boolean shouldUseActionBarForAutomotiveToolbar() {
-        return false;
     }
 }

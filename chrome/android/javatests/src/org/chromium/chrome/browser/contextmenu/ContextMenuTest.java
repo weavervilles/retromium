@@ -319,9 +319,6 @@ public class ContextMenuTest implements DownloadTestRule.CustomMainActivityStart
             menuCoordinator.clickChipForTesting();
         });
 
-        Assert.assertEquals("Selection histogram pings not equal to one", 1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "ContextMenu.LensChip.Event", ContextMenuChipController.ChipEvent.CLICKED));
         Assert.assertFalse("Chip popoup still showing.",
                 menuCoordinator.getCurrentPopupWindowForTesting().isShowing());
     }
@@ -422,9 +419,6 @@ public class ContextMenuTest implements DownloadTestRule.CustomMainActivityStart
             menuCoordinator.clickChipForTesting();
         });
 
-        Assert.assertEquals("Selection histogram pings not equal to one", 1,
-                RecordHistogram.getHistogramValueCountForTesting(
-                        "ContextMenu.LensChip.Event", ContextMenuChipController.ChipEvent.CLICKED));
         Assert.assertFalse("Chip popoup still showing.",
                 menuCoordinator.getCurrentPopupWindowForTesting().isShowing());
     }
@@ -905,7 +899,8 @@ public class ContextMenuTest implements DownloadTestRule.CustomMainActivityStart
                 ContextMenuHelper.createForTesting(0, tab.getWebContents());
         ContextMenuParams params = new ContextMenuParams(0, 0, new GURL("http://example.com/"),
                 GURL.emptyGURL(), "", GURL.emptyGURL(), GURL.emptyGURL(), "", null, false, 0, 0,
-                MenuSourceType.MENU_SOURCE_TOUCH, /*getOpenedFromHighlight*/ true);
+                MenuSourceType.MENU_SOURCE_TOUCH, /*getOpenedFromHighlight=*/true,
+                /*impression=*/null);
         ContextMenuPopulatorFactory populatorFactory = new ChromeContextMenuPopulatorFactory(
                 mItemDelegate,
                 ()
@@ -1065,7 +1060,7 @@ public class ContextMenuTest implements DownloadTestRule.CustomMainActivityStart
 
         // Wait for the download to complete and see if we got the right file
         Assert.assertTrue(mDownloadTestRule.waitForChromeDownloadToFinish(callCount));
-        mDownloadTestRule.checkLastDownload(expectedFilename);
+        Assert.assertTrue(mDownloadTestRule.hasDownloaded(expectedFilename, null));
     }
 
     private String getClipboardText() throws Throwable {

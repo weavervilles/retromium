@@ -11,11 +11,11 @@
 #include <vector>
 
 #include "base/callback_list.h"
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "base/timer/elapsed_timer.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/sessions/core/session_id.h"
@@ -51,12 +51,12 @@ class RecentTabsSubMenuModel : public ui::SimpleMenuModel,
                                public ui::SimpleMenuModel::Delegate,
                                public sessions::TabRestoreServiceObserver {
  public:
-  // Command Id for recently closed items header or disabled item to which the
+  using LogMenuMetricsCallback = base::RepeatingCallback<void(int)>;
+
+  // Command ID for recently closed items header or disabled item to which the
   // accelerator string will be appended.
-  static constexpr int kRecentlyClosedHeaderCommandId =
-      AppMenuModel::kMinRecentTabsCommandId;
   static constexpr int kDisabledRecentlyClosedHeaderCommandId =
-      kRecentlyClosedHeaderCommandId + AppMenuModel::kNumUnboundedMenuTypes;
+      AppMenuModel::kMinRecentTabsCommandId;
   static constexpr int kFirstMenuEntryCommandId =
       kDisabledRecentlyClosedHeaderCommandId +
       AppMenuModel::kNumUnboundedMenuTypes;
@@ -79,12 +79,8 @@ class RecentTabsSubMenuModel : public ui::SimpleMenuModel,
   bool GetAcceleratorForCommandId(int command_id,
                                   ui::Accelerator* accelerator) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
-  const gfx::FontList* GetLabelFontListAt(size_t index) const override;
 
-  int GetMaxWidthForItemAtIndex(size_t item_index) const;
-  bool GetURLAndTitleForItemAtIndex(size_t index,
-                                    std::string* url,
-                                    std::u16string* title);
+  void RegisterLogMenuMetricsCallback(LogMenuMetricsCallback callback);
 
  private:
   struct TabNavigationItem;
@@ -218,10 +214,9 @@ class RecentTabsSubMenuModel : public ui::SimpleMenuModel,
   // Returns true if the command id identifies a sub menu item.
   bool IsSubMenuModelCommandId(int command_id) const;
 
-  // Returns true if the command id identifies a device name item.
-  bool IsDeviceNameCommandId(int command_id) const;
-
   const raw_ptr<Browser> browser_;  // Weak.
+
+  LogMenuMetricsCallback log_menu_metrics_callback_;
 
   const raw_ptr<sync_sessions::SessionSyncService>
       session_sync_service_;  // Weak.
@@ -258,18 +253,14 @@ class RecentTabsSubMenuModel : public ui::SimpleMenuModel,
   // closed groups and windows. These are not executable.
   SubMenuItems local_sub_menu_items_;
 
-  // Device name items for names of non-local devices. These are not
-  // executable.
-  DeviceNameItems device_name_items_;
+  // Index of "Recently closed" title item.
+  absl::optional<size_t> recently_closed_title_index_;
 
   // Index of the last local entry (recently closed tab or window or group) in
   // the menumodel.
   size_t last_local_model_index_ = kHistorySeparatorIndex;
 
   base::CancelableTaskTracker local_tab_cancelable_task_tracker_;
-
-  // Time the menu is open for until a recent tab is selected.
-  base::ElapsedTimer menu_opened_timer_;
 
   base::ScopedObservation<sessions::TabRestoreService,
                           sessions::TabRestoreServiceObserver>

@@ -73,11 +73,10 @@ const char kTestEnterpriseAccountId[] = "enterprise-kiosk-app@localhost";
 const test::UIPath kConfigNetwork = {"app-launch-splash", "configNetwork"};
 const char kSizeChangedMessage[] = "size_changed";
 
-bool ShouldBrowserBeClosedByAppSessionBrowserHander(
-    AppSessionAsh* app_session) {
+bool DidSessionCloseNewWindow(KioskSystemSession* session) {
   base::RunLoop waiter;
   bool result = false;
-  app_session->SetOnHandleBrowserCallbackForTesting(
+  session->SetOnHandleBrowserCallbackForTesting(
       base::BindLambdaForTesting([&waiter, &result](bool is_closing) {
         result = is_closing;
         waiter.Quit();
@@ -86,16 +85,16 @@ bool ShouldBrowserBeClosedByAppSessionBrowserHander(
   return result;
 }
 
-Browser* OpenA11ySettingsBrowser(AppSessionAsh* app_session) {
+Browser* OpenA11ySettingsBrowser(KioskSystemSession* session) {
   auto* settings_manager = chrome::SettingsWindowManager::GetInstance();
   Profile* profile = ProfileManager::GetPrimaryUserProfile();
 
   settings_manager->ShowOSSettings(
       profile, chromeos::settings::mojom::kManageAccessibilitySubpagePath);
 
-  EXPECT_FALSE(ShouldBrowserBeClosedByAppSessionBrowserHander(app_session));
+  EXPECT_FALSE(DidSessionCloseNewWindow(session));
 
-  Browser* settings_browser = app_session->GetSettingsBrowserForTesting();
+  Browser* settings_browser = session->GetSettingsBrowserForTesting();
   return settings_browser;
 }
 
@@ -349,8 +348,6 @@ void KioskBaseTest::RunAppLaunchNetworkDownTest() {
   error_screen_waiter.Wait();
   EXPECT_TRUE(LoginScreenTestApi::IsOobeDialogVisible());
 
-  ASSERT_TRUE(GetKioskLaunchController()->showing_network_dialog());
-
   SimulateNetworkOnline();
   WaitForAppLaunchSuccess();
 }
@@ -372,6 +369,14 @@ void KioskBaseTest::BlockAppLaunch(bool block) {
   } else {
     block_app_launch_override_.reset();
   }
+}
+
+void KioskBaseTest::SetTestApp(const std::string& app_id,
+                               const std::string& crx_file,
+                               const std::string& version) {
+  test_app_id_ = app_id;
+  test_crx_file_ = (crx_file == "") ? app_id + ".crx" : crx_file;
+  test_app_version_ = version;
 }
 
 }  // namespace ash

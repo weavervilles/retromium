@@ -20,6 +20,7 @@ class NGColumnSpannerPath;
 class NGConstraintSpace;
 class NGEarlyBreak;
 class NGFragmentItems;
+class NGInlineNode;
 class NGLayoutResult;
 class NGPhysicalBoxFragment;
 class NGPhysicalFragment;
@@ -144,7 +145,7 @@ class CORE_EXPORT NGBlockNode : public NGLayoutInputNode {
   // or nodes consisting purely of block-level, floats, and/or out-of-flow
   // positioned children will return false.
   bool IsInlineFormattingContextRoot(
-      NGLayoutInputNode* first_child_out = nullptr) const;
+      NGInlineNode* first_child_out = nullptr) const;
 
   bool IsInlineLevel() const;
   bool IsAtomicInlineLevel() const;
@@ -211,8 +212,6 @@ class CORE_EXPORT NGBlockNode : public NGLayoutInputNode {
       bool use_first_line_style,
       NGBaselineAlgorithmType baseline_algorithm_type);
 
-  void InsertIntoLegacyPositionedObjectsOf(LayoutBlock*) const;
-
   // Write back resolved margins to legacy.
   void StoreMargins(const NGConstraintSpace&, const NGBoxStrut& margins);
   void StoreMargins(const NGPhysicalBoxStrut& margins);
@@ -268,7 +267,7 @@ class CORE_EXPORT NGBlockNode : public NGLayoutInputNode {
                     const NGConstraintSpace&,
                     const NGBlockBreakToken*,
                     const NGLayoutResult*,
-                    LayoutSize old_box_size) const;
+                    PhysicalSize old_box_size) const;
 
   // Update the layout results vector in LayoutBox with the new result.
   void StoreResultInLayoutBox(const NGLayoutResult*,

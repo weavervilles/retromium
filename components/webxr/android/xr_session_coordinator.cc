@@ -88,6 +88,16 @@ void XrSessionCoordinator::RequestVrSession(
       webxr::GetJavaWebContents(render_process_id, render_frame_id));
 }
 
+void XrSessionCoordinator::RequestXrSession(
+    ActivityReadyCallback ready_callback) {
+  DVLOG(1) << __func__;
+  JNIEnv* env = AttachCurrentThread();
+
+  activity_ready_callback_ = std::move(ready_callback);
+
+  Java_XrSessionCoordinator_startXrSession(env, j_xr_session_coordinator_);
+}
+
 void XrSessionCoordinator::EndSession() {
   DVLOG(1) << __func__;
   JNIEnv* env = AttachCurrentThread();
@@ -142,6 +152,16 @@ void XrSessionCoordinator::OnDrawingSurfaceDestroyed(
   }
 }
 
+void XrSessionCoordinator::OnXrHostActivityReady(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj,
+    const base::android::JavaParamRef<jobject>& activity) {
+  DVLOG(1) << __func__;
+  if (activity_ready_callback_) {
+    std::move(activity_ready_callback_).Run(activity);
+  }
+}
+
 bool XrSessionCoordinator::EnsureARCoreLoaded() {
 #if BUILDFLAG(ENABLE_ARCORE)
   DCHECK(device::IsArCoreSupported());
@@ -179,6 +199,13 @@ ScopedJavaLocalRef<jobject> XrSessionCoordinator::GetCurrentActivityContext() {
 ScopedJavaLocalRef<jobject> XrSessionCoordinator::GetApplicationContext() {
   JNIEnv* env = AttachCurrentThread();
   return Java_XrSessionCoordinator_getApplicationContext(env);
+}
+
+// static
+ScopedJavaLocalRef<jobject> XrSessionCoordinator::GetActivity(
+    ScopedJavaLocalRef<jobject> web_contents) {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_XrSessionCoordinator_getActivity(env, web_contents);
 }
 
 }  // namespace webxr

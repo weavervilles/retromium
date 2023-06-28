@@ -43,10 +43,6 @@ class ExtensionsContainer {
   // toolbar.
   virtual bool IsActionVisibleOnToolbar(const std::string& action_id) const = 0;
 
-  // Returns the action's toolbar button visibility.
-  virtual extensions::ExtensionContextMenuModel::ButtonVisibility
-  GetActionVisibility(const std::string& action_id) const = 0;
-
   // Undoes the current "pop out"; i.e., moves the popped out action back into
   // overflow.
   virtual void UndoPopOut() = 0;
@@ -85,6 +81,11 @@ class ExtensionsContainer {
   virtual void UpdateToolbarActionHoverCard(
       ToolbarActionView* action_view,
       ToolbarActionHoverCardUpdateType update_type) = 0;
+
+  // Collapses the confirmation on the request access button, effectively
+  // hiding the button. Does nothing if the confirmation is not showing
+  // anymore.
+  virtual void CollapseConfirmation() = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_EXTENSIONS_EXTENSIONS_CONTAINER_H_

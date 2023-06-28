@@ -126,7 +126,7 @@ public class TabSwitcherTabletTest {
             }
 
             @Override
-            public void onStartedShowing(int layoutType, boolean showToolbar) {
+            public void onStartedShowing(int layoutType) {
                 if (layoutType != LayoutType.TAB_SWITCHER) {
                     return;
                 }
@@ -146,12 +146,13 @@ public class TabSwitcherTabletTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> {
             activity.getLayoutManagerSupplier().removeObserver(mLayoutManagerCallback);
         });
+        if (mTabListDelegate != null) mTabListDelegate.resetBitmapFetchCountForTesting();
     }
 
     @Test
     @MediumTest
     @RequiresRestart
-    public void testEnterAndExitTabSwitcher() throws ExecutionException, TimeoutException {
+    public void testEnterAndExitTabSwitcher() throws TimeoutException {
         Layout layout = sActivityTestRule.getActivity().getLayoutManager().getOverviewLayout();
         assertNull("StartSurface layout should not be initialized", layout);
         ViewStub tabSwitcherStub = (ViewStub) sActivityTestRule.getActivity().findViewById(
@@ -202,9 +203,6 @@ public class TabSwitcherTabletTest {
                        withParent(withId(R.id.tab_switcher_switches_and_menu))))
                 .check(matches(withEffectiveVisibility(GONE)));
         onView(allOf(withId(R.id.new_tab_button), withParent(withId(R.id.tab_switcher_toolbar))))
-                .check(matches(withEffectiveVisibility(GONE)));
-        onView(allOf(withId(R.id.tab_switcher_mode_tab_switcher_button),
-                       withParent(withId(R.id.tab_switcher_switches_and_menu))))
                 .check(matches(withEffectiveVisibility(GONE)));
 
         // Assert visible views.
@@ -263,11 +261,21 @@ public class TabSwitcherTabletTest {
         // Assert the grid tab switcher is shown automatically, since there is no next tab.
         onView(withId(R.id.tab_switcher_view_holder))
                 .check(matches(withEffectiveVisibility(VISIBLE)));
+    }
 
-        TestThreadUtils.runOnUiThreadBlocking(()
-                                                      -> sActivityTestRule.getActivity()
-                                                                 .findViewById(R.id.new_tab_button)
-                                                                 .performClick());
+    @Test
+    @MediumTest
+    public void testGridTabSwitcherOnCloseAllTabs() throws ExecutionException {
+        // Assert the grid tab switcher is not yet showing.
+        onView(withId(R.id.tab_switcher_view_holder)).check(matches(withEffectiveVisibility(GONE)));
+
+        // Close all tabs.
+        ChromeTabUtils.closeAllTabs(InstrumentationRegistry.getInstrumentation(),
+                sActivityTestRule.getActivity().getTabModelSelectorSupplier());
+
+        // Assert the grid tab switcher is shown automatically, since there is no next tab.
+        onView(withId(R.id.tab_switcher_view_holder))
+                .check(matches(withEffectiveVisibility(VISIBLE)));
     }
 
     @Test
@@ -368,7 +376,7 @@ public class TabSwitcherTabletTest {
                 });
     }
 
-    private void setupForThumbnailCheck() {
+    private void retrieveTabListDelegate() {
         Layout layout = sActivityTestRule.getActivity().getLayoutManager().getOverviewLayout();
         assertTrue(layout instanceof TabSwitcherAndStartSurfaceLayout);
         TabSwitcherAndStartSurfaceLayout mTabSwitcherAndStartSurfaceLayout =
@@ -376,6 +384,10 @@ public class TabSwitcherTabletTest {
 
         mTabListDelegate = mTabSwitcherAndStartSurfaceLayout.getStartSurfaceForTesting()
                                    .getGridTabListDelegate();
+    }
+
+    private void setupForThumbnailCheck() {
+        retrieveTabListDelegate();
         Callback<Bitmap> mBitmapListener = (bitmap) -> mAllBitmaps.add(new WeakReference<>(bitmap));
         mTabListDelegate.setBitmapCallbackForTesting(mBitmapListener);
         assertEquals(0, mTabListDelegate.getBitmapFetchCountForTesting());
@@ -385,8 +397,11 @@ public class TabSwitcherTabletTest {
             throws TimeoutException {
         assertTrue(sActivityTestRule.getActivity().getLayoutManager().isLayoutVisible(
                 LayoutType.TAB_SWITCHER));
+
+        if (mTabListDelegate == null) retrieveTabListDelegate();
         assertTrue(mTabListDelegate.getBitmapFetchCountForTesting() > 0);
         assertEquals(tabsWithThumbnail, mAllBitmaps.size());
+
         final int index = sActivityTestRule.getActivity().getCurrentTabModel().index();
         exitSwitcherWithTabClick(index);
         assertThumbnailsAreReleased();

@@ -29,8 +29,8 @@
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/network_service_instance.h"
+#include "content/public/browser/network_service_util.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/network_service_util.h"
 #include "content/public/common/user_agent.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -40,7 +40,6 @@
 #include "net/cookies/canonical_cookie_test_helpers.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/net_buildflags.h"
-#include "net/proxy_resolution/proxy_info.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/network_service_buildflags.h"
 #include "services/network/public/mojom/network_context.mojom.h"
@@ -213,260 +212,6 @@ IN_PROC_BROWSER_TEST_F(SystemNetworkContextManagerBrowsertest, AuthParams) {
             dynamic_params->patterns_allowed_to_use_all_schemes);
 }
 
-class SystemNetworkContextManagerWithCustomProxyConfigBrowserTest
-    : public SystemNetworkContextManagerBrowsertest {
- protected:
-  void SetUpDefaultCommandLine(base::CommandLine* command_line) override {
-    SystemNetworkContextManagerBrowsertest::SetUpDefaultCommandLine(
-        command_line);
-    command_line->AppendSwitchASCII(switches::kIPAnonymizationProxyServer,
-                                    "testproxy:80");
-    command_line->AppendSwitchASCII(
-        switches::kIPAnonymizationProxyAllowList,
-        "a.test, foo.a.test, foo.test, b.test:1234");
-    command_line->AppendSwitchASCII(switches::kIPAnonymizationProxyPassword,
-                                    "value");
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(
-    SystemNetworkContextManagerWithCustomProxyConfigBrowserTest,
-    InitialCustomProxyConfig) {
-  network::mojom::NetworkContextParamsPtr network_context_params =
-      g_browser_process->system_network_context_manager()
-          ->CreateDefaultNetworkContextParams();
-
-  // Check that command line switches were correctly set in
-  // `initial_custom_proxy_config`
-  EXPECT_TRUE(network_context_params->initial_custom_proxy_config->rules
-                  .reverse_bypass);
-  EXPECT_TRUE(network_context_params->initial_custom_proxy_config
-                  ->should_replace_direct);
-  EXPECT_FALSE(network_context_params->initial_custom_proxy_config
-                   ->should_override_existing_config);
-
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config->rules
-                .single_proxies.ToValue(),
-            base::test::ParseJson(R"(["testproxy:80"])"));
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config->rules
-                .bypass_rules.ToString(),
-            "a.test;foo.a.test;foo.test;b.test:1234;");
-
-  net::HttpRequestHeaders expected_header;
-  expected_header.SetHeader("password", "value");
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config
-                ->connect_tunnel_headers.ToString(),
-            expected_header.ToString());
-
-  // Check that rules are applied correctly
-  net::ProxyInfo result;
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://example.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://foo.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://a.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://a.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://foo.a.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://bar.a.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://b.test:1234"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://b.test:5678"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-}
-
-class SystemNetworkContextManagerWithIpProtectionFlagsEnabled
-    : public SystemNetworkContextManagerBrowsertest {
- public:
-  SystemNetworkContextManagerWithIpProtectionFlagsEnabled() {
-    // Enable the IP protection feature and set parameters for the proxy server
-    // and proxy allowlist.
-    base::FieldTrialParams params;
-    params[net::features::kIpPrivacyProxyServer.name] =
-        "testproxyenabledfromflag.test:80";
-    params[net::features::kIpPrivacyProxyAllowlist.name] =
-        "enabledfromflag.test";
-
-    feature_list_.InitAndEnableFeatureWithParameters(
-        net::features::kEnableIpProtectionProxy, params);
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(
-    SystemNetworkContextManagerWithIpProtectionFlagsEnabled,
-    EnableIpProtectionProxyByFeature) {
-  network::mojom::NetworkContextParamsPtr network_context_params =
-      g_browser_process->system_network_context_manager()
-          ->CreateDefaultNetworkContextParams();
-
-  // Check that feature configuration was correctly set in
-  // `initial_custom_proxy_config`
-  EXPECT_TRUE(network_context_params->initial_custom_proxy_config->rules
-                  .reverse_bypass);
-  EXPECT_TRUE(network_context_params->initial_custom_proxy_config
-                  ->should_replace_direct);
-  EXPECT_FALSE(network_context_params->initial_custom_proxy_config
-                   ->should_override_existing_config);
-
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config->rules
-                .single_proxies.ToValue(),
-            base::test::ParseJson(R"(["testproxyenabledfromflag.test:80"])"));
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config->rules
-                .bypass_rules.ToString(),
-            "enabledfromflag.test;");
-
-  // Check that rules are applied correctly
-  net::ProxyInfo result;
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://example.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://enabledfromflag.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxyenabledfromflag.test:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://enabledfromflag.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxyenabledfromflag.test:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://a.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://a.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://bar.a.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://b.test:1234"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-}
-
-class
-    SystemNetworkContextManagerWithIpProtectionFlagsEnabledAndCommandLineSettingsEnabled
-    : public SystemNetworkContextManagerWithCustomProxyConfigBrowserTest {
- public:
-  SystemNetworkContextManagerWithIpProtectionFlagsEnabledAndCommandLineSettingsEnabled() {
-    // Enable the IP protection feature flag using default params.
-    feature_list_.InitAndEnableFeature(net::features::kEnableIpProtectionProxy);
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(
-    SystemNetworkContextManagerWithIpProtectionFlagsEnabledAndCommandLineSettingsEnabled,
-    EnableIpProtectionProxyCommandLineOverridesFeature) {
-  network::mojom::NetworkContextParamsPtr network_context_params =
-      g_browser_process->system_network_context_manager()
-          ->CreateDefaultNetworkContextParams();
-
-  // Check that command line switches were correctly set in
-  // `initial_custom_proxy_config`even though feature flag parameters were set.
-  EXPECT_TRUE(network_context_params->initial_custom_proxy_config->rules
-                  .reverse_bypass);
-  EXPECT_TRUE(network_context_params->initial_custom_proxy_config
-                  ->should_replace_direct);
-  EXPECT_FALSE(network_context_params->initial_custom_proxy_config
-                   ->should_override_existing_config);
-
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config->rules
-                .single_proxies.ToValue(),
-            base::test::ParseJson(R"(["testproxy:80"])"));
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config->rules
-                .bypass_rules.ToString(),
-            "a.test;foo.a.test;foo.test;b.test:1234;");
-
-  net::HttpRequestHeaders expected_header;
-  expected_header.SetHeader("password", "value");
-  EXPECT_EQ(network_context_params->initial_custom_proxy_config
-                ->connect_tunnel_headers.ToString(),
-            expected_header.ToString());
-
-  // Check that rules are applied correctly
-  net::ProxyInfo result;
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://example.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://foo.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("http://a.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://a.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://foo.a.test"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://bar.a.test"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://b.test:1234"), &result);
-  EXPECT_FALSE(result.did_bypass_proxy());
-  EXPECT_EQ(result.ToPacString(), "PROXY testproxy:80");
-
-  network_context_params->initial_custom_proxy_config->rules.Apply(
-      GURL("https://b.test:5678"), &result);
-  EXPECT_TRUE(result.did_bypass_proxy());
-  EXPECT_EQ(result.proxy_server(), net::ProxyServer::Direct());
-}
-
 class SystemNetworkContextManagerWithFirstPartySetComponentBrowserTest
     : public SystemNetworkContextManagerBrowsertest {
  public:
@@ -611,13 +356,9 @@ INSTANTIATE_TEST_SUITE_P(All,
                          ::testing::Bool());
 
 class SystemNetworkContextManagerFreezeQUICUaBrowsertest
-    : public SystemNetworkContextManagerBrowsertest,
-      public testing::WithParamInterface<bool> {
+    : public SystemNetworkContextManagerBrowsertest {
  public:
-  SystemNetworkContextManagerFreezeQUICUaBrowsertest() {
-    scoped_feature_list_.InitWithFeatureState(blink::features::kReduceUserAgent,
-                                              GetParam());
-  }
+  SystemNetworkContextManagerFreezeQUICUaBrowsertest() = default;
   ~SystemNetworkContextManagerFreezeQUICUaBrowsertest() override {}
 
   void SetUpOnMainThread() override {}
@@ -626,7 +367,7 @@ class SystemNetworkContextManagerFreezeQUICUaBrowsertest
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_P(SystemNetworkContextManagerFreezeQUICUaBrowsertest,
+IN_PROC_BROWSER_TEST_F(SystemNetworkContextManagerFreezeQUICUaBrowsertest,
                        QUICUaConfig) {
   network::mojom::NetworkContextParamsPtr network_context_params =
       g_browser_process->system_network_context_manager()
@@ -634,23 +375,8 @@ IN_PROC_BROWSER_TEST_P(SystemNetworkContextManagerFreezeQUICUaBrowsertest,
 
   std::string quic_ua = network_context_params->quic_user_agent_id;
 
-  if (GetParam()) {  // if the UA Freeze feature is turned on
-    EXPECT_EQ("", quic_ua);
-  } else {
-    EXPECT_THAT(quic_ua, testing::HasSubstr(chrome::GetChannelName(
-                             chrome::WithExtendedStable(false))));
-    EXPECT_THAT(quic_ua,
-                testing::HasSubstr(
-                    version_info::GetProductNameAndVersionForUserAgent()));
-    EXPECT_THAT(quic_ua, testing::HasSubstr(content::BuildOSCpuInfo(
-                             content::IncludeAndroidBuildNumber::Exclude,
-                             content::IncludeAndroidModel::Include)));
-  }
+  EXPECT_EQ("", quic_ua);
 }
-
-INSTANTIATE_TEST_SUITE_P(All,
-                         SystemNetworkContextManagerFreezeQUICUaBrowsertest,
-                         ::testing::Bool());
 
 class SystemNetworkContextManagerWPADQuickCheckBrowsertest
     : public SystemNetworkContextManagerBrowsertest,

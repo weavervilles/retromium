@@ -248,15 +248,12 @@ class CORE_EXPORT LayoutMultiColumnSet final : public LayoutBlockFlow {
 
   void InsertedIntoTree() final;
   void WillBeRemovedFromTree() final;
-  LayoutSize Size() const override;
+  PhysicalSize Size() const override;
 
   void ComputeLogicalHeight(LayoutUnit logical_height,
                             LayoutUnit logical_top,
                             LogicalExtentComputedValues&) const override;
   PositionWithAffinity PositionForPoint(const PhysicalOffset&) const override;
-
-  void PaintObject(const PaintInfo&,
-                   const PhysicalOffset& paint_offset) const override;
 
   void ComputeVisualOverflow() final;
 

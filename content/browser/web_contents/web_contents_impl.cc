@@ -46,9 +46,6 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/download/public/common/download_stats.h"
-#include "components/power_scheduler/power_mode.h"
-#include "components/power_scheduler/power_mode_arbiter.h"
-#include "components/power_scheduler/power_mode_voter.h"
 #include "components/url_formatter/url_formatter.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
@@ -177,6 +174,7 @@
 #include "ui/base/ime/mojom/virtual_keyboard_types.mojom.h"
 #include "ui/base/pointer/pointer_device.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/color/color_provider_key.h"
 #include "ui/color/color_provider_manager.h"
 #include "ui/display/screen.h"
 #include "ui/display/types/display_constants.h"
@@ -499,7 +497,7 @@ class DefaultColorProviderSource : public ui::ColorProviderSource,
 
  protected:
   // ui::ColorProviderSource:
-  ui::ColorProviderManager::Key GetColorProviderKey() const override {
+  ui::ColorProviderKey GetColorProviderKey() const override {
     return ui::NativeTheme::GetInstanceForWeb()->GetColorProviderKey(nullptr);
   }
 
@@ -1028,10 +1026,7 @@ WebContentsImpl::WebContentsImpl(BrowserContext* browser_context)
           std::make_unique<MediaWebContentsObserver>(this)),
       is_overlay_content_(false),
       showing_context_menu_(false),
-      prerender_host_registry_(std::make_unique<PrerenderHostRegistry>(*this)),
-      audible_power_mode_voter_(
-          power_scheduler::PowerModeArbiter::GetInstance()->NewVoter(
-              "PowerModeVoter.Audible")) {
+      prerender_host_registry_(std::make_unique<PrerenderHostRegistry>(*this)) {
   TRACE_EVENT0("content", "WebContentsImpl::WebContentsImpl");
   WebContentsOfBrowserContext::Attach(*this);
 #if BUILDFLAG(ENABLE_PPAPI)
@@ -1392,8 +1387,13 @@ void WebContentsImpl::SetDelegate(WebContentsDelegate* delegate) {
     view_->SetOverscrollControllerEnabled(CanOverscrollContent());
 }
 
-RenderFrameHostImpl* WebContentsImpl::GetPrimaryMainFrame() {
+const RenderFrameHostImpl* WebContentsImpl::GetPrimaryMainFrame() const {
   return primary_frame_tree_.root()->current_frame_host();
+}
+
+RenderFrameHostImpl* WebContentsImpl::GetPrimaryMainFrame() {
+  return const_cast<RenderFrameHostImpl*>(
+      std::as_const(*this).GetPrimaryMainFrame());
 }
 
 PageImpl& WebContentsImpl::GetPrimaryPage() {
@@ -1718,6 +1718,13 @@ void WebContentsImpl::SetColorProviderSource(ui::ColorProviderSource* source) {
   ColorProviderSourceObserver::Observe(source);
 }
 
+ui::ColorProviderKey::ColorMode WebContentsImpl::GetColorMode() const {
+  // A ColorProviderSource should always be set.
+  auto* source = GetColorProviderSource();
+  CHECK(source);
+  return source->GetColorMode();
+}
+
 void WebContentsImpl::SetAccessibilityMode(ui::AXMode mode) {
   OPTIONAL_TRACE_EVENT2("content", "WebContentsImpl::SetAccessibilityMode",
                         "mode", mode.ToString(), "previous_mode",
@@ -1874,6 +1881,30 @@ void WebContentsImpl::OnManifestUrlChanged(PageImpl& page) {
 
 WebUI* WebContentsImpl::GetWebUI() {
   return primary_frame_tree_.root()->current_frame_host()->web_ui();
+}
+
+void WebContentsImpl::SetAlwaysSendSubresourceNotifications() {
+  if (!base::FeatureList::IsEnabled(
+          features::kReduceSubresourceResponseStartedIPC)) {
+    return;
+  }
+
+  if (GetSendSubresourceNotification()) {
+    return;
+  }
+
+  // Updates all the renderers if the user allows certificate error or HTTP
+  // exception, but doesn't update renderers when all exceptions are revoked
+  // from all hosts since this causes superfluous IPCs.
+  for (WebContentsImpl* web_contents : GetAllWebContents()) {
+    DCHECK(!web_contents->GetSendSubresourceNotification());
+    web_contents->renderer_preferences_.send_subresource_notification = true;
+    web_contents->SyncRendererPrefs();
+  }
+}
+
+bool WebContentsImpl::GetSendSubresourceNotification() {
+  return GetRendererPrefs().send_subresource_notification;
 }
 
 void WebContentsImpl::SetUserAgentOverride(
@@ -2376,10 +2407,6 @@ void WebContentsImpl::OnAudioStateChanged() {
   is_currently_audible_ = is_currently_audible;
   was_ever_audible_ = was_ever_audible_ || is_currently_audible_;
 
-  audible_power_mode_voter_->VoteFor(is_currently_audible_
-                                         ? power_scheduler::PowerMode::kAudible
-                                         : power_scheduler::PowerMode::kIdle);
-
   ExecutePageBroadcastMethod(base::BindRepeating(
       [](bool is_currently_audible, RenderViewHostImpl* rvh) {
         if (auto& broadcast = rvh->GetAssociatedPageBroadcast())
@@ -2684,7 +2711,7 @@ std::unique_ptr<WebContents> WebContentsImpl::DetachFromOuterWebContents() {
   view_ = CreateWebContentsView(
       this, GetContentClient()->browser()->GetWebContentsViewDelegate(this),
       &render_view_host_delegate_view_);
-  view_->CreateView(nullptr);
+  view_->CreateView(gfx::NativeView());
   std::unique_ptr<WebContents> web_contents =
       node_.DisconnectFromOuterWebContents();
   DCHECK_EQ(web_contents.get(), this);
@@ -2885,11 +2912,14 @@ const blink::web_pref::WebPreferences WebContentsImpl::ComputeWebPreferences() {
   prefs.threaded_scrolling_enabled =
       !command_line.HasSwitch(blink::switches::kDisableThreadedScrolling);
 
+#if BUILDFLAG(IS_ANDROID)
   if (prefs.viewport_enabled &&
       base::FeatureList::IsEnabled(
-          blink::features::kDefaultViewportIsDeviceWidth)) {
+          blink::features::kDefaultViewportIsDeviceWidth) &&
+      ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) {
     prefs.viewport_style = blink::mojom::ViewportStyle::kDefault;
   }
+#endif
 
   if (GetController().GetVisibleEntry() &&
       GetController().GetVisibleEntry()->GetIsOverridingUserAgent()) {
@@ -3266,6 +3296,15 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params,
   // happens after RenderFrameHostManager::Init.
   NotifySwappedFromRenderManager(nullptr,
                                  GetRenderManager()->current_frame_host());
+
+  // Checks whether the associated ssl_manager has any certificate error or HTTP
+  // exceptions for any host and updates the renderer preferences.
+  if (base::FeatureList::IsEnabled(
+          features::kReduceSubresourceResponseStartedIPC) &&
+      GetController().ssl_manager()->HasAllowExceptionForAnyHost()) {
+    renderer_preferences_.send_subresource_notification = true;
+    SyncRendererPrefs();
+  }
 }
 
 void WebContentsImpl::OnWebContentsDestroyed(WebContentsImpl* web_contents) {
@@ -4052,9 +4091,10 @@ FrameTree* WebContentsImpl::CreateNewWindow(
 
   // Give the content browser client a chance to intercept the request and open
   // the URL with an external handler.
-  if (GetContentClient()->browser()->OpenExternally(opener, params.target_url,
-                                                    params.disposition))
+  if (GetContentClient()->browser()->OpenExternally(params.target_url,
+                                                    params.disposition)) {
     return nullptr;
+  }
 
   int render_process_id = opener->GetProcess()->GetID();
   SiteInstanceImpl* source_site_instance = opener->GetSiteInstance();
@@ -5210,8 +5250,6 @@ void WebContentsImpl::OnSavePage() {
   OPTIONAL_TRACE_EVENT0("content", "WebContentsImpl::OnSavePage");
   // If we can not save the page, try to download it.
   if (!IsSavable()) {
-    download::RecordSavePackageEvent(
-        download::SAVE_PACKAGE_DOWNLOAD_ON_NON_HTML);
     SaveFrame(GetLastCommittedURL(), Referrer(), GetPrimaryMainFrame());
     return;
   }
@@ -5354,7 +5392,7 @@ void WebContentsImpl::GenerateMHTMLWithResult(
 }
 
 const std::string& WebContentsImpl::GetContentsMimeType() {
-  return GetPrimaryPage().contents_mime_type();
+  return GetPrimaryPage().GetContentsMimeType();
 }
 
 blink::RendererPreferences* WebContentsImpl::GetMutableRendererPrefs() {
@@ -5901,15 +5939,6 @@ void WebContentsImpl::DidFinishNavigation(NavigationHandle* navigation_handle) {
     if (navigation_handle->IsInPrimaryMainFrame() &&
         !navigation_handle->IsSameDocument()) {
       was_ever_audible_ = false;
-    }
-
-    // Clear the stored prerender activation result if this is not a prerender
-    // activation. If this is another prerender activation, it will override
-    // the old result in DevTools.
-    if (!navigation_handle->IsPrerenderedPageActivation() &&
-        !navigation_handle->IsSameDocument() &&
-        navigation_handle->IsInPrimaryMainFrame()) {
-      last_navigation_was_prerender_activation_for_devtools_ = false;
     }
 
     if (!navigation_handle->IsSameDocument())
@@ -7589,14 +7618,10 @@ void WebContentsImpl::UpdateWindowPreferredSize(const gfx::Size& pref_size) {
   OnPreferredSizeChanged(old_size);
 }
 
-// TODO(https://crbug.com/1424417): This function is used exclusively for COOP
-// reporting, to determine what other pages might try to access this page, for
-// the purpose of installing and removing access reporters. Update it to handle
-// CoopRelatedGroups instead of BrowsingContextGroups as a part of COOP:
-// restrict-properties reporting implementation.
 std::vector<RenderFrameHostImpl*>
-WebContentsImpl::GetActiveTopLevelDocumentsInBrowsingContextGroup(
-    RenderFrameHostImpl* render_frame_host) {
+WebContentsImpl::GetActiveTopLevelDocumentsInGroup(
+    RenderFrameHostImpl* render_frame_host,
+    GroupType group_type) {
   std::vector<RenderFrameHostImpl*> out;
   for (WebContentsImpl* web_contents : GetAllWebContents()) {
     RenderFrameHostImpl* other_render_frame_host =
@@ -7608,8 +7633,18 @@ WebContentsImpl::GetActiveTopLevelDocumentsInBrowsingContextGroup(
       continue;
     }
 
-    // Filters out documents from a different browsing context group.
-    if (!render_frame_host->GetSiteInstance()->IsRelatedSiteInstance(
+    // If we're looking for frames in the same browsing context group, filter
+    // frames in different browsing context groups.
+    if (group_type == GroupType::kBrowsingContextGroup &&
+        !render_frame_host->GetSiteInstance()->IsRelatedSiteInstance(
+            other_render_frame_host->GetSiteInstance())) {
+      continue;
+    }
+
+    // If we're looking for frames in the same CoopRelatedGroup, filter frames
+    // in different CoopRelatedGroups.
+    if (group_type == GroupType::kCoopRelatedGroup &&
+        !render_frame_host->GetSiteInstance()->IsCoopRelatedSiteInstance(
             other_render_frame_host->GetSiteInstance())) {
       continue;
     }
@@ -7617,6 +7652,20 @@ WebContentsImpl::GetActiveTopLevelDocumentsInBrowsingContextGroup(
     out.push_back(other_render_frame_host);
   }
   return out;
+}
+
+std::vector<RenderFrameHostImpl*>
+WebContentsImpl::GetActiveTopLevelDocumentsInBrowsingContextGroup(
+    RenderFrameHostImpl* render_frame_host) {
+  return GetActiveTopLevelDocumentsInGroup(render_frame_host,
+                                           GroupType::kBrowsingContextGroup);
+}
+
+std::vector<RenderFrameHostImpl*>
+WebContentsImpl::GetActiveTopLevelDocumentsInCoopRelatedGroup(
+    RenderFrameHostImpl* render_frame_host) {
+  return GetActiveTopLevelDocumentsInGroup(render_frame_host,
+                                           GroupType::kCoopRelatedGroup);
 }
 
 PrerenderHostRegistry* WebContentsImpl::GetPrerenderHostRegistry() {
@@ -7818,6 +7867,16 @@ void WebContentsImpl::DidReceiveUserActivation(
                         "render_frame_host", render_frame_host);
   observers_.NotifyObservers(&WebContentsObserver::FrameReceivedUserActivation,
                              render_frame_host);
+}
+
+void WebContentsImpl::WebAuthnAssertionRequestSucceeded(
+    RenderFrameHostImpl* render_frame_host) {
+  OPTIONAL_TRACE_EVENT1("content",
+                        "WebContentsImpl::WebAuthnAssertionRequestSucceeded",
+                        "render_frame_host", render_frame_host);
+  observers_.NotifyObservers(
+      &WebContentsObserver::WebAuthnAssertionRequestSucceeded,
+      render_frame_host);
 }
 
 void WebContentsImpl::BindDisplayCutoutHost(

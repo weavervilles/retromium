@@ -24,15 +24,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_key.h"
 #include "chrome/browser/supervised_user/permission_request_creator_mock.h"
-#include "chrome/browser/supervised_user/supervised_user_interstitial.h"
 #include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
-#include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/supervised_user/core/browser/supervised_user_interstitial.h"
+#include "components/supervised_user/core/browser/supervised_user_service.h"
 #include "components/supervised_user/core/browser/supervised_user_settings_service.h"
 #include "components/supervised_user/core/browser/supervised_user_url_filter.h"
 #include "components/supervised_user/core/common/features.h"
@@ -86,8 +86,9 @@ class RenderFrameTracker : public content::WebContentsObserver {
   void FrameDeleted(int frame_tree_node_id) override;
 
   content::RenderFrameHost* GetHost(int frame_id) {
-    if (!base::Contains(render_frame_hosts_, frame_id))
+    if (!base::Contains(render_frame_hosts_, frame_id)) {
       return nullptr;
+    }
     return render_frame_hosts_[frame_id];
   }
 
@@ -102,8 +103,9 @@ void RenderFrameTracker::RenderFrameHostChanged(
 }
 
 void RenderFrameTracker::FrameDeleted(int frame_tree_node_id) {
-  if (!base::Contains(render_frame_hosts_, frame_tree_node_id))
+  if (!base::Contains(render_frame_hosts_, frame_tree_node_id)) {
     return;
+  }
 
   render_frame_hosts_.erase(frame_tree_node_id);
 }
@@ -137,8 +139,9 @@ void InnerWebContentsAttachedWaiter::InnerWebContentsAttached(
 }
 
 void InnerWebContentsAttachedWaiter::WaitForInnerWebContentsAttached() {
-  if (web_contents()->GetInnerWebContents().size() > 0u)
+  if (web_contents()->GetInnerWebContents().size() > 0u) {
     return;
+  }
   run_loop_.Run();
 }
 
@@ -175,19 +178,22 @@ NavigationFinishedWaiter::NavigationFinishedWaiter(
       url_(url) {}
 
 void NavigationFinishedWaiter::Wait() {
-  if (did_finish_)
+  if (did_finish_) {
     return;
+  }
   run_loop_.Run();
 }
 
 void NavigationFinishedWaiter::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
-  if (!navigation_handle->HasCommitted())
+  if (!navigation_handle->HasCommitted()) {
     return;
+  }
 
   if (navigation_handle->GetFrameTreeNodeId() != frame_id_ ||
-      navigation_handle->GetURL() != url_)
+      navigation_handle->GetURL() != url_) {
     return;
+  }
 
   did_finish_ = true;
   run_loop_.Quit();
@@ -380,9 +386,9 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserNavigationThrottleTest,
                        AllowFamiliesDotGoogleDotComAccess) {
   // Simulate families.google.com being set in the blocklist.
   BlockHost(kFamiliesHost);
-  // TODO(https://crbug.com/1174695): This test is relying on a production
-  // service being available.  It should be probably be a TAST test instead of a
-  // browsertest.
+
+  // A production endpoint is used here because a Tast test would be too
+  // expensive to be used for this specific case.
   const GURL kFamiliesDotGoogleDotComUrl =
       GURL("https://families.google.com/families");
 
@@ -445,7 +451,7 @@ class SupervisedUserIframeFilterTest
 void SupervisedUserIframeFilterTest::SetUpOnMainThread() {
   SupervisedUserNavigationThrottleTest::SetUpOnMainThread();
 
-  SupervisedUserService* service =
+  supervised_user::SupervisedUserService* service =
       SupervisedUserServiceFactory::GetForProfile(browser()->profile());
   std::unique_ptr<supervised_user::PermissionRequestCreator> creator =
       std::make_unique<PermissionRequestCreatorMock>(browser()->profile());
@@ -474,8 +480,9 @@ std::vector<int> SupervisedUserIframeFilterTest::GetBlockedFrames() {
   std::vector<int> blocked_frames;
   blocked_frames.reserve(interstitials.size());
 
-  for (const auto& elem : interstitials)
+  for (const auto& elem : interstitials) {
     blocked_frames.push_back(elem.first);
+  }
 
   return blocked_frames;
 }
@@ -552,8 +559,8 @@ void SupervisedUserIframeFilterTest::SendCommandToFrame(
   DCHECK(render_frame_host);
   DCHECK(render_frame_host->IsRenderFrameLive());
   std::string command = base::StrCat({"sendCommand(\'", command_name, "\')"});
-  ASSERT_TRUE(content::ExecuteScript(
-      content::ToRenderFrameHost(render_frame_host), command));
+  ASSERT_TRUE(
+      content::ExecJs(content::ToRenderFrameHost(render_frame_host), command));
 }
 
 void SupervisedUserIframeFilterTest::WaitForNavigationFinished(
@@ -574,8 +581,9 @@ bool SupervisedUserIframeFilterTest::RunCommandAndGetBooleanFromFrame(
       SupervisedUserNavigationObserver::FromWebContents(tab);
   auto& interstitials = navigation_observer->interstitials_for_test();
 
-  if (!base::Contains(interstitials, frame_id))
+  if (!base::Contains(interstitials, frame_id)) {
     return false;
+  }
 
   auto* render_frame_host = tracker()->GetHost(frame_id);
   DCHECK(render_frame_host->IsRenderFrameLive());
@@ -675,11 +683,17 @@ IN_PROC_BROWSER_TEST_P(SupervisedUserIframeFilterTest, BlockSubFrame) {
   EXPECT_FALSE(IsInterstitialBeingShownInFrame(blocked_frame_id));
 
   histogram_tester.ExpectUniqueSample(
-      SupervisedUserInterstitial::kInterstitialCommandHistogramName,
-      SupervisedUserInterstitial::Commands::REMOTE_ACCESS_REQUEST, 1);
+      supervised_user::SupervisedUserInterstitial::
+          kInterstitialCommandHistogramName,
+      supervised_user::SupervisedUserInterstitial::Commands::
+          REMOTE_ACCESS_REQUEST,
+      1);
   histogram_tester.ExpectUniqueSample(
-      SupervisedUserInterstitial::kInterstitialPermissionSourceHistogramName,
-      SupervisedUserInterstitial::RequestPermissionSource::SUB_FRAME, 1);
+      supervised_user::SupervisedUserInterstitial::
+          kInterstitialPermissionSourceHistogramName,
+      supervised_user::SupervisedUserInterstitial::RequestPermissionSource::
+          SUB_FRAME,
+      1);
 }
 
 IN_PROC_BROWSER_TEST_P(SupervisedUserIframeFilterTest, BlockMultipleSubFrames) {
@@ -870,7 +884,7 @@ IN_PROC_BROWSER_TEST_P(SupervisedUserIframeFilterTest,
 
 IN_PROC_BROWSER_TEST_P(SupervisedUserIframeFilterTest,
                        IframesWithSameDomainAsMainFrameAllowed) {
-  SupervisedUserService* service =
+  supervised_user::SupervisedUserService* service =
       SupervisedUserServiceFactory::GetForProfile(browser()->profile());
   supervised_user::SupervisedUserURLFilter* filter = service->GetURLFilter();
 
@@ -1048,11 +1062,17 @@ IN_PROC_BROWSER_TEST_P(ChromeOSLocalWebApprovalsTest,
   CheckPreferredApprovalButton(blocked_frame);
 
   histogram_tester.ExpectUniqueSample(
-      SupervisedUserInterstitial::kInterstitialCommandHistogramName,
-      SupervisedUserInterstitial::Commands::LOCAL_ACCESS_REQUEST, 1);
+      supervised_user::SupervisedUserInterstitial::
+          kInterstitialCommandHistogramName,
+      supervised_user::SupervisedUserInterstitial::Commands::
+          LOCAL_ACCESS_REQUEST,
+      1);
   histogram_tester.ExpectUniqueSample(
-      SupervisedUserInterstitial::kInterstitialPermissionSourceHistogramName,
-      SupervisedUserInterstitial::RequestPermissionSource::MAIN_FRAME, 1);
+      supervised_user::SupervisedUserInterstitial::
+          kInterstitialPermissionSourceHistogramName,
+      supervised_user::SupervisedUserInterstitial::RequestPermissionSource::
+          MAIN_FRAME,
+      1);
 }
 
 IN_PROC_BROWSER_TEST_P(ChromeOSLocalWebApprovalsTest,
@@ -1090,11 +1110,17 @@ IN_PROC_BROWSER_TEST_P(ChromeOSLocalWebApprovalsTest,
   CheckPreferredApprovalButton(blocked_frame);
 
   histogram_tester.ExpectUniqueSample(
-      SupervisedUserInterstitial::kInterstitialCommandHistogramName,
-      SupervisedUserInterstitial::Commands::LOCAL_ACCESS_REQUEST, 1);
+      supervised_user::SupervisedUserInterstitial::
+          kInterstitialCommandHistogramName,
+      supervised_user::SupervisedUserInterstitial::Commands::
+          LOCAL_ACCESS_REQUEST,
+      1);
   histogram_tester.ExpectUniqueSample(
-      SupervisedUserInterstitial::kInterstitialPermissionSourceHistogramName,
-      SupervisedUserInterstitial::RequestPermissionSource::SUB_FRAME, 1);
+      supervised_user::SupervisedUserInterstitial::
+          kInterstitialPermissionSourceHistogramName,
+      supervised_user::SupervisedUserInterstitial::RequestPermissionSource::
+          SUB_FRAME,
+      1);
 }
 
 IN_PROC_BROWSER_TEST_P(ChromeOSLocalWebApprovalsTest,

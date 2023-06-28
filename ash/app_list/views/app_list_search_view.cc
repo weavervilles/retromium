@@ -37,6 +37,7 @@
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/box_layout.h"
+#include "ui/views/view_utils.h"
 
 using views::BoxLayout;
 
@@ -108,8 +109,7 @@ AppListSearchView::AppListSearchView(
   auto* answer_card_container =
       scroll_contents->AddChildView(std::make_unique<SearchResultListView>(
           view_delegate, dialog_controller_,
-          SearchResultView::SearchResultViewType::kAnswerCard,
-          /*animates_result_updates=*/true, absl::nullopt));
+          SearchResultView::SearchResultViewType::kAnswerCard, absl::nullopt));
   answer_card_container->SetListType(
       SearchResultListView::SearchResultListType::kAnswerCard);
   add_result_container(answer_card_container);
@@ -118,17 +118,16 @@ AppListSearchView::AppListSearchView(
   auto* best_match_container =
       scroll_contents->AddChildView(std::make_unique<SearchResultListView>(
           view_delegate, dialog_controller_,
-          SearchResultView::SearchResultViewType::kDefault,
-          /*animated_result_updates=*/true, absl::nullopt));
+          SearchResultView::SearchResultViewType::kDefault, absl::nullopt));
   best_match_container->SetListType(
       SearchResultListView::SearchResultListType::kBestMatch);
   add_result_container(best_match_container);
 
   // Launcher image search container is always the third view shown.
   if (features::IsProductivityLauncherImageSearchEnabled()) {
-    auto* image_search_container = scroll_contents->AddChildView(
+    image_search_container_ = scroll_contents->AddChildView(
         std::make_unique<SearchResultImageListView>(view_delegate));
-    add_result_container(image_search_container);
+    add_result_container(image_search_container_);
   }
 
   // SearchResultListViews are aware of their relative position in the
@@ -143,8 +142,7 @@ AppListSearchView::AppListSearchView(
     auto* result_container =
         scroll_contents->AddChildView(std::make_unique<SearchResultListView>(
             view_delegate, dialog_controller_,
-            SearchResultView::SearchResultViewType::kDefault,
-            /*animates_result_updates=*/true, i));
+            SearchResultView::SearchResultViewType::kDefault, i));
     add_result_container(result_container);
   }
 
@@ -334,6 +332,12 @@ void AppListSearchView::UpdateForNewSearch(bool search_active) {
     } else {
       search_result_fast_update_time_.reset();
     }
+  }
+}
+
+void AppListSearchView::OnBoundsChanged(const gfx::Rect& old_bounds) {
+  if (image_search_container_ && width() != old_bounds.width()) {
+    image_search_container_->ConfigureLayoutForAvailableWidth(width());
   }
 }
 

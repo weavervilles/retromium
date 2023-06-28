@@ -280,11 +280,9 @@ void SetBuildInfoAnnotations(std::map<std::string, std::string>* annotations) {
   (*annotations)["resources_version"] = info->resources_version();
   (*annotations)["gms_core_version"] = info->gms_version_code();
 
-  if (info->firebase_app_id()[0] != '\0') {
-    (*annotations)["package"] = std::string(info->firebase_app_id()) + " v" +
-                                info->package_version_code() + " (" +
-                                info->package_version_name() + ")";
-  }
+  (*annotations)["package"] = std::string(info->package_name()) + " v" +
+                              info->package_version_code() + " (" +
+                              info->package_version_name() + ")";
 }
 
 // Constructs paths to a handler trampoline executable and a library exporting
@@ -335,6 +333,8 @@ bool GetHandlerTrampoline(std::string* handler_trampoline,
 #define CURRENT_ABI "x86_64"
 #elif defined(__aarch64__)
 #define CURRENT_ABI "arm64-v8a"
+#elif defined(__riscv) && (__riscv_xlen == 64)
+#define CURRENT_ABI "riscv64"
 #else
 #error "Unsupported target abi"
 #endif

@@ -9,7 +9,7 @@
 #include <string>
 
 #include "ash/public/cpp/locale_update_controller.h"
-#include "ash/public/cpp/system_tray_observer.h"
+#include "ash/system/tray/system_tray_observer.h"
 #include "base/callback_list.h"
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
@@ -141,7 +141,8 @@ class WelcomeScreen : public BaseScreen,
                           Profile* profile,
                           bool show_message) override;
 
-  void OnFeatureSupportStatusDetermined(
+  void EnableQuickStart();
+  void OnGetQuickStartFeatureSupportStatus(
       quick_start::TargetDeviceConnectionBroker::FeatureSupportStatus status);
 
   // Handlers for various user actions:
