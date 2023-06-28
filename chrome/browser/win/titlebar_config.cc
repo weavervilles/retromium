@@ -4,15 +4,20 @@
 
 #include "chrome/browser/win/titlebar_config.h"
 
-#include <Windows.h>
 #include "base/command_line.h"
+#include "base/win/windows_version.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/common/chrome_switches.h"
+#include "ui/color/win/accent_color_observer.h"
+#include "ui/native_theme/native_theme.h"
 
 bool ShouldCustomDrawSystemTitlebar() {
   // Some extra code added here because those with pre-win8 and no DWM will have to fallback on the custom titlebar.
   BOOL result = FALSE;
 	
   typedef HRESULT(WINAPI* DwmIsCompositionEnabledFunc)(BOOL* enabled);
-
   DwmIsCompositionEnabledFunc func_ = nullptr;
 	
   HMODULE dwmapi_library_ = LoadLibraryW(L"dwmapi.dll");
@@ -28,8 +33,6 @@ bool ShouldCustomDrawSystemTitlebar() {
   }
   else
 	  return true;
-  
-  
   // Cache flag lookup.
   static const bool custom_titlebar_disabled =
       base::CommandLine::InitializedForCurrentProcess() &&
@@ -50,4 +53,8 @@ bool ShouldDefaultThemeUseMicaTitlebar() {
 bool SystemTitlebarCanUseMicaMaterial() {
   return base::win::GetVersion() >= base::win::Version::WIN11_22H2 &&
          base::FeatureList::IsEnabled(kWindows11MicaTitlebar);
+}
+
+bool SystemTitlebarSupportsDarkMode() {
+  return base::win::GetVersion() >= base::win::Version::WIN11;
 }
