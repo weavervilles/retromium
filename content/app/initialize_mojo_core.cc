@@ -56,7 +56,6 @@ void InitializeMojoCore() {
       config.force_direct_shared_memory_allocation = true;
   } else {
 #if BUILDFLAG(IS_WIN)
-<<<<<<< HEAD
     if (base::win::GetVersion() >= base::win::Version::WIN8_1) {
       // On Windows 8.1 and later it's not necessary to broker shared memory
       // allocation, as even sandboxed processes can allocate their own without
@@ -67,11 +66,6 @@ void InitializeMojoCore() {
     // On Android we run a Finch experiment testing direct memory allocation.
     config.force_direct_shared_memory_allocation = base::FeatureList::IsEnabled(
         mojo::core::kMojoDirectSharedMemoryAndroid);
-=======
-    // On Windows it's not necessary to broker shared memory allocation, as
-    // even sandboxed processes can allocate their own without trouble.
-    config.force_direct_shared_memory_allocation = true;
->>>>>>> 4abd918b29516f4a97125e618c490f82492b935b
 #endif
   }
 

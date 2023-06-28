@@ -110,33 +110,7 @@ PenIdHandler::ScopedPenIdStaticsForTesting::~ScopedPenIdStaticsForTesting() =
     default;
 
 PenIdHandler::PenIdHandler() {
-<<<<<<< HEAD
-  base::win::AssertComInitialized();
-  
-  if(!base::win::ResolveCoreWinRTDelayload()){
-	pen_device_statics_ = nullptr;
-	pointer_point_statics_ = nullptr;
-	return;
-  }
-  
-  HRESULT hr = base::win::RoGetActivationFactory(
-      base::win::HStringReference(RuntimeClass_Windows_Devices_Input_PenDevice)
-          .Get(),
-      IID_PPV_ARGS(&pen_device_statics_));
-  if (FAILED(hr)) {
-    pen_device_statics_ = nullptr;
-  }
-
-  hr = base::win::RoGetActivationFactory(
-      base::win::HStringReference(RuntimeClass_Windows_UI_Input_PointerPoint)
-          .Get(),
-      IID_PPV_ARGS(&pointer_point_statics_));
-  if (FAILED(hr)) {
-    pointer_point_statics_ = nullptr;
-  }
-=======
   InitPenIdStatics();
->>>>>>> 4abd918b29516f4a97125e618c490f82492b935b
 }
 
 PenIdHandler::~PenIdHandler() = default;

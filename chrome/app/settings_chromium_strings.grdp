@@ -8,14 +8,6 @@
     </message>
   </if>
   <!-- About Page -->
-<<<<<<< HEAD
-  <message name="IDS_SETTINGS_ABOUT_PROGRAM" desc="Menu title for the About Supermium page.">
-    About Supermium
-  </message>
-  <message name="IDS_SETTINGS_GET_HELP_USING_CHROME" desc="Text of the button which takes the user to the Chrome help page.">
-    Get help with Supermium
-  </message>
-=======
   <if expr="_is_chrome_for_testing_branded">
     <then>
       <message name="IDS_SETTINGS_ABOUT_PROGRAM" desc="Menu title for the About Chrome for Testing page.">
@@ -27,14 +19,13 @@
     </then>
     <else>
       <message name="IDS_SETTINGS_ABOUT_PROGRAM" desc="Menu title for the About Chromium page.">
-        About Chromium
+        About Supermium
       </message>
       <message name="IDS_SETTINGS_GET_HELP_USING_CHROME" desc="Text of the button which takes the user to the Chrome help page.">
-        Get help with Chromium
+        Get help with Supermium
       </message>
     </else>
   </if>
->>>>>>> 4abd918b29516f4a97125e618c490f82492b935b
   <if expr="not chromeos_ash">
     <message name="IDS_SETTINGS_UPGRADE_UPDATING" desc="Status label: Updating Supermium">
       Updating Supermium
@@ -109,11 +100,6 @@
     <message name="IDS_SETTINGS_DEFAULT_BROWSER_ERROR" desc="The text displayed when Chrome cannot determine or set the default browser">
       Supermium cannot determine or set the default browser
     </message>
-<<<<<<< HEAD
-    <message name="IDS_SETTINGS_DEFAULT_BROWSER_SECONDARY" desc="The text displayed when Supermium is installed in side-by-side mode, which does not support setting as the default browser.">
-      This is a secondary installation of Supermium, and cannot be made your default browser.
-    </message>
-=======
     <if expr="_is_chrome_for_testing_branded">
       <then>
         <message name="IDS_SETTINGS_DEFAULT_BROWSER_SECONDARY" desc="The text displayed when Chrome for Testing is installed in side-by-side mode, which does not support setting as the default browser.">
@@ -122,11 +108,10 @@
       </then>
       <else>
         <message name="IDS_SETTINGS_DEFAULT_BROWSER_SECONDARY" desc="The text displayed when Chromium is installed in side-by-side mode, which does not support setting as the default browser.">
-          This is a secondary installation of Chromium, and cannot be made your default browser.
+          This is a secondary installation of Supermium, and cannot be made your default browser.
         </message>
       </else>
     </if>
->>>>>>> 4abd918b29516f4a97125e618c490f82492b935b
   </if>
 
   <!-- Privacy Page -->
