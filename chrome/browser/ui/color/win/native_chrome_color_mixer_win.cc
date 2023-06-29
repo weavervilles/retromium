@@ -46,11 +46,11 @@ class FrameColorHelper {
 
  private:
   // Returns whether there is a custom image provided for the given id.
-  bool HasCustomImage(int id, const ui::ColorProviderManager::Key& key) const;
+  bool HasCustomImage(int id, const ui::ColorProviderKey& key) const;
 
   // Returns true if colors from DWM can be used, i.e. this is a native frame
   // on Windows 8+.
-  bool DwmColorsAllowed(const ui::ColorProviderManager::Key& key) const;
+  bool DwmColorsAllowed(const ui::ColorProviderKey& key) const;
 
   // Returns the Tint for the given |id|. If there is no tint, the identity tint
   // {-1, -1, -1} is returned and won't tint the color on which it is used.
@@ -105,9 +105,13 @@ void FrameColorHelper::AddNativeChromeColors(
     // should be the same as non-incognito in all cases here.
 
     constexpr SkColor kSystemSolidLightFrameColor = SK_ColorWHITE;
-    constexpr SkColor kSystemSolidDarkActiveFrameColor = SK_ColorBLACK;
     constexpr SkColor kSystemSolidDarkInactiveFrameColor =
         SkColorSetRGB(0x2B, 0x2B, 0x2B);
+		
+    constexpr SkColor kSystemMicaLightFrameColor =
+      SkColorSetRGB(0xE8, 0xE8, 0xE8);
+    constexpr SkColor kSystemMicaDarkFrameColor = SkColorSetRGB(0x20, 0x20, 0x20);
+
 
   if (auto color = get_theme_color(TP::COLOR_FRAME_ACTIVE)) {
     mixer[ui::kColorFrameActive] = {color.value()};
@@ -141,7 +145,7 @@ void FrameColorHelper::AddNativeChromeColors(
       mixer[ui::kColorFrameInactive] = {key.color_mode == ColorMode::kDark
                                             ? kSystemMicaDarkFrameColor
                                             : kSystemMicaLightFrameColor};
-    } else if (ShouldAlwaysUseSystemTitlebar()) {
+    } else if (!ShouldCustomDrawSystemTitlebar()) {
       mixer[ui::kColorFrameInactive] = {key.color_mode == ColorMode::kDark
                                             ? kSystemSolidDarkInactiveFrameColor
                                             : kSystemSolidLightFrameColor};
@@ -185,14 +189,14 @@ FrameColorHelper* FrameColorHelper::Get() {
 
 bool FrameColorHelper::HasCustomImage(
     int id,
-    const ui::ColorProviderManager::Key& key) const {
+    const ui::ColorProviderKey& key) const {
   return BrowserThemePack::IsPersistentImageID(id) && key.custom_theme &&
          key.custom_theme->HasCustomImage(id);
 }
 
 bool FrameColorHelper::DwmColorsAllowed(
-    const ui::ColorProviderManager::Key& key) const {
-  return !ShouldAlwaysUseSystemTitlebar() ||
+    const ui::ColorProviderKey& key) const {
+  return ShouldCustomDrawSystemTitlebar() ||
          !HasCustomImage(IDR_THEME_FRAME, key);
 }
 
