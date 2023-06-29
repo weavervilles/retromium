@@ -4,6 +4,7 @@
 
 #include "chrome/browser/win/titlebar_config.h"
 
+#include <Windows.h>
 #include "base/command_line.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -43,6 +44,16 @@ bool ShouldCustomDrawSystemTitlebar() {
          base::win::GetVersion() >= base::win::Version::WIN10) || !result;
 }
 
+bool ShouldBrowserCustomDrawTitlebar(BrowserView* browser_view) {
+  return !ShouldDefaultThemeUseMicaTitlebar() ||
+         !ThemeServiceFactory::GetForProfile(browser_view->GetProfile())
+              ->UsingSystemTheme() ||
+         (!browser_view->browser()->is_type_normal() &&
+          !browser_view->browser()->is_type_popup() &&
+          !browser_view->browser()->is_type_devtools());
+}
+
+
 bool ShouldDefaultThemeUseMicaTitlebar() {
   return SystemTitlebarCanUseMicaMaterial() &&
          !ui::AccentColorObserver::Get()->accent_color().has_value() &&
@@ -51,8 +62,11 @@ bool ShouldDefaultThemeUseMicaTitlebar() {
 }
 
 bool SystemTitlebarCanUseMicaMaterial() {
-  return base::win::GetVersion() >= base::win::Version::WIN11_22H2 &&
-         base::FeatureList::IsEnabled(kWindows11MicaTitlebar);
+  return false;
+}
+
+bool ShouldBrowserUseMicaTitlebar(class BrowserView *) {
+  return false;
 }
 
 bool SystemTitlebarSupportsDarkMode() {
