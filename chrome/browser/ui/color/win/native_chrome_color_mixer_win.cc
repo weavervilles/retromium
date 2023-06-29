@@ -244,8 +244,8 @@ bool FrameColorHelper::HasCustomImage(
 
 bool FrameColorHelper::DwmColorsAllowed(
     const ui::ColorProviderKey& key) const {
-  return ShouldCustomDrawSystemTitlebar() ||
-         !HasCustomImage(IDR_THEME_FRAME, key);
+  return (!ShouldCustomDrawSystemTitlebar() ||
+         !HasCustomImage(IDR_THEME_FRAME, key));
 }
 
 color_utils::HSL FrameColorHelper::GetTint(
