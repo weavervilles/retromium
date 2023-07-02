@@ -13,6 +13,14 @@ Releases are expected every one to two months.
 
 -Supporting Windows Vista (without extended kernel)
 
+-Restoring GDI font rendering
+
+-Adding basic GUI to installer to allow user to pick an install directory
+
+-Adding trapezoidal tabs option
+
+-"ungoogled" mode
+
 # Future objectives of lower priority
 
 -Supporting Windows XP
