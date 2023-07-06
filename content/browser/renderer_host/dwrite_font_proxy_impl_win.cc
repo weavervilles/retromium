@@ -579,25 +579,6 @@ void DWriteFontProxyImpl::MatchUniqueFont(
   std::move(callback).Run(std::move(font_file), ttc_index);
 }
 
-void DWriteFontProxyImpl::GetUniqueFontLookupMode(
-    GetUniqueFontLookupModeCallback callback) {
-  InitializeDirectWrite();
-  // If factory3_ is available, that means we can use IDWriteFontSet to filter
-  // for PostScript name and full font name directly and do not need to build
-  // the lookup table.
-  blink::mojom::UniqueFontLookupMode lookup_mode =
-      factory3_.Get() ? blink::mojom::UniqueFontLookupMode::kSingleLookups
-                      : blink::mojom::UniqueFontLookupMode::kRetrieveTable;
-  std::move(callback).Run(lookup_mode);
-}
-
-void DWriteFontProxyImpl::GetUniqueNameLookupTable(
-    GetUniqueNameLookupTableCallback callback) {
-  DCHECK(base::FeatureList::IsEnabled(features::kFontSrcLocalMatching));
-  DWriteFontLookupTableBuilder::GetInstance()->QueueShareMemoryRegionWhenReady(
-      base::SequencedTaskRunner::GetCurrentDefault(), std::move(callback));
-}
-
 void DWriteFontProxyImpl::FallbackFamilyAndStyleForCodepoint(
     const std::string& base_family_name,
     const std::string& locale_name,
