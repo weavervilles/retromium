@@ -47,8 +47,6 @@ bool ShouldCustomDrawSystemTitlebar() {
 bool ShouldBrowserCustomDrawTitlebar(BrowserView* browser_view) {
 
   return ShouldCustomDrawSystemTitlebar() ||
-         !ThemeServiceFactory::GetForProfile(browser_view->GetProfile())
-              ->UsingSystemTheme() ||
          (!browser_view->browser()->is_type_normal() &&
           !browser_view->browser()->is_type_popup() &&
           !browser_view->browser()->is_type_devtools());
