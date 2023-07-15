@@ -65,17 +65,12 @@ static const char* kBadFlags[] = {
     sandbox::policy::switches::kDisableGpuSandbox,
     sandbox::policy::switches::kDisableSeccompFilterSandbox,
     sandbox::policy::switches::kDisableSetuidSandbox,
-    sandbox::policy::switches::kNoSandbox,
 #if BUILDFLAG(IS_WIN)
     sandbox::policy::switches::kAllowThirdPartyModules,
 #endif
     switches::kDisableSiteIsolation,
     switches::kDisableWebSecurity,
-#if BUILDFLAG(IS_WIN) && INTPTR_MAX == INT32_MAX
-
-#else
     switches::kSingleProcess,
-#endif
 
     // These flags disable or undermine the Same Origin Policy.
     translate::switches::kTranslateSecurityOrigin,
