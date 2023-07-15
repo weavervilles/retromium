@@ -5032,7 +5032,7 @@ ChildProcessTerminationInfo RenderProcessHostImpl::GetChildTerminationInfo(
     if (info.exit_code == WAIT_TIMEOUT && g_analyze_hung_renderer)
       g_analyze_hung_renderer(child_process_launcher_->GetProcess());
 #endif
-  }
+    }
 
 #if BUILDFLAG(IS_ANDROID)
   PopulateTerminationInfoRendererFields(&info);

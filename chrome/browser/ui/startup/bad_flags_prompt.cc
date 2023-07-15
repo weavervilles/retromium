@@ -71,11 +71,7 @@ static const char* kBadFlags[] = {
 #endif
     switches::kDisableSiteIsolation,
     switches::kDisableWebSecurity,
-#if BUILDFLAG(IS_WIN) && INTPTR_MAX == INT32_MAX
-
-#else
     switches::kSingleProcess,
-#endif
 
     // These flags disable or undermine the Same Origin Policy.
     translate::switches::kTranslateSecurityOrigin,
