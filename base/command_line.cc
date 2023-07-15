@@ -297,20 +297,6 @@ void CommandLine::SetProgram(const FilePath& program) {
 
 bool CommandLine::HasSwitch(StringPiece switch_string) const {
   DCHECK_EQ(ToLowerASCII(switch_string), switch_string);
-  
- #if BUILDFLAG(IS_WIN) && defined(_X86_)
-   // On 32 bit Windows 7 and below, considered legacy by even Supermium standards,
-   // there are memory allocation issues that occur when the renderer and GPU are broken out
-   // into separate processes. Analysis of win32 API usage did not reveal any source of failure.
-   // So the --single-process switch is effectively mandatory on these platforms and is done 
-   // seamlessly to prevent warning messages from appearing.
-  if (base::win::GetVersion() <= base::win::Version::WIN7) {
-	  if (switch_string == StringPiece("single-process")) {
-		  
-		  return true;
-	  }
-  }
-#endif
   return Contains(switches_, switch_string);
 }
 
