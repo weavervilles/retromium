@@ -20,8 +20,6 @@ struct NtExports {
   NtFreeVirtualMemoryFunction            FreeVirtualMemory;
   NtMapViewOfSectionFunction             MapViewOfSection;
   NtOpenThreadFunction                   OpenThread;
-  NtOpenProcessFunction                  OpenProcess;
-  NtOpenProcessTokenFunction             OpenProcessToken;
   NtOpenProcessTokenExFunction           OpenProcessTokenEx;
   NtProtectVirtualMemoryFunction         ProtectVirtualMemory;
   NtQueryAttributesFileFunction          QueryAttributesFile;
