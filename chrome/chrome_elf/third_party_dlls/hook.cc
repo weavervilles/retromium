@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <limits>
+#include <memory>
 
 #include <assert.h>
 #include <ntstatus.h>
@@ -419,10 +420,13 @@ ThirdPartyStatus ApplyHook() {
     return ThirdPartyStatus::kHookInitImportsFailure;
 
   // Prep system-service thunk via the appropriate ServiceResolver instance.
-  sandbox::ServiceResolverThunk thunk(::GetCurrentProcess(), /*relaxed=*/false);
+  std::unique_ptr<sandbox::ServiceResolverThunk> thunk(
+      elf_hook::HookSystemService(false));
+  if (!thunk)
+    return ThirdPartyStatus::kHookUnsupportedOs;
 
   // Set target process to self.
-  thunk.AllowLocalPatches();
+  thunk->AllowLocalPatches();
 
   // Mark the thunk storage as readable and writeable, since we
   // are ready to write to it now.
@@ -440,10 +444,10 @@ ThirdPartyStatus ApplyHook() {
   // Setup() applies the system-service patch, and stores a copy of the original
   // system service coded in |thunk_storage|.
   ntstatus =
-      thunk.Setup(::GetModuleHandle(sandbox::kNtdllName),
-                  reinterpret_cast<void*>(&__ImageBase), "NtMapViewOfSection",
-                  nullptr, reinterpret_cast<void*>(&NewNtMapViewOfSection64),
-                  thunk_storage, sizeof(sandbox::ThunkData), nullptr);
+      thunk->Setup(::GetModuleHandle(sandbox::kNtdllName),
+                   reinterpret_cast<void*>(&__ImageBase), "NtMapViewOfSection",
+                   nullptr, reinterpret_cast<void*>(&NewNtMapViewOfSection64),
+                   thunk_storage, sizeof(sandbox::ThunkData), nullptr);
 
   // Keep a pointer to the original system-service code, which is now in
   // |thunk_storage|.  Use this pointer for passing off execution from new shim.
@@ -460,10 +464,10 @@ ThirdPartyStatus ApplyHook() {
   }
 #else   // x86
   ntstatus =
-      thunk.Setup(::GetModuleHandle(sandbox::kNtdllName),
-                  reinterpret_cast<void*>(&__ImageBase), "NtMapViewOfSection",
-                  nullptr, reinterpret_cast<void*>(&NewNtMapViewOfSection),
-                  thunk_storage, sizeof(sandbox::ThunkData), nullptr);
+      thunk->Setup(::GetModuleHandle(sandbox::kNtdllName),
+                   reinterpret_cast<void*>(&__ImageBase), "NtMapViewOfSection",
+                   nullptr, reinterpret_cast<void*>(&NewNtMapViewOfSection),
+                   thunk_storage, sizeof(sandbox::ThunkData), nullptr);
 #endif  // defined(_WIN64)
 
   if (!NT_SUCCESS(ntstatus)) {
