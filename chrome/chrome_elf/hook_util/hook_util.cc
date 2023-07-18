@@ -11,7 +11,6 @@
 #include "chrome/chrome_elf/nt_registry/nt_registry.h"  // utils
 #include "sandbox/win/src/interception_internal.h"
 #include "sandbox/win/src/internal_types.h"
-#include "sandbox/win/src/sandbox_utils.h"
 #include "sandbox/win/src/service_resolver.h"
 
 namespace {
@@ -219,7 +218,8 @@ sandbox::ServiceResolverThunk* HookSystemService(bool relaxed) {
   // handling one like it does in 32-bit versions).
   thunk = new sandbox::ServiceResolverThunk(current_process, relaxed);
 #else
-  if (nt::IsCurrentProcWow64()) {
+  BOOL is_wow64 = FALSE;
+  if (::IsWow64Process(::GetCurrentProcess(), &is_wow64) && is_wow64) {
     if (::IsWindows10OrGreater())
       thunk = new sandbox::Wow64W10ResolverThunk(current_process, relaxed);
     else if (::IsWindows8OrGreater())
