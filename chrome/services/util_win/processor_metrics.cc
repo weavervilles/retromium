@@ -7,7 +7,6 @@
 #include <objbase.h>
 #include <sysinfoapi.h>
 #include <wbemidl.h>
-#include <winbase.h>
 #include <wrl/client.h>
 
 #include "base/metrics/histogram_functions.h"
@@ -157,20 +156,14 @@ void RecordEnclaveAvailability() {
 }
 
 void RecordProcessorMetrics() {
-  // These metrics do not require a WMI connection.
+  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                base::BlockingType::MAY_BLOCK);
+  ComPtr<IWbemServices> wmi_services;
+  if (!base::win::CreateLocalWmiConnection(true, &wmi_services))
+    return;
+  RecordProcessorMetricsFromWMI(wmi_services);
+  RecordHypervStatusFromWMI(wmi_services);
   RecordCetAvailability();
-  RecordEnclaveAvailability();
-
-  {
-    base::ScopedBlockingCall scoped_blocking_call(
-        FROM_HERE, base::BlockingType::MAY_BLOCK);
-    ComPtr<IWbemServices> wmi_services;
-    if (!base::win::CreateLocalWmiConnection(true, &wmi_services)) {
-      return;
-    }
-    RecordProcessorMetricsFromWMI(wmi_services);
-    RecordHypervStatusFromWMI(wmi_services);
-  }
 }
 
 }  // namespace
