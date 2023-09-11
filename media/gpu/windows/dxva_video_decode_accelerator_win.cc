@@ -40,7 +40,7 @@
 #include "base/win/scoped_co_mem.h"
 #include "build/build_config.h"
 #include "components/viz/common/resources/resource_format.h"
-#include "components/viz/common/viz_resource_format_export.h"
+//#include "components/viz/common/viz_resource_format_export.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/command_buffer/service/shared_image/d3d_image_backing.h"
 #include "gpu/command_buffer/service/shared_image/pbuffer_image_backing.h"

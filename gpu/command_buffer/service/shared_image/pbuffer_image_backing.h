@@ -6,7 +6,7 @@
 #define GPU_COMMAND_BUFFER_SERVICE_SHARED_IMAGE_PBUFFER_IMAGE_BACKING_H_
 
 #include "gpu/command_buffer/service/shared_image/gl_texture_common_representations.h"
-#include "gpu/command_buffer/service/shared_image/gl_texture_image_backing_helper.h"
+#include "gpu/command_buffer/service/shared_image/gl_texture_image_backing.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_backing.h"
 #include "gpu/gpu_gles2_export.h"
 
@@ -71,7 +71,7 @@ class GPU_GLES2_EXPORT PbufferImageBacking
 
   scoped_refptr<gles2::TexturePassthrough> passthrough_texture_;
 
-  sk_sp<SkPromiseImageTexture> cached_promise_texture_;
+  sk_sp<GrPromiseImageTexture> cached_promise_texture_;
 };
 
 }  // namespace gpu

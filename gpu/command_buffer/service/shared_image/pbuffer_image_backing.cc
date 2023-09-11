@@ -4,14 +4,14 @@
 
 #include "gpu/command_buffer/service/shared_image/pbuffer_image_backing.h"
 
-#include "components/viz/common/resources/resource_format_utils.h"
+#include "components/viz/common/resources/resource_format.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_format_service_utils.h"
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
-#include "third_party/skia/include/core/SkPromiseImageTexture.h"
+#include "third_party/skia/include/private/chromium/GrPromiseImageTexture.h"
 #include "third_party/skia/include/gpu/GrContextThreadSafeProxy.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_gl_api_implementation.h"
@@ -129,10 +129,10 @@ PbufferImageBacking::ProduceSkiaGanesh(
         context_state->feature_info(), GL_TEXTURE_2D, size(),
         passthrough_texture_->service_id(), gl_texture_storage_format,
         context_state->gr_context()->threadSafeProxy(), &backend_texture);
-    cached_promise_texture_ = SkPromiseImageTexture::Make(backend_texture);
+    cached_promise_texture_ = GrPromiseImageTexture::Make(backend_texture);
   }
 
-  std::vector<sk_sp<SkPromiseImageTexture>> promise_textures = {
+  std::vector<sk_sp<GrPromiseImageTexture>> promise_textures = {
       cached_promise_texture_};
   return std::make_unique<SkiaGLCommonRepresentation>(
       manager, this, gl_client, std::move(context_state),
