@@ -589,7 +589,7 @@ ResultCode GenerateConfigForSandboxedProcess(const base::CommandLine& cmd_line,
   #if !defined(NACL_WIN64)
     // Don't block font loading with GDI.
     if (!gfx::win::ShouldUseDirectWrite())
-      mitigations ^= sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE;
+      mitigations &= ~(MITIGATION_NONSYSTEM_FONT_DISABLE | MITIGATION_HEAP_TERMINATE);
   #endif
 
   // CET is enabled with the CETCOMPAT bit on chrome.exe so must be
@@ -634,10 +634,12 @@ ResultCode GenerateConfigForSandboxedProcess(const base::CommandLine& cmd_line,
         return result;
       }
     }
-    result = SandboxWin::AddWin32kLockdownPolicy(config);
-    if (result != SBOX_ALL_OK) {
-      return result;
-    }
+  if (gfx::win::ShouldUseDirectWrite()) {
+     result = SandboxWin::AddWin32kLockdownPolicy(config);
+     if (result != SBOX_ALL_OK) {
+       return result;
+     }
+  }
   }
 
   if (!delegate->DisableDefaultPolicy()) {

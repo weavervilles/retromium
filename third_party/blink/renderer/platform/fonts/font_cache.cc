@@ -94,15 +94,15 @@ FontCache::FontCache()
       font_platform_data_cache_(FontPlatformDataCache::Create()),
       font_data_cache_(FontDataCache::Create()) {
 #if BUILDFLAG(IS_WIN)
+  if(!s_useDirectWrite) {
+	  font_manager_ = SkFontMgr_New_GDI();
+  }
+
   if (!font_manager_ || should_use_test_font_mgr) {
     // This code path is only for unit tests. This SkFontMgr does not work in
     // sandboxed environments, but injecting this initialization code to all
     // unit tests isn't easy.
-	if(s_useDirectWrite) {
 		font_manager_ = SkFontMgr_New_DirectWrite();
-	} else {
-		font_manager_ = SkFontMgr_New_GDI();
-	}
     // Set |is_test_font_mgr_| to capture if this is not happening in the
     // production code. crbug.com/561873
     is_test_font_mgr_ = true;

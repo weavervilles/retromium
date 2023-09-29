@@ -127,7 +127,7 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags starting_flags,
   #if !defined(NACL_WIN64)
   // Don't block font loading with GDI.
   if (!gfx::win::ShouldUseDirectWrite())
-    flags ^= sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE;
+    flags &= ~(MITIGATION_NONSYSTEM_FONT_DISABLE | MITIGATION_WIN32K_DISABLE | MITIGATION_HEAP_TERMINATE);
   #endif
 
  if (flags & MITIGATION_DLL_SEARCH_ORDER) {
@@ -471,7 +471,7 @@ void ConvertProcessMitigationsToPolicy(MitigationFlags flags,
   #if !defined(NACL_WIN64)
     // Don't block font loading with GDI.
     if (!gfx::win::ShouldUseDirectWrite())
-      *policy_value_1 ^= sandbox::MITIGATION_NONSYSTEM_FONT_DISABLE;
+      *policy_value_1 &= ~(MITIGATION_NONSYSTEM_FONT_DISABLE | MITIGATION_NONSYSTEM_FONT_DISABLE | MITIGATION_HEAP_TERMINATE);
   #endif
 
   // Everything >= Win8, do not return before the end of the function where
