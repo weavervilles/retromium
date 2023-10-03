@@ -42,8 +42,18 @@ void CreateDirectWriteFactory(IDWriteFactory** factory) {
   // This shouldn't be necessary, but not having this causes breakage in
   // content_browsertests, and possibly other high-stress cases.
   PatchServiceManagerCalls();
+ using DWriteCreateFactoryProc = decltype(DWriteCreateFactory)*;
+  HMODULE dwrite_dll = LoadLibraryW(L"dwrite.dll");
+  if (!dwrite_dll)
+    return;
 
-  CHECK(SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED,
+  DWriteCreateFactoryProc dwrite_create_factory_proc =
+      reinterpret_cast<DWriteCreateFactoryProc>(
+          GetProcAddress(dwrite_dll, "DWriteCreateFactory"));
+  if (!dwrite_create_factory_proc)
+    return;
+
+  CHECK(SUCCEEDED(dwrite_create_factory_proc(DWRITE_FACTORY_TYPE_ISOLATED,
                                       __uuidof(IDWriteFactory),
                                       reinterpret_cast<IUnknown**>(factory))));
 }

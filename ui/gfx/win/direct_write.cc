@@ -24,17 +24,15 @@ namespace gfx {
 namespace win {
 	
 GFX_EXPORT bool ShouldUseDirectWrite() {
-  // If the flag is currently on, and we're on WinVista or above, we enable
-  // DirectWrite. There is no reason to not install Platform Update or
-  // even use the Windows 7 Platform Update dwrite.dll with the extended kernel.
-  if (base::win::GetVersion() < base::win::Version::VISTA) {
+  // Considering that there are seemingly some decent DirectWrite implementations
+  // out there for XP, we will no longer discriminate by OS version.
+  if (!::LoadLibraryA("dwrite.dll")) {
     return false;
   }
   // If forced off, don't use it.
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
-  return !(command_line.HasSwitch("disable-direct-write") || 
-          base::FeatureList::IsEnabled(base::features::kForceGdi));
+  return !command_line.HasSwitch("disable-direct-write");;
 }
 
 namespace {

@@ -5656,7 +5656,7 @@ const FeatureEntry kFeatureEntries[] = {
 	 FEATURE_VALUE_TYPE(kForceXpTheme)},	 
 	{"force-gdi",
 	 flag_descriptions::kForceGdiName, flag_descriptions::kForceGdiDescription, kOsWin,
-	 FEATURE_VALUE_TYPE(base::features::kForceGdi)},
+	 SINGLE_VALUE_TYPE("disable-direct-write")},
 #endif
 #if BUILDFLAG(IS_ANDROID)
     {"enable-accessibility-page-zoom",
