@@ -45,6 +45,9 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
+#if BUILDFLAG(IS_WIN)
+#include "third_party/skia/include/ports/SkTypeface_win.h"
+#endif
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "v8/include/v8.h"
 
@@ -141,7 +144,7 @@ FontPlatformData FontCustomPlatformData::GetFontPlatformData(
         bool syntheticItalic = italic && !return_typeface->isItalic();
         if (syntheticBold || syntheticItalic) {
             SkString name;
-			sk_sp<SkFontMgr> font_mgr(SkFontMgr::RefDefault());
+			sk_sp<SkFontMgr> font_mgr(SkFontMgr_New_GDI());
             return_typeface->getFamilyName(&name);
 
             SkFontStyle realStyle = return_typeface->fontStyle();
