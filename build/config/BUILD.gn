@@ -171,6 +171,7 @@ config("default_libs") {
       "odbc32.lib",
       "odbccp32.lib",
       "oleaut32.lib",
+      "psapi.lib",
       "shell32.lib",
       "shlwapi.lib",
       "user32.lib",
