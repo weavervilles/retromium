@@ -1414,10 +1414,6 @@ bool RegisterChromeBrowserImpl(const base::FilePath& chrome_exe,
 
 // Registers a set of protocols for a particular application in the Windows
 // registry.
-//
-// This method is not supported and should not be called in Windows versions
-// prior to Win8, where write access to HKLM is required.
-//
 // |protocols| is the set of protocols to register. Must not be empty.
 // |prog_id| is the ProgId used by Windows for protocol associations with this
 // application. Must not be empty or start with a '.'.
@@ -1425,7 +1421,6 @@ bool RegisterChromeBrowserImpl(const base::FilePath& chrome_exe,
 bool RegisterApplicationForProtocols(const std::vector<std::wstring>& protocols,
                                      const std::wstring& prog_id,
                                      const base::FilePath& chrome_exe) {
-  DCHECK_GT(base::win::GetVersion(), base::win::Version::WIN7);
   std::vector<std::unique_ptr<RegistryEntry>> entries;
   ShellUtil::ApplicationInfo app_info =
       ShellUtil::GetApplicationInfoForProgId(prog_id);
