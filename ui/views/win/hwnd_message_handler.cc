@@ -30,6 +30,7 @@
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
+#include "chrome/browser/win/titlebar_config.h"
 #include "services/tracing/public/cpp/perfetto/macros.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_window_handle_event_info.pbzero.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -47,7 +48,6 @@
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/base/win/session_change_observer.h"
 #include "ui/base/win/touch_input.h"
-#include "ui/base/win/shell.h"
 #include "ui/base/win/win_cursor.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/display/win/dpi.h"
@@ -388,7 +388,7 @@ class HWNDMessageHandler::ScopedRedrawLock {
         should_lock_(owner_->IsVisible() && !owner->HasChildRenderingWindow() &&
                      ::IsWindow(hwnd_) && !owner_->IsHeadless() &&
                      (!(GetWindowLong(hwnd_, GWL_STYLE) & WS_CAPTION) ||
-					  !ui::win::IsAeroGlassEnabled())) {
+					  ShouldCustomDrawSystemTitlebar())) {
     if (should_lock_)
       owner_->LockUpdates();
   }
@@ -712,7 +712,7 @@ void HWNDMessageHandler::SetBounds(const gfx::Rect& bounds_in_pixels,
 }
 
 void HWNDMessageHandler::SetDwmFrameExtension(DwmFrameState state) {
-  if (!delegate_->HasFrame() && ui::win::IsAeroGlassEnabled() &&
+  if (!delegate_->HasFrame() && !ShouldCustomDrawSystemTitlebar() &&
 	  !is_translucent_) {
     MARGINS m = {0, 0, 0, 0};
     if (state == DwmFrameState::kOn && !IsMaximized())
@@ -2014,7 +2014,7 @@ void HWNDMessageHandler::OnEnterSizeMove() {
 
 LRESULT HWNDMessageHandler::OnEraseBkgnd(HDC dc) {
   gfx::Insets insets;
-  if (ui::win::IsAeroGlassEnabled() && 
+  if (!ShouldCustomDrawSystemTitlebar() && 
 	  delegate_->GetDwmFrameInsetsInPixels(&insets) && !insets.IsEmpty() &&
       needs_dwm_frame_clear_) {
     // This is necessary to avoid white flashing in the titlebar area around the
@@ -2591,7 +2591,7 @@ void HWNDMessageHandler::OnNCPaint(HRGN rgn) {
   // It's required to avoid some native painting artifacts from appearing when
   // the window is resized.
   if (!delegate_->HasNonClientView() || IsFrameSystemDrawn()) {
-	  if (ui::win::IsAeroGlassEnabled()) {
+	  if (!ShouldCustomDrawSystemTitlebar()) {
     // The default WM_NCPAINT handler under Aero Glass doesn't clear the
     // nonclient area, so it'll remain the default white color. That area is
     // invisible initially (covered by the window border) but can become
@@ -3665,7 +3665,7 @@ void HWNDMessageHandler::UpdateDwmFrame() {
   TRACE_EVENT0("ui", "HWNDMessageHandler::UpdateDwmFrame");
 
   gfx::Insets insets;
-  if (ui::win::IsAeroGlassEnabled() &&
+  if (!ShouldCustomDrawSystemTitlebar() &&
       delegate_->GetDwmFrameInsetsInPixels(&insets)) {
     MARGINS margins = {insets.left(), insets.right(), insets.top(),
                        insets.bottom()};
