@@ -5651,6 +5651,9 @@ const FeatureEntry kFeatureEntries[] = {
 	 flag_descriptions::kForceDarkModeFlagName, flag_descriptions::kForceDarkModeFlagDescription, kOsAll,
 	 FEATURE_VALUE_TYPE(base::features::kForceDarkModeFlag)},
 #if BUILDFLAG(IS_WIN)
+	{"disable-windows-10-custom-titlebar",
+	 flag_descriptions::kDisableWindows10CustomTitlebarName, flag_descriptions::kDisableWindows10CustomTitlebarDescription, kOsWin,
+	 SINGLE_VALUE_TYPE("disable-windows10-custom-titlebar")},
 	{"force-xp-theme",
 	 flag_descriptions::kForceXpThemeName, flag_descriptions::kForceXpThemeDescription, kOsWin,
 	 FEATURE_VALUE_TYPE(kForceXpTheme)},	 

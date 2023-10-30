@@ -1844,6 +1844,11 @@
     "expiry_milestone": -1
   },
   {
+    "name": "disable-windows-10-custom-titlebar",
+    "owners": [ "win32", "supermium" ],
+    "expiry_milestone": -1
+  },
+  {
     "name": "disallow-doc-written-script-loads",
     "owners": [ "//chrome/browser/data_saver/OWNERS" ],
     // This is a web-developer facing flag and should not be removed.

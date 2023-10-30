@@ -34,6 +34,7 @@
   "disable-javascript-harmony-shipping",
   "disable-webrtc-hw-decoding",
   "disable-webrtc-hw-encoding",
+  "disable-windows-10-custom-titlebar",
   "disallow-doc-written-script-loads",
   "enable-autofill-credit-card-upload",
   "enable-benchmarking",

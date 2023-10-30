@@ -1783,6 +1783,10 @@ const char kForceGdiName[] = "Force GDI font rendering";
 const char kForceGdiDescription[] =
     "Use GDI font rendering in place of DirectWrite font rendering on Windows.";
 
+const char kDisableWindows10CustomTitlebarName[] = "Force disabling of Windows 10 custom titlebar";
+const char kDisableWindows10CustomTitlebarDescription[] =
+    "Disable the \"Windows 10\" custom titlebar to take advantage of Aero Glass fixes for the operating system.";
+
 const char kForceUiDirectionName[] = "Force UI direction";
 const char kForceUiDirectionDescription[] =
     "Explicitly force the UI to left-to-right (LTR) or right-to-left (RTL) "

@@ -1594,6 +1594,9 @@ extern const char kPasswordGenerationExperimentDescription[];
 extern const char kForceGdiName[];
 extern const char kForceGdiDescription[];
 
+extern const char kDisableWindows10CustomTitlebarName[];
+extern const char kDisableWindows10CustomTitlebarDescription[];
+
 extern const char kBacklightOcrName[];
 extern const char kBacklightOcrDescription[];
 
