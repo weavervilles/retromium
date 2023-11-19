@@ -11264,6 +11264,12 @@ const FeatureEntry kFeatureEntries[] = {
      flag_descriptions::kEnableBuiltinHlsDescription, kOsAll,
      FEATURE_VALUE_TYPE(media::kBuiltInHlsPlayer)},
 #endif
+	{"ungoogled-supermium",
+	 flag_descriptions::kUngoogledSupermiumName, flag_descriptions::kUngoogledSupermiumDescription, 
+	 kOsAll, SINGLE_VALUE_TYPE("disable-windows10-custom-titlebar")},
+	{"disable-download-upload",
+	 flag_descriptions::kDisableDownloadUploadName, flag_descriptions::kDisableDownloadUploadDescription, 
+	 kOsAll, SINGLE_VALUE_TYPE("disable-windows10-custom-titlebar")}
 
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
     {"profiles-reordering", flag_descriptions::kProfilesReorderingName,

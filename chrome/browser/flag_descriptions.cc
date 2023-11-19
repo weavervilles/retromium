@@ -1093,6 +1093,10 @@ const char kDesktopPWAsWebBundlesName[] = "Desktop PWAs Web Bundles";
 const char kDesktopPWAsWebBundlesDescription[] =
     "Adds support for web bundles, making web apps able to be launched "
     "offline.";
+	
+const char kDisableDownloadUploadName[] = "Disable Safe Browsing for Downloads and Download Sample Uploads";
+const char kDisableDownloadUploadDescription[] = "Disables prompts about unsafe or uncommon downloads, and "
+												  "prevents samples of downloads from being sent to Google.";
 
 const char kEnableTLS13EarlyDataName[] = "TLS 1.3 Early Data";
 const char kEnableTLS13EarlyDataDescription[] =
@@ -1943,6 +1947,10 @@ const char kHideIncognitoMediaMetadataName[] =
 const char kHideIncognitoMediaMetadataDescription[] =
     "When enabled, media metadata will be hidden from your OS' media player "
     "if you are in an Incognito session.";
+	
+const char kUngoogledSupermiumName[] = "\"Ungoogled\" Supermium Mode";
+const char kUngoogledSupermiumDescription[] = "A work in progress - this rolls all new privacy-protecting "
+											"features in Supermium into one option";
 
 const char kTabAudioMutingName[] = "Tab audio muting UI control";
 const char kTabAudioMutingDescription[] =

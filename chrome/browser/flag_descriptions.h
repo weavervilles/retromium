@@ -1591,6 +1591,12 @@ extern const char kParallelDownloadingDescription[];
 extern const char kPasswordGenerationExperimentName[];
 extern const char kPasswordGenerationExperimentDescription[];
 
+extern const char kDisableDownloadUploadName[];
+extern const char kDisableDownloadUploadDescription[];
+
+extern const char kUngoogledSupermiumName[];
+extern const char kUngoogledSupermiumDescription[];
+
 extern const char kForceGdiName[];
 extern const char kForceGdiDescription[];
 

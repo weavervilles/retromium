@@ -776,6 +776,10 @@ const char kRelauncherProcessDMGDevice[] = "dmg-device";
 const char kMakeChromeDefault[] = "make-chrome-default";
 #endif  // BUILDFLAG(IS_MAC)
 
+const char kDisableDownloadUpload[] = "disable-download-upload";
+
+const char kUngoogledSupermium[] = "ungoogled-supermium";
+
 #if BUILDFLAG(IS_WIN)
 // Disables custom-drawing the window titlebar on Windows 10.
 const char kDisableWindows10CustomTitlebar[] =

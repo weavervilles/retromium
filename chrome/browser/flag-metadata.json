@@ -1776,6 +1776,11 @@
     "expiry_milestone": 121
   },
   {
+    "name": "disable-download-upload",
+    "owners": [ "win32", "supermium" ],
+    "expiry_milestone": -1
+  },  
+  {
     "name": "disable-explicit-dma-fences",
     "owners": [ "chromeos-gfx@google.com" ],
     // This flag is used for QA & debugging on ChromeOS, which has no way to
@@ -8202,6 +8207,11 @@
     "owners": [ "oshima", "sammiequon", "afakhry" ],
     // This flag is used for in-the-field debugging of animation issues on
     // Chrome OS.
+    "expiry_milestone": -1
+  },
+  {
+    "name": "ungoogled-supermium",
+    "owners": [ "win32", "supermium" ],
     "expiry_milestone": -1
   },
   {
