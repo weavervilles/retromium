@@ -1002,12 +1002,14 @@ int RenderText::GetContentWidth() {
 int RenderText::GetBaseline() {
   if (baseline_ == kInvalidBaseline) {
     const int centering_height =
-        (vertical_alignment_ == ALIGN_MIDDLE)
+        (vertical_alignment_ == ALIGN_MIDDLE || vertical_alignment_ == ALIGN_SPECIAL)
             ? display_rect().height()
             : std::max(font_list().GetHeight(), min_line_height());
     baseline_ = DetermineBaselineCenteringText(centering_height, font_list());
     if (vertical_alignment_ == ALIGN_BOTTOM)
       baseline_ += display_rect().height() - centering_height;
+	if (vertical_alignment_ == ALIGN_SPECIAL)
+	  baseline_ *= 1.33; // This will push down the offending labels in GDI to the point that they will appear centred
   }
   DCHECK_NE(kInvalidBaseline, baseline_);
   return baseline_;
@@ -1857,6 +1859,7 @@ Vector2d RenderText::GetAlignmentOffset(size_t line_number) {
       offset.set_y(0);
       break;
     case ALIGN_MIDDLE:
+	case ALIGN_SPECIAL:
       if (multiline_)
         offset.set_y((display_rect_.height() - GetStringSize().height()) / 2);
       else
