@@ -79,6 +79,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "base/win/win_util.h"
+#include "ui/gfx/win/direct_write.h"
 #endif
 
 #if BUILDFLAG(IS_LINUX)
@@ -615,7 +616,13 @@ void Textfield::FitToLocalBounds() {
   } else {
     // The text will draw with the correct vertical alignment if we don't apply
     // the vertical insets.
+	#if BUILDFLAG(IS_WIN)
+    if (!gfx::win::IsDirectWriteEnabled()) {
+	  bounds.Inset(gfx::Insets::TLBR(8, insets.left(), 0, insets.right()));
+    }
+	#else
     bounds.Inset(gfx::Insets::TLBR(0, insets.left(), 0, insets.right()));
+	#endif
   }
 
   bounds.set_x(GetMirroredXForRect(bounds));

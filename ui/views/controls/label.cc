@@ -1159,7 +1159,7 @@ void Label::Init(const std::u16string& text,
   full_text_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
   #if BUILDFLAG(IS_WIN)
   if (!gfx::win::IsDirectWriteEnabled() && 
-  (text_context_ == style::CONTEXT_LABEL || text_context_ == style::CONTEXT_BUTTON)) {
+  (text_context_ != style::CONTEXT_MENU && text_context_ != style::CONTEXT_DIALOG_TITLE)) {
 	  full_text_->SetVerticalAlignment(gfx::ALIGN_SPECIAL); 
   } // The bookmark bar labels and some of the side text in the menus are CONTEXT_BUTTON.
 	// The "new tab" labels are CONTEXT_LABEL.
