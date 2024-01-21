@@ -1004,18 +1004,21 @@ int RenderText::GetContentWidth() {
 int RenderText::GetBaseline() {
   if (baseline_ == kInvalidBaseline) {
     const int centering_height =
-        (vertical_alignment_ == ALIGN_MIDDLE || vertical_alignment_ == ALIGN_SPECIAL)
+        (vertical_alignment_ == ALIGN_MIDDLE || vertical_alignment_ == ALIGN_SPECIAL || vertical_alignment_ == ALIGN_COMPACT)
             ? display_rect().height()
             : std::max(font_list().GetHeight(), min_line_height());
     baseline_ = DetermineBaselineCenteringText(centering_height, font_list());
     if (vertical_alignment_ == ALIGN_BOTTOM)
       baseline_ += display_rect().height() - centering_height;
+    if (vertical_alignment_ == ALIGN_COMPACT) {
+		baseline_ += 6;
+	}
 	if (vertical_alignment_ == ALIGN_SPECIAL) {
 		if (base::FeatureList::IsEnabled(features::kChromeRefresh2023)) {
-			baseline_ *= 1.40; // This will push down the offending labels in GDI to the point that they will appear centred
+			baseline_ += 4; // This will push down the offending labels in GDI to the point that they will appear centred
 		}
 		else
-			baseline_ *= 1.30;
+			baseline_ += 3;
 	}
   }
   DCHECK_NE(kInvalidBaseline, baseline_);
@@ -1876,6 +1879,7 @@ Vector2d RenderText::GetAlignmentOffset(size_t line_number) {
       break;
     case ALIGN_MIDDLE:
 	case ALIGN_SPECIAL:
+	case ALIGN_COMPACT:
       if (multiline_)
         offset.set_y((display_rect_.height() - GetStringSize().height()) / 2);
       else

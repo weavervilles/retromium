@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
@@ -1219,7 +1220,10 @@ void Label::Init(const std::u16string& text,
   #if BUILDFLAG(IS_WIN)
   if (!gfx::win::IsDirectWriteEnabled() && 
   (text_context_ != style::CONTEXT_MENU && text_context_ != style::CONTEXT_DIALOG_TITLE)) {
-	  full_text_->SetVerticalAlignment(gfx::ALIGN_SPECIAL); 
+	  if (text_context_ == style::CONTEXT_LABEL && base::CommandLine::ForCurrentProcess()->HasSwitch("compact-ui"))
+		  full_text_->SetVerticalAlignment(gfx::ALIGN_COMPACT); 
+	  else
+		  full_text_->SetVerticalAlignment(gfx::ALIGN_SPECIAL); 
   } // The bookmark bar labels and some of the side text in the menus are CONTEXT_BUTTON.
 	// The "new tab" labels are CONTEXT_LABEL.
   #endif
