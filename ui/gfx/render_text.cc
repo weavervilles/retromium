@@ -371,7 +371,7 @@ void SkiaTextRenderer::DrawPosText(const SkPoint* pos,
   static_assert(sizeof(*pos) == 2 * sizeof(*run_buffer.pos), "");
   memcpy(run_buffer.pos, pos, glyph_count * sizeof(*pos));
 
-  canvas_skia_->drawTextBlob(builder.make(), 0, 0, flags_);
+  canvas_skia_->drawTextBlob(builder.make(), 0, 0 + special_y_offset_, flags_);
 }
 
 void SkiaTextRenderer::DrawUnderline(int x,
@@ -1010,16 +1010,6 @@ int RenderText::GetBaseline() {
     baseline_ = DetermineBaselineCenteringText(centering_height, font_list());
     if (vertical_alignment_ == ALIGN_BOTTOM)
       baseline_ += display_rect().height() - centering_height;
-    if (vertical_alignment_ == ALIGN_COMPACT) {
-		baseline_ += 6;
-	}
-	if (vertical_alignment_ == ALIGN_SPECIAL) {
-		if (base::FeatureList::IsEnabled(features::kChromeRefresh2023)) {
-			baseline_ += 4; // This will push down the offending labels in GDI to the point that they will appear centred
-		}
-		else
-			baseline_ += 3;
-	}
   }
   DCHECK_NE(kInvalidBaseline, baseline_);
   return baseline_;
@@ -1044,7 +1034,15 @@ void RenderText::Draw(Canvas* canvas, bool select_all) {
       draw_selections = GetAllSelections();
 
     DrawSelections(canvas, draw_selections);
+
     internal::SkiaTextRenderer renderer(canvas);
+	
+    if (vertical_alignment_ == ALIGN_COMPACT) {
+		renderer.SetSpecialYOffset(6);
+	}
+	if (vertical_alignment_ == ALIGN_SPECIAL) {
+		renderer.SetSpecialYOffset(4); // This will push down the offending labels in GDI to the point that they will appear centred
+	}
     DrawVisualText(&renderer, draw_selections);
   }
 

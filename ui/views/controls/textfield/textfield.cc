@@ -625,15 +625,13 @@ void Textfield::FitToLocalBounds() {
   } else {
     // The text will draw with the correct vertical alignment if we don't apply
     // the vertical insets.
-	
-	#if BUILDFLAG(IS_WIN)
-    if (!gfx::win::IsDirectWriteEnabled()) {
-	  GetRenderText()->SetVerticalAlignment(gfx::ALIGN_SPECIAL);    
-	}
-	#endif
     bounds.Inset(gfx::Insets::TLBR(0, insets.left(), 0, insets.right()));
   }
-
+  #if BUILDFLAG(IS_WIN)
+  if (!gfx::win::IsDirectWriteEnabled()) {
+	   GetRenderText()->SetVerticalAlignment(gfx::ALIGN_SPECIAL);  
+  }
+  #endif
   bounds.set_x(GetMirroredXForRect(bounds));
   GetRenderText()->SetDisplayRect(bounds);
   UpdateAfterChange(TextChangeType::kNone, true);
@@ -2719,6 +2717,13 @@ void Textfield::PaintTextAndCursor(gfx::Canvas* canvas) {
     int placeholder_text_draw_flags = placeholder_text_draw_flags_;
     if (SkColorGetA(GetBackgroundColor()) != SK_AlphaOPAQUE)
       placeholder_text_draw_flags |= gfx::Canvas::NO_SUBPIXEL_RENDERING;
+ 
+    #if BUILDFLAG(IS_WIN)
+    if (!gfx::win::IsDirectWriteEnabled()) {
+	   render_text->SetVerticalAlignment(gfx::ALIGN_SPECIAL);  
+	   placeholder_text_draw_flags |= gfx::Canvas::GDI_OFFSET_RENDERING;
+    }
+    #endif
 
     canvas->DrawStringRectWithFlags(
         GetPlaceholderText(), placeholder_font_list_.value_or(GetFontList()),
@@ -2728,7 +2733,7 @@ void Textfield::PaintTextAndCursor(gfx::Canvas* canvas) {
                 GetInvalid() ? style::STYLE_INVALID : style::STYLE_PRIMARY))),
         render_text->display_rect(), placeholder_text_draw_flags);
   }
-
+  
   // If drop cursor is active, draw |render_text| with its text selected.
   const bool select_all = drop_cursor_visible_ && !IsDropCursorForInsertion();
   render_text->Draw(canvas, select_all);

@@ -135,6 +135,12 @@ void OmniboxTextView::OnPaint(gfx::Canvas* canvas) {
 
   if (!render_text_)
     return;
+/*
+  #if BUILDFLAG(IS_WIN)
+  if (!gfx::win::IsDirectWriteEnabled()) {
+	  render_text_->SetVerticalAlignment(gfx::ALIGN_SPECIAL);	
+  }
+  #endif*/
   render_text_->SetDisplayRect(GetContentsBounds());
   render_text_->Draw(canvas);
 }
