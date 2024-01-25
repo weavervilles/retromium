@@ -37,8 +37,10 @@ bool ShouldCustomDrawSystemTitlebar() {
   // Cache flag lookup.
   static const bool custom_titlebar_disabled =
       base::CommandLine::InitializedForCurrentProcess() &&
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableWindows10CustomTitlebar);
+      (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableWindows10CustomTitlebar) ||
+	  base::CommandLine::ForCurrentProcess()->HasSwitch(
+          "windows11-mica-titlebar"));
 
   return (!custom_titlebar_disabled &&
          base::win::GetVersion() >= base::win::Version::WIN10) || !result;
@@ -61,11 +63,13 @@ bool ShouldDefaultThemeUseMicaTitlebar() {
 }
 
 bool SystemTitlebarCanUseMicaMaterial() {
-  return false;
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+          "windows11-mica-titlebar");
 }
 
 bool ShouldBrowserUseMicaTitlebar(class BrowserView *) {
-  return false;
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+          "windows11-mica-titlebar");
 }
 
 bool SystemTitlebarSupportsDarkMode() {

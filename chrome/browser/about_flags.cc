@@ -11553,7 +11553,11 @@ const FeatureEntry kFeatureEntries[] = {
     {"power-bookmarks-side-panel", "Power bookmarks side panel",
      "Enables the power bookmarks version of the bookmarks side panel content.", kOsDesktop,
      FEATURE_VALUE_TYPE(features::kPowerBookmarksSidePanel)},
-
+	{"windows11-mica-titlebar",
+     "Windows 11 Mica Taskbar",
+     "Enables support for the Windows 11 Mica Taskbar, as used in 22H2 and up.",
+     kOsDesktop, SINGLE_VALUE_TYPE("windows11-mica-titlebar")},
+	 
     // NOTE: Adding a new flag requires adding a corresponding entry to enum
     // "LoginCustomFlags" in tools/metrics/histograms/enums.xml. See "Flag
     // Histograms" in tools/metrics/histograms/README.md (run the
