@@ -1,9 +1,9 @@
 # Supermium
-An up-to-date Chromium-based web browser compatible with Windows Vista, 7 and 8.x.
+An up-to-date Chromium-based web browser compatible with Windows XP, 2003, Vista, 7 and 8.x.
 
 The Supermium web browser also provides the following features:
 
--Aero Glass and Aero Glass-style titlebars instead of Windows 10-style ones
+-Aero Glass and Aero Glass-style titlebars instead of Windows 10-style ones (#force-xp-theme in chrome://flags for the latter)
 
 -Turnaround for major vulnerability patches generally less than one week from upstream disclosure
 
@@ -17,15 +17,17 @@ The Supermium web browser also provides the following features:
 
 -Persistent dark mode on the browser's UI elements, using #force-dark-mode in chrome://flags
 
+-Custom tab options including trapezoidal tabs, transparent tabs, and outlined tabs
+
+-Many flags from ungoogled-chromium
+
 -Support for SSE2-only processors in the 32 bit build
 
 **Future support for:**
 
--Windows XP/Server 2003
-
 -Windows 2000
 
--Ungoogled Chromium features
+-Ungoogled Chromium features (in progress)
 
 -WebGPU for D3D9 renderer
 
