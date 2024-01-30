@@ -442,9 +442,9 @@ void ToolbarView::Init() {
     send_tab_to_self_button_ =
         container_view_->AddChildView(std::move(send_tab_to_self_button));
 
-  if (!features::IsSidePanelPinningEnabled()) {
-    if (companion::IsCompanionFeatureEnabled() &&
+  if (!features::IsSidePanelPinningEnabled()&&
       !base::CommandLine::ForCurrentProcess()->HasSwitch("hide-sidepanel-button")) {
+    if (companion::IsCompanionFeatureEnabled()) {
       side_panel_container_ = container_view_->AddChildView(
           std::make_unique<SidePanelToolbarContainer>(browser_view_));
     } else {
