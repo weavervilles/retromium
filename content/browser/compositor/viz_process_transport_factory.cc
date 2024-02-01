@@ -51,6 +51,7 @@
 #include "ui/base/ui_base_features.h"
 
 #if BUILDFLAG(IS_WIN)
+#include "base/win/windows_version.h"
 #include "ui/gfx/win/rendering_window_manager.h"
 #endif
 
@@ -158,10 +159,15 @@ VizProcessTransportFactory::VizProcessTransportFactory(
   GetHostFrameSinkManager()->SetConnectionLostCallback(
       base::BindRepeating(&VizProcessTransportFactory::OnGpuProcessLost,
                           weak_ptr_factory_.GetWeakPtr()));
-
+#if BUILDFLAG(IS_WIN)
+  // Workaround for Windows 7.
+  if (base::win::GetVersion() == base::win::Version::WIN7 || GpuDataManagerImpl::GetInstance()->IsGpuCompositingDisabled())
+    DisableGpuCompositing(nullptr);
+#else
   if (GpuDataManagerImpl::GetInstance()->IsGpuCompositingDisabled()) {
     DisableGpuCompositing(nullptr);
   }
+#endif
 }
 
 VizProcessTransportFactory::~VizProcessTransportFactory() {

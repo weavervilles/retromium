@@ -11,6 +11,10 @@
 #include "ui/views/animation/compositor_animation_runner.h"
 #include "ui/views/widget/widget.h"
 
+#if BUILDFLAG(IS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 namespace views {
 
 AnimationDelegateViews::AnimationDelegateViews(View* view) : view_(view) {
@@ -66,6 +70,11 @@ base::TimeDelta AnimationDelegateViews::GetAnimationDurationForReporting()
 
 void AnimationDelegateViews::UpdateAnimationRunner(
     const base::Location& location) {
+#if BUILDFLAG(IS_WIN)
+  if (base::win::GetVersion() == base::win::Version::WIN7)
+	  // Workaround for GPU process bug on Windows 7.
+	  return;
+#endif
   if (!view_ || !view_->GetWidget() || !view_->GetWidget()->GetCompositor()) {
     ClearAnimationRunner();
     return;

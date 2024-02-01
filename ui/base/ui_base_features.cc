@@ -615,7 +615,7 @@ BASE_FEATURE(kBubbleMetricsApi,
 			 
 BASE_FEATURE(kSupermiumCustomTabs,
              "SupermiumCustomTabs",
-             base::FEATURE_ENABLED_BY_DEFAULT);
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_MAC)
 // When enabled, images will be written to the system clipboard as both a TIFF
