@@ -265,6 +265,8 @@ BASE_FEATURE(kInputPaneOnScreenKeyboard,
 BASE_FEATURE(kPointerEventsForTouch,
              "PointerEventsForTouch",
              base::FEATURE_ENABLED_BY_DEFAULT);
+// Enables using TSF (over IMM32) for IME.
+BASE_FEATURE(kTSFImeSupport, "TSFImeSupport", base::FEATURE_ENABLED_BY_DEFAULT);
 
 bool IsUsingWMPointerForTouch() {
   return base::win::GetVersion() >= base::win::Version::WIN8 &&
