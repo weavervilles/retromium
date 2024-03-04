@@ -4,7 +4,7 @@
 
 import './commerce/shopping_list.js';
 
-import {ShoppingListApiProxy, ShoppingListApiProxyImpl} from '//bookmarks-side-panel.top-chrome/shared/commerce/shopping_list_api_proxy.js';
+import {ShoppingServiceApiProxy, ShoppingServiceApiProxyImpl} from '//bookmarks-side-panel.top-chrome/shared/commerce/shopping_service_api_proxy.js';
 import {BookmarkProductInfo} from '//bookmarks-side-panel.top-chrome/shared/shopping_list.mojom-webui.js';
 import {getInstance as getAnnouncerInstance} from 'chrome://resources/cr_elements/cr_a11y_announcer/cr_a11y_announcer.js';
 import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
@@ -60,8 +60,8 @@ export class BookmarksListElement extends PolymerElement {
 
   private bookmarksApi_: BookmarksApiProxy =
       BookmarksApiProxyImpl.getInstance();
-  private shoppingListApi_: ShoppingListApiProxy =
-      ShoppingListApiProxyImpl.getInstance();
+  private shoppingServiceApi_: ShoppingServiceApiProxy =
+      ShoppingServiceApiProxyImpl.getInstance();
   private bookmarksDragManager_: BookmarksDragManager =
       new BookmarksDragManager(this);
   private focusOutlineManager_: FocusOutlineManager;
@@ -125,14 +125,14 @@ export class BookmarksListElement extends PolymerElement {
       this.bookmarksDragManager_.startObserving();
     });
 
-    this.shoppingListApi_.getAllPriceTrackedBookmarkProductInfo().then(res => {
+    this.shoppingServiceApi_.getAllPriceTrackedBookmarkProductInfo().then(res => {
       this.productInfos_ = res.productInfos;
       if (this.productInfos_.length > 0) {
         chrome.metricsPrivate.recordUserAction(
             'Commerce.PriceTracking.SidePanel.TrackedProductsShown');
       }
     });
-    const callbackRouter = this.shoppingListApi_.getCallbackRouter();
+    const callbackRouter = this.shoppingServiceApi_.getCallbackRouter();
     this.shoppingListenerIds_.push(
         callbackRouter.priceTrackedForBookmark.addListener(
             (product: BookmarkProductInfo) =>
@@ -149,7 +149,7 @@ export class BookmarksListElement extends PolymerElement {
     }
     this.bookmarksDragManager_.stopObserving();
     this.shoppingListenerIds_.forEach(
-        id => this.shoppingListApi_.getCallbackRouter().removeListener(id));
+        id => this.shoppingServiceApi_.getCallbackRouter().removeListener(id));
   }
 
   /** BookmarksDragDelegate */
