@@ -198,10 +198,17 @@ bool ConfigureDialog_Legacy(OPENFILENAME_NT4W* open_file_name,
  for (const auto& filter_spec : filter) {
 	std::u16string filter_str = filter_spec.extension_spec;
     filter_buffer.append(filter_str);
-    filter_buffer.push_back(0);
   }
   filter_buffer.push_back(0);
-  open_file_name->lpstrFilter = (LPCWSTR)filter_buffer.c_str();
+  
+  PWSTR c_filter_buffer = (PWSTR) ::HeapAlloc(::GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WCHAR)*filter_buffer.length());
+  
+  for (size_t i = 0; i < filter_buffer.length(); i++)
+  {
+	  c_filter_buffer[i] = filter_buffer.at(i);
+  }
+  
+  open_file_name->lpstrFilter = c_filter_buffer;
   
   return true;
 }
@@ -483,12 +490,17 @@ bool RunSaveFileDialog(HWND owner,
       if (!filter.empty() && ((int)filter.size() - 1) < *filter_index) {
             *filter_index = filter.size() - 1;
           }
-	  open_file_name.lpstrFilter = 
-		  filter.empty() ? nullptr : (LPCWSTR)filter.at(*filter_index).extension_spec.c_str();
+	 // open_file_name.lpstrFilter = 
+	//	  filter.empty() ? nullptr : (LPCWSTR)filter.at(*filter_index).extension_spec.c_str();
 	  open_file_name.nFilterIndex = *filter_index;
 	  open_file_name.lpstrDefExt = &def_ext[0];
 
 	  BOOL success = ::GetSaveFileNameW((OPENFILENAMEW*)&open_file_name);
+	  
+	  if(open_file_name.lpstrFilter) {
+		  ::HeapFree(::GetProcessHeap(), 0, (LPVOID)open_file_name.lpstrFilter);
+		  open_file_name.lpstrFilter = nullptr;
+	  }
 	  BaseShellDialogImpl::DisableOwner(owner);
 	  if (!success)
 		return false;
@@ -626,6 +638,11 @@ bool RunOpenFileDialog(HWND owner,
 	  open_file_name.Flags |= OFN_EXPLORER | OFN_HIDEREADONLY;
 	  bool success = ::GetOpenFileNameW((OPENFILENAMEW*)&open_file_name);
 	  BaseShellDialogImpl::DisableOwner(owner);
+	  
+	  if(open_file_name.lpstrFilter) {
+		  ::HeapFree(::GetProcessHeap(), 0, (LPVOID)open_file_name.lpstrFilter);
+		  open_file_name.lpstrFilter = nullptr;
+	  }
 	  
 	  if(success) {
 		  base::FilePath directory;
