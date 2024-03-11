@@ -157,16 +157,25 @@ gfx::Size GM2TabStyle::GetPreviewImageSize() const {
 }
 
 int GM2TabStyle::GetTopCornerRadius() const {
+	if(base::CommandLine::ForCurrentProcess()->HasSwitch("rectangular-tabs"))
+		return 0;
 	return views::LayoutProvider::Get()->GetCornerRadiusMetric(
       views::Emphasis::kHigh);
 }
 
 int GM2TabStyle::GetBottomCornerRadius() const {
+	if(base::CommandLine::ForCurrentProcess()->HasSwitch("rectangular-tabs"))
+		return 0;
 	return views::LayoutProvider::Get()->GetCornerRadiusMetric(
       views::Emphasis::kHigh);
 }
 
 gfx::Insets GM2TabStyle::GetContentsInsets() const {
+  if(base::CommandLine::ForCurrentProcess()->HasSwitch("rectangular-tabs"))
+	 return gfx::Insets::TLBR(0, views::LayoutProvider::Get()->GetCornerRadiusMetric(
+                             views::Emphasis::kHigh) * 2, 0,
+                           views::LayoutProvider::Get()->GetCornerRadiusMetric(
+                            views::Emphasis::kHigh) * 2);
   return gfx::Insets::TLBR(0, GetBottomCornerRadius() * 2, 0,
                            GetBottomCornerRadius() * 2);
 }
