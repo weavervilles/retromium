@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
@@ -642,10 +643,14 @@ void BaseFile::AnnotateWithSourceInformation(
         &BaseFile::OnQuarantineServiceError, weak_factory_.GetWeakPtr(),
         authority_url, referrer_url));
 
-    quarantine_service_->QuarantineFile(
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch("disable-alternate-ds"))	{
+		OnFileQuarantined(quarantine::mojom::QuarantineFileResult::OK);
+	} else {
+		quarantine_service_->QuarantineFile(
         full_path_, authority_url, referrer_url, client_guid,
         base::BindOnce(&BaseFile::OnFileQuarantined,
                        weak_factory_.GetWeakPtr()));
+	}
   }
 }
 
