@@ -144,7 +144,10 @@ bool WebFontTypefaceFactory::CreateTypeface(
     const FontFormatCheck& format_check,
     const FontInstantiator& instantiator) {
   CHECK(!typeface);
-
+#if BUILDFLAG(IS_WIN)
+  if(format_check.IsVariableFont() && !FontCache::useDirectWrite())
+	  return false;
+#endif
   if (!format_check.IsVariableFont() && !format_check.IsColorFont() &&
       !format_check.IsCff2OutlineFont()) {
     typeface = instantiator.make_system(data);
