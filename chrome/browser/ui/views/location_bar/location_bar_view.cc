@@ -1157,7 +1157,8 @@ void LocationBarView::RefreshBackground() {
     // applied.
     border_color = color_provider->GetColor(kColorLocationBarBorderOnMismatch);
   }
-
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch("classic-omnibox"))
+	  border_color = SK_ColorBLACK;
     if (is_popup_mode_) {
     SetBackground(views::CreateSolidBackground(background_color));
     } else {
@@ -1169,7 +1170,8 @@ void LocationBarView::RefreshBackground() {
   // Keep the views::Textfield in sync. It needs an opaque background to
   // correctly enable subpixel AA.
   omnibox_view_->SetBackgroundColor(background_color);
-
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch("classic-omnibox"))
+	omnibox_view_->SetBorder(views::CreateSolidSidedBorder(gfx::Insets::TLBR(1, 0, 1, 0), SK_ColorBLACK));
   SchedulePaint();
 }
 
