@@ -421,7 +421,7 @@ void CWSInfoService::SendRequest() {
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(kRequestUrl);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch("ungoogled-supermium"))
-	  resource_request->url = GURL("google-must-be-stopped");
+	  return; //resource_request->url = GURL("google-must-be-stopped");
   // A POST request is sent with an override to GET due to server requirements.
   resource_request->method = "POST";
   resource_request->load_flags = net::LOAD_DISABLE_CACHE;
