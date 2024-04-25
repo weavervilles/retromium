@@ -73,7 +73,7 @@ SoftwareImageDecodeCacheUtils::DoDecodeImage(
     base::OnceClosure on_no_memory) {
   const SkISize target_size =
       SkISize::Make(key.target_size().width(), key.target_size().height());
-  if(!base::CommandLine::ForCurrentProcess()->HasSwitch("disable-webbloat-mitigation") &&
+  if(base::CommandLine::ForCurrentProcess()->HasSwitch("enable-webbloat-mitigation") &&
      (target_size.fWidth * target_size.fHeight) > 1000000) {
 	  LOG(ERROR) << "Supermium attempted to load an image of size " << target_size.fWidth * target_size.fHeight << " pixels";
 	  return nullptr;
