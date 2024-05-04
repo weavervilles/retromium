@@ -298,6 +298,7 @@ struct SameSizeAsDocumentLoader
   bool is_same_origin_navigation;
   bool has_text_fragment_token;
   bool was_discarded;
+  bool listing_ftp_directory;
   bool loading_main_document_from_mhtml_archive;
   bool loading_srcdoc;
   KURL fallback_base_url;
