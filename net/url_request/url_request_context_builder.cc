@@ -579,17 +579,19 @@ std::unique_ptr<URLRequestContext> URLRequestContextBuilder::Build() {
   job_factory->SetProtocolHandler(url::kTraceScheme,
                                   std::make_unique<TrkProtocolHandler>());
 
-  context->set_job_factory(std::move(job_factory));
+  
   
 #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   if (ftp_enabled_) {
     context->set_ftp_auth_cache(new FtpAuthCache());
     job_factory->SetProtocolHandler(
-        url::kFtpScheme, FtpProtocolHandler::Create(context->host_resolver(),
-                                                    context->ftp_auth_cache()));
+       url::kFtpScheme, FtpProtocolHandler::Create(context->host_resolver(),
+                                                   context->ftp_auth_cache()));
   }
 #endif  // !BUILDFLAG(DISABLE_FTP_SUPPORT)
 
+  context->set_job_factory(std::move(job_factory));
+  
   if (cookie_deprecation_label_.has_value()) {
     context->set_cookie_deprecation_label(*cookie_deprecation_label_);
   }

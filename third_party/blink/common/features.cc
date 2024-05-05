@@ -755,9 +755,9 @@ BASE_FEATURE(kEstablishGpuChannelAsync,
 
 // Enables support for FTP URLs. When disabled FTP URLs will behave the same as
 // any other URL scheme that's unknown to the UA. See https://crbug.com/333943
-BASE_FEATURE{kFtpProtocol,
-	         "FtpProtocol",
-             base::FEATURE_ENABLED_BY_DEFAULT};
+//BASE_FEATURE(kFtpProtocol,
+//	         "FtpProtocol",
+//             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables reporting Event Timing with matching presentation promise index only.
 BASE_FEATURE(kEventTimingMatchPresentationIndex,

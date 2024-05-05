@@ -9,12 +9,12 @@
 
 #include "base/i18n/encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "net/base/directory_listing.h"
-#include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/ftp/ftp_directory_listing_parser.h"
 #include "net/net_buildflags.h"
@@ -54,13 +54,13 @@ std::u16string ConvertPathToUTF16(const std::string& path) {
 scoped_refptr<SharedBuffer> GenerateFtpDirectoryListingHtml(
     const KURL& url,
     const SharedBuffer* input) {
-  const GURL gurl = url;
+  const GURL gurl = GURL(url);
   scoped_refptr<SharedBuffer> output = SharedBuffer::Create();
-  net::UnescapeRule::Type unescape_rules =
-      net::UnescapeRule::SPACES |
-      net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS;
+  base::UnescapeRule::Type unescape_rules =
+      base::UnescapeRule::SPACES |
+      base::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS;
   std::string unescaped_path =
-      net::UnescapeURLComponent(gurl.path(), unescape_rules);
+      base::UnescapeURLComponent(gurl.path(), unescape_rules);
   const std::string header =
       net::GetDirectoryListingHeader(ConvertPathToUTF16(unescaped_path));
   output->Append(header.c_str(), header.size());

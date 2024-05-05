@@ -1456,11 +1456,11 @@ void DocumentLoader::HandleResponse() {
       response_.MimeType() == "text/vnd.chromium.ftp-dir") {
     if (response_.CurrentRequestUrl().Query() == "raw") {
       // Interpret the FTP LIST command result as text.
-      response_.SetMimeType("text/plain");
+      response_.SetMimeType(AtomicString("text/plain"));
     } else {
       // FTP directory listing: Make up an HTML for the entries.
       listing_ftp_directory_ = true;
-      response_.SetMimeType("text/html");
+      response_.SetMimeType(AtomicString("text/html"));
     }
   }
   if (response_.IsHTTP() &&

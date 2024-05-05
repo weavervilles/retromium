@@ -14,8 +14,7 @@ declare_args() {
   # and are optional in cronet.
   enable_websockets = use_blink
 
-  # Disable FTP support.
-  disable_ftp_support = false
+  disable_ftp_support = is_ios
 
   # Enable Kerberos authentication. It is disabled by default on iOS, Fuchsia
   # and Chromecast, at least for now. This feature needs configuration
