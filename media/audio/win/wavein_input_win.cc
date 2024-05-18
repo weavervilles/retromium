@@ -87,10 +87,10 @@ AudioInputStream::OpenOutcome PCMWaveInAudioInputStream::Open() {
 void PCMWaveInAudioInputStream::SetupBuffers() {
   WAVEHDR* last = NULL;
   WAVEHDR* first = NULL;
-  WAVEHDR* buffer_local = buffer_;
   for (int ix = 0; ix != num_buffers_; ++ix) {
     uint32_t sz = sizeof(WAVEHDR) + buffer_size_;
     buffer_ =  reinterpret_cast<WAVEHDR*>(new char[sz]);
+    WAVEHDR* buffer_local = buffer_;
     buffer_->lpData = reinterpret_cast<char*>(buffer_local) + sizeof(WAVEHDR);
     buffer_->dwBufferLength = buffer_size_;
     buffer_->dwBytesRecorded = 0;
