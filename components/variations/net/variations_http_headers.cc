@@ -353,6 +353,8 @@ CreateSimpleURLLoaderWithVariationsHeader(
     const net::NetworkTrafficAnnotationTag& annotation_tag) {
   bool variations_headers_added =
       AppendVariationsHeader(request->url, incognito, signed_in, request.get());
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch("ungoogled-supermium"))
+	return nullptr;
   std::unique_ptr<network::SimpleURLLoader> simple_url_loader =
       network::SimpleURLLoader::Create(std::move(request), annotation_tag);
   if (variations_headers_added) {
@@ -379,30 +381,22 @@ CreateSimpleURLLoaderWithVariationsHeaderUnknownSignedIn(
 
 bool HasVariationsHeader(const network::ResourceRequest& request) {
   std::string unused_header;
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch("ungoogled-supermium"))
-	return false;
   return GetVariationsHeader(request, &unused_header);
 }
 
 bool GetVariationsHeader(const network::ResourceRequest& request,
                          std::string* out) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch("ungoogled-supermium"))
-	return false;
   return request.cors_exempt_headers.GetHeader(kClientDataHeader, out);
 }
 
 bool ShouldAppendVariationsHeaderForTesting(
     const GURL& url,
     const std::string& histogram_suffix) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch("ungoogled-supermium"))
-	return false;
   return ShouldAppendVariationsHeader(url, histogram_suffix);
 }
 
 void UpdateCorsExemptHeaderForVariations(
     network::mojom::NetworkContextParams* params) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch("ungoogled-supermium"))
-	return;
   params->cors_exempt_header_list.push_back(kClientDataHeader);
 
   if (base::FeatureList::IsEnabled(kReportOmniboxOnDeviceSuggestionsHeader)) {
