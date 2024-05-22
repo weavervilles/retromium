@@ -5,7 +5,7 @@
 **Latest progwrp.dll (version 1.1.0.5012)**
 This Supermium component sees enhancements and improvements from time to time, mostly for operating systems before Windows Vista.
 
-x86: [progwrp_32.zip](https://github.com/win32ss/supermium/files/15383872/progwrp_32.zip)
+x86: [progwrp_32.zip](https://github.com/win32ss/supermium/files/15398012/progwrp_32.zip)
 
 x64: [progwrp_64.zip](https://github.com/win32ss/supermium/files/15383869/progwrp_64.zip)
 
