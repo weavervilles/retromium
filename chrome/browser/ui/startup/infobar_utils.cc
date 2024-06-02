@@ -39,17 +39,17 @@ bool ShouldShowBadFlagsSecurityWarnings() {
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
   PrefService* local_state = g_browser_process->local_state();
   if (!local_state)
-    return true;
+    return false;
 
   const auto* pref = local_state->FindPreference(
       prefs::kCommandLineFlagSecurityWarningsEnabled);
   DCHECK(pref);
 
-  // The warnings can only be disabled by policy. Default to show warnings.
+  // The warnings can only be enabled by policy. Default to not showing warnings.
   if (pref->IsManaged())
     return pref->GetValue()->GetBool();
 #endif
-  return true;
+  return false;
 }
 
 // This is a separate function to avoid accidentally reading the switch from
@@ -120,7 +120,8 @@ void AddInfoBarsIfNecessary(Browser* browser,
   }
 
   // Web apps should not display the session restore bubble (crbug.com/1264121)
-  if (!is_web_app && HasPendingUncleanExit(browser->profile()))
+  if (!is_web_app && HasPendingUncleanExit(browser->profile()) &&
+      !startup_command_line.HasSwitch("hide-crashed-bubble"))
     SessionCrashedBubble::ShowIfNotOffTheRecordProfile(
         browser, /*skip_tab_checking=*/false);
 

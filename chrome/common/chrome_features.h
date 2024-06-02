@@ -735,6 +735,8 @@ BASE_DECLARE_FEATURE(kThirdPartyModulesBlocking);
 
 COMPONENT_EXPORT(CHROME_FEATURES)
 BASE_DECLARE_FEATURE(kTreatUnsafeDownloadsAsActive);
+COMPONENT_EXPORT(CHROME_FEATURES)
+BASE_DECLARE_FEATURE(kInsecureDownloadWarnings);
 
 // TrackingProtectionSentimentSurvey
 #if !BUILDFLAG(IS_ANDROID)

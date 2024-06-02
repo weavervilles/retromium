@@ -67,7 +67,7 @@ DefaultBrowserInfoBarDelegate::GetIdentifier() const {
 }
 
 const gfx::VectorIcon& DefaultBrowserInfoBarDelegate::GetVectorIcon() const {
-  return vector_icons::kProductIcon;
+  return vector_icons::kInfoOutlineIcon;
 }
 
 bool DefaultBrowserInfoBarDelegate::ShouldExpire(

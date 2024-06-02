@@ -52,6 +52,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+#include "base/win/windows_version.h"
 #endif
 
 #if BUILDFLAG(IS_FUCHSIA)
@@ -694,6 +695,12 @@ bool FieldTrialList::CreateTrialsFromFieldTrialStates(
 void FieldTrialList::CreateTrialsInChildProcess(const CommandLine& cmd_line) {
   CHECK(!global_->create_trials_in_child_process_called_);
   global_->create_trials_in_child_process_called_ = true;
+  
+#if BUILDFLAG(IS_WIN)
+  if (win::GetVersion() < win::Version::VISTA) {
+    return;
+  }
+#endif
 
 #if BUILDFLAG(USE_BLINK)
   // TODO(crbug.com/867558): Change to a CHECK.

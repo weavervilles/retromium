@@ -57,6 +57,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pdf_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -1732,6 +1733,10 @@ bool ChromeDownloadManagerDelegate::IsOpenInBrowserPreferredForFile(
 bool ChromeDownloadManagerDelegate::ShouldBlockFile(
     download::DownloadItem* item,
     download::DownloadDangerType danger_type) const {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableDownloadUpload) ||
+		base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUngoogledSupermium))	{
+	  return false;
+  }
   // Chrome-initiated background downloads should not be blocked.
   if (item && !item->RequireSafetyChecks()) {
     return false;
@@ -1979,7 +1984,7 @@ void ChromeDownloadManagerDelegate::OnManagerInitialized() {
 #if !BUILDFLAG(IS_ANDROID)
 void ChromeDownloadManagerDelegate::ScheduleCancelForEphemeralWarning(
     const std::string& guid) {
-  if (!download::IsDownloadBubbleEnabled()) {
+  if (!download::IsDownloadBubbleEnabled(profile_)) {
     return;
   }
   LogCancelEphemeralWarningEvent(
@@ -2016,7 +2021,7 @@ void ChromeDownloadManagerDelegate::CancelForEphemeralWarning(
 }
 
 void ChromeDownloadManagerDelegate::CancelAllEphemeralWarnings() {
-  if (!download::IsDownloadBubbleEnabled()) {
+  if (!download::IsDownloadBubbleEnabled(profile_)) {
     return;
   }
   content::DownloadManager::DownloadVector downloads;

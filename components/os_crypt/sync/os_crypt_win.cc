@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include "base/base64.h"
+#include "base/command_line.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
@@ -46,6 +47,10 @@ constexpr char kDPAPIKeyPrefix[] = "DPAPI";
 
 bool EncryptStringWithDPAPI(const std::string& plaintext,
                             std::string* ciphertext) {
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch("disable-encryption")) {
+    *ciphertext = plaintext;
+    return true;
+  }
   DATA_BLOB input;
   input.pbData =
       const_cast<BYTE*>(reinterpret_cast<const BYTE*>(plaintext.data()));
@@ -80,6 +85,10 @@ bool EncryptStringWithDPAPI(const std::string& plaintext,
 
 bool DecryptStringWithDPAPI(const std::string& ciphertext,
                             std::string* plaintext) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch("disable-encryption")) {
+    *plaintext = ciphertext;
+    return true;
+  }
   DATA_BLOB input;
   input.pbData =
       const_cast<BYTE*>(reinterpret_cast<const BYTE*>(ciphertext.data()));

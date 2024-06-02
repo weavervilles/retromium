@@ -101,6 +101,9 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
       {switches::kEnableDownloadWarningImprovements,
        std::cref(safe_browsing::kDeepScanningPromptRemoval),
        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+      {switches::kEnableDownloadWarningImprovements,
+       std::cref(safe_browsing::kDownloadBubble),
+       base::FeatureList::OVERRIDE_ENABLE_FEATURE},
 #if !BUILDFLAG(IS_ANDROID)
       {switches::kEnableDownloadWarningImprovements,
        std::cref(feature_engagement::kIPHDeepScanPromptRemovalFeature),

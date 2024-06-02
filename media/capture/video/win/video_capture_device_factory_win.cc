@@ -305,6 +305,10 @@ bool DevicesInfoContainsDeviceId(const DevicesInfo& devices_info,
                         });
 }
 
+bool IsEnclosureLocationSupported() {
+  return true;
+}
+
 // Returns a non DirectShow descriptor DevicesInfo with the provided name and
 // model.
 DevicesInfo::const_iterator FindNonDirectShowDeviceInfoByNameAndModel(
@@ -810,17 +814,23 @@ void VideoCaptureDeviceFactoryWin::GetDevicesInfo(
     devices_info = GetDevicesInfoDirectShow(devices_info);
   }
 
-  com_thread_.init_com_with_mta(true);
-  com_thread_.Start();
-  com_thread_data_ =
+  if (IsEnclosureLocationSupported()) {
+   com_thread_.init_com_with_mta(true);
+   com_thread_.Start();
+   com_thread_data_ =
       base::MakeRefCounted<VideoCaptureDeviceFactoryWin::ComThreadData>(
           weak_ptr_factory_.GetWeakPtr(), com_thread_.task_runner(),
           base::SingleThreadTaskRunner::GetCurrentDefault());
-  com_thread_.task_runner()->PostTask(
+   com_thread_.task_runner()->PostTask(
       FROM_HERE,
       base::BindOnce(
           &VideoCaptureDeviceFactoryWin::ComThreadData::EnumerateDevicesUWP,
           com_thread_data_, std::move(devices_info), std::move(callback)));
+
+  } else {
+    DeviceInfoReady(std::move(devices_info), std::move(callback));
+  }
+
 }
 
 void VideoCaptureDeviceFactoryWin::ComThreadData::EnumerateDevicesUWP(

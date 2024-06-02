@@ -367,6 +367,11 @@ class UnexportableKeyProviderWin : public UnexportableKeyProvider {
     ScopedNCryptProvider provider;
     {
       SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
+	  
+	  if(!::LoadLibraryW(L"ncrypt.dll")) {
+		  return std::nullopt;
+	  }
+	  
       if (FAILED(NCryptOpenStorageProvider(
               ScopedNCryptProvider::Receiver(provider).get(),
               MS_PLATFORM_CRYPTO_PROVIDER, /*flags=*/0))) {
@@ -386,6 +391,11 @@ class UnexportableKeyProviderWin : public UnexportableKeyProvider {
     ScopedNCryptProvider provider;
     {
       SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
+	  
+	  if(!::LoadLibraryW(L"ncrypt.dll")) {
+		  return nullptr;
+	  }
+	  
       if (FAILED(NCryptOpenStorageProvider(
               ScopedNCryptProvider::Receiver(provider).get(),
               MS_PLATFORM_CRYPTO_PROVIDER, /*flags=*/0))) {
@@ -617,6 +627,11 @@ class VirtualUnexportableKeyProviderWin
     ScopedNCryptProvider provider;
     {
       SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
+
+	  if(!::LoadLibraryW(L"ncrypt.dll")) {
+		  return std::nullopt;
+	  }
+	  
       SECURITY_STATUS status = NCryptOpenStorageProvider(
           ScopedNCryptProvider::Receiver(provider).get(),
           MS_KEY_STORAGE_PROVIDER, /*dwFlags=*/0);
@@ -639,6 +654,11 @@ class VirtualUnexportableKeyProviderWin
     ScopedNCryptProvider provider;
     {
       SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
+	  
+	  if(!::LoadLibraryW(L"ncrypt.dll")) {
+		  return nullptr;
+	  }
+	  
       SECURITY_STATUS status = NCryptOpenStorageProvider(
           ScopedNCryptProvider::Receiver(provider).get(),
           MS_KEY_STORAGE_PROVIDER, /*dwFlags=*/0);
