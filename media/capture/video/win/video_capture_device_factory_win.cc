@@ -836,7 +836,9 @@ void VideoCaptureDeviceFactoryWin::GetDevicesInfo(
 void VideoCaptureDeviceFactoryWin::ComThreadData::EnumerateDevicesUWP(
     std::vector<VideoCaptureDeviceInfo> devices_info,
     GetDevicesInfoCallback result_callback) {
-  DCHECK_GE(base::win::OSInfo::GetInstance()->version_number().build, 10240u);
+  if (base::win::GetVersion() < base::win::Version::WIN10) {
+    return;
+  }
 
   // The |device_info_callback| created by base::BindRepeating() is copyable,
   // which is necessary for the below lambda function of |callback| for the
