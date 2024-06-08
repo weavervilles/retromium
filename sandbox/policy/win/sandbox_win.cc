@@ -663,15 +663,11 @@ ResultCode GenerateConfigForSandboxedProcess(const base::CommandLine& cmd_line,
   if (process_type == switches::kRendererProcess) {
     // TODO(crbug.com/74242) Remove if we can reliably not load cryptbase.dll.
     config->AddKernelObjectToClose(HandleToClose::kKsecDD);
-    result = SandboxWin::AddWin32kLockdownPolicy(config);
-    if (result != SBOX_ALL_OK) {
-      return result;
-    }
-    if (gfx::win::ShouldUseDirectWrite()) {
-      result = SandboxWin::AddWin32kLockdownPolicy(config);
-      if (result != SBOX_ALL_OK) {
-        return result;
-      }
+	if (gfx::win::ShouldUseDirectWrite()) {
+     result = SandboxWin::AddWin32kLockdownPolicy(config);
+     if (result != SBOX_ALL_OK) {
+       return result;
+     }
    }
   }
 
