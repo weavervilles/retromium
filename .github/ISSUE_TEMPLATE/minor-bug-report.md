@@ -1,8 +1,9 @@
 ---
-name: Bug report
-about: Create a report to fix an issue in the Supermium web browser
+name: Minor bug report
+about: Create a report to fix a minor bug in the Supermium web browser (as in one
+  that does not cause it to crash)
 title: ''
-labels: bug
+labels: Minor bug
 assignees: ''
 
 ---
