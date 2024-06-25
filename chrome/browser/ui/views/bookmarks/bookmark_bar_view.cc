@@ -339,7 +339,8 @@ class BookmarkBarView::ButtonSeparatorView : public views::Separator {
   ButtonSeparatorView() {
     const int leading_padding = features::IsChromeRefresh2023() ? 8 : 4;
     const int trailing_padding = features::IsChromeRefresh2023() ? 8 : 3;
-    // TODO(1465541): Rely on kThickness once value is updated for refresh.
+    // TODO(crbug.com/40923523): Rely on kThickness once value is updated for
+    // refresh.
     separator_thickness_ = features::IsChromeRefresh2023()
                                ? kBookmarkBarSeparatorRefreshThickness
                                : kThickness;
@@ -1889,6 +1890,13 @@ void BookmarkBarView::UpdateAppearanceForTheme() {
   const SkColor overflow_color =
       color_provider->GetColor(kColorBookmarkButtonIcon);
   const bool touch_ui = ui::TouchUiController::Get()->touch_ui();
+  ui::ImageModel overflow_button_icon = ui::ImageModel::FromVectorIcon(
+      features::IsChromeRefresh2023()
+          ? kBookmarkbarOverflowRefreshIcon
+          : (touch_ui ? kBookmarkbarTouchOverflowIcon : kOverflowChevronIcon),
+      overflow_color);
+  overflow_button_->SetImageModel(views::Button::STATE_NORMAL,
+                                  overflow_button_icon);
   overflow_button_->SetImageModel(
       views::Button::STATE_NORMAL,
       ui::ImageModel::FromVectorIcon(

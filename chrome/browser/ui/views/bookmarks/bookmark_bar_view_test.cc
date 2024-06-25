@@ -1877,7 +1877,7 @@ class BookmarkBarViewTest20 : public BookmarkBarViewEventTestBase {
 BEGIN_METADATA(BookmarkBarViewTest20, TestViewForMenuExit)
 END_METADATA
 
-// TODO(https://crbug.com/1506808): Flaky on Windows.
+// TODO(crbug.com/40947483): Flaky on Windows.
 #if BUILDFLAG(IS_WIN)
 #define MAYBE_ContextMenuExitTest DISABLED_ContextMenuExitTest
 #elif BUILDFLAG(IS_OZONE_WAYLAND)
