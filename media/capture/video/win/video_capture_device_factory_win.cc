@@ -306,7 +306,11 @@ bool DevicesInfoContainsDeviceId(const DevicesInfo& devices_info,
 }
 
 bool IsEnclosureLocationSupported() {
-  return true;
+  // If there's no UWP device enumeration API, which is the case before Windows 10,
+  // access to video and audio capture will break on certain sites, specifically those
+  // using webkit APIs to access those devices.
+  // Someday, progwrp will get the Ro* interfaces, but this will do for now.
+  return base::win::GetVersion() >= base::win::Version::WIN10;
 }
 
 // Returns a non DirectShow descriptor DevicesInfo with the provided name and
@@ -836,10 +840,6 @@ void VideoCaptureDeviceFactoryWin::GetDevicesInfo(
 void VideoCaptureDeviceFactoryWin::ComThreadData::EnumerateDevicesUWP(
     std::vector<VideoCaptureDeviceInfo> devices_info,
     GetDevicesInfoCallback result_callback) {
-  if (base::win::GetVersion() < base::win::Version::WIN10) {
-    return;
-  }
-
   // The |device_info_callback| created by base::BindRepeating() is copyable,
   // which is necessary for the below lambda function of |callback| for the
   // asynchronous operation. The reason is to permanently capture anything in a
