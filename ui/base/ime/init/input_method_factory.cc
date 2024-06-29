@@ -37,7 +37,7 @@ bool g_create_input_method_called = false;
 namespace ui {
 #if BUILDFLAG(IS_WIN)	
 bool IsUsingTSFForIME() {
-    return base::win::GetVersion() >= base::win::Version::VISTA &&
+    return base::win::GetVersion() >= base::win::Version::WIN8 &&
            base::FeatureList::IsEnabled(features::kTSFImeSupport);
   }
 #endif

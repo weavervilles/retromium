@@ -722,7 +722,7 @@ HRESULT TSFBridge::Initialize() {
   }
 
   // If we aren't supporting TSF early out.
-  if (!base::FeatureList::IsEnabled(features::kTSFImeSupport) || base::win::GetVersion() < base::win::Version::VISTA)
+  if (!base::FeatureList::IsEnabled(features::kTSFImeSupport) || base::win::GetVersion() < base::win::Version::WIN8)
     return E_FAIL;
 
   auto delegate = std::make_unique<TSFBridgeImpl>();
