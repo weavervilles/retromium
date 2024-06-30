@@ -8,11 +8,13 @@
 #include "build/branding_buildflags.h"
 #include "build/buildflag.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/obsolete_system/obsolete_system.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/session_crashed_bubble.h"
+#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/startup/automation_infobar_delegate.h"
 #include "chrome/browser/ui/startup/bad_flags_prompt.h"
 #include "chrome/browser/ui/startup/bidding_and_auction_consented_debugging_infobar_delegate.h"
@@ -24,6 +26,8 @@
 #include "chrome/browser/ui/startup/test_third_party_cookie_phaseout_infobar_delegate.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/flags_ui/flags_storage.h"
+#include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/common/content_switches.h"
@@ -149,6 +153,16 @@ void AddInfoBarsIfNecessary(Browser* browser,
       chrome::ShowBadFlagsPrompt(web_contents);
     }
 
+    if (startup_command_line.HasSwitch("revert-from-portable")) {
+          chrome::MessageBoxResult mbr = chrome::ShowQuestionMessageBoxSync(nullptr, u"Profile Warning", u"--revert-from-portable is in use."
+                                u" If the profile has already been moved, press Yes. If not, press No. Security may suffer if the "
+                                u"profile's encryption remains bypassed.");
+
+          if (mbr == chrome::MESSAGE_BOX_RESULT_YES) {
+              std::unique_ptr<flags_ui::FlagsStorage> flags_storage = std::make_unique<flags_ui::PrefServiceFlagsStorage>(g_browser_process->local_state());
+              about_flags::SetFeatureEntryEnabled(flags_storage.get(), "revert-from-portable", false);
+          }
+    }
     infobars::ContentInfoBarManager* infobar_manager =
         infobars::ContentInfoBarManager::FromWebContents(web_contents);
 

@@ -11488,14 +11488,15 @@ const FeatureEntry kFeatureEntries[] = {
      "Enable Native User Interface Elements",
      "Enables native user interface elements on Windows. At this time, it only applies to elements outside the area of the web page itself.",
      kOsWin, SINGLE_VALUE_TYPE("native-ui-style")},
-    {"disable-webbloat-mitigation",
-     "Disable Blockage Of Unnecessarily Bloated Web Elements",
-     "Disable blockage of unnecessarily bloated web elements, including large images that can force the browser to allocate hundreds of megabytes of memory.",
-     kOsWin, SINGLE_VALUE_TYPE("disable-webbloat-mitigation")},
     {"old-tab-strip-bounds",
      "Enable Old Tab Strip Bounds",
      "Enable the old tab strip bounds, specifically on the left (or right in an RTL configuration).",
      kOsDesktop, SINGLE_VALUE_TYPE("old-tab-strip-bounds")},
+    {"revert-from-portable",
+     "Prevent Data (Extension) Loss When Changing Profile State",
+     "When moving a Supermium profile from one drive to another (one system to another), enable this flag before moving the profile. It can also be "
+	 "used to change a portable profile to a non-portable profile. This mostly ensures that extensions and extension data are not lost.",
+     kOsDesktop, SINGLE_VALUE_TYPE("revert-from-portable")},
 	// TODO: move all Supermium-specific flags to new source file.
     // NOTE: Adding a new flag requires adding a corresponding entry to enum
     // "LoginCustomFlags" in tools/metrics/histograms/enums.xml. See "Flag
