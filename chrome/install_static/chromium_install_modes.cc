@@ -36,7 +36,7 @@ const InstallConstants kInstallModes[] = {
             L"",  // Empty app_guid since no integration with Google Update.
         .base_app_name = L"Supemium",              // A distinct base_app_name.
         .base_app_id = L"Supemium",                // A distinct base_app_id.
-        .browser_prog_id_prefix = L"SupemiumHTM",  // Browser ProgID prefix.
+        .browser_prog_id_prefix = L"SupermiumHTM",  // Browser ProgID prefix.
         .browser_prog_id_description =
             L"Supermium HTML Document",         // Browser ProgID description.
         .pdf_prog_id_prefix = L"SupermiumPDF",  // PDF ProgID prefix.
