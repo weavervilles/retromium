@@ -11497,6 +11497,10 @@ const FeatureEntry kFeatureEntries[] = {
      "When moving a Supermium profile from one drive to another (one system to another), enable this flag before moving the profile. It can also be "
 	 "used to change a portable profile to a non-portable profile. This mostly ensures that extensions and extension data are not lost.",
      kOsDesktop, SINGLE_VALUE_TYPE("revert-from-portable")},
+    {"disable-browser-font-smoothing-win",
+     "Disable Browser Font Smoothing on Windows",
+     "The internal font smoothing (antialiasing and subpixel rendering is disabled with this switch enabled.",
+     kOsWin, SINGLE_VALUE_TYPE("disable-browser-font-smoothing-win")},
 	// TODO: move all Supermium-specific flags to new source file.
     // NOTE: Adding a new flag requires adding a corresponding entry to enum
     // "LoginCustomFlags" in tools/metrics/histograms/enums.xml. See "Flag
