@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -23,7 +24,7 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/icon_util.h"
 #include "ui/gfx/image/image_skia.h"
-int IconLoaderProcCount = 0;
+
 namespace {
 // Helper class to manage lifetime of icon reader service.
 class IconLoaderHelper {
@@ -202,17 +203,16 @@ scoped_refptr<base::TaskRunner> IconLoader::GetReadIconTaskRunner() {
 
 void IconLoader::ReadGroup() {
   group_ = GroupForFilepath(file_path_);
-  if (group_ == file_path_.value()) {
+  if (group_ == file_path_.value() && 
+      !base::CommandLine::ForCurrentProcess()->HasSwitch("force-generic-download-icons")) {
     // Calls a Windows API that parses the file so must be sandboxed.
-	++IconLoaderProcCount;
-	while(IconLoaderProcCount >= 25)
-		Sleep(1);
     GetReadIconTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&IconLoader::ReadIconInSandbox, base::Unretained(this)));
-	--IconLoaderProcCount;
   } else {
     // Looks up generic icons for groups based only on the file's extension.
+	// Also, this is a preferable solution for some systems that end up loading hundreds of icon reader processes
+	// to the point of failure, hence the switch above.
     GetReadIconTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&IconLoader::ReadIcon, base::Unretained(this)));

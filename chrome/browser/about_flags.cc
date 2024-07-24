@@ -11501,6 +11501,10 @@ const FeatureEntry kFeatureEntries[] = {
      "Disable Browser Font Smoothing on Windows",
      "The internal font smoothing (antialiasing and subpixel rendering is disabled with this switch enabled.",
      kOsWin, SINGLE_VALUE_TYPE("disable-browser-font-smoothing-win")},
+    {"force-generic-download-icons",
+     "Force Generic Download Icons",
+     "If the browser is slow or crashes when opening the Recent Downloads page, use this switch.",
+     kOsWin, SINGLE_VALUE_TYPE("force-generic-download-icons")},
 	// TODO: move all Supermium-specific flags to new source file.
     // NOTE: Adding a new flag requires adding a corresponding entry to enum
     // "LoginCustomFlags" in tools/metrics/histograms/enums.xml. See "Flag
