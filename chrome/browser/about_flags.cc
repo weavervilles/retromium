@@ -11505,6 +11505,10 @@ const FeatureEntry kFeatureEntries[] = {
      "Force Generic Download Icons",
      "If the browser is slow or crashes when opening the Recent Downloads page, use this switch.",
      kOsWin, SINGLE_VALUE_TYPE("force-generic-download-icons")},
+    {"remove-client-hints",
+     "Remove Client Hints",
+     "Removes client hints (information sent to servers about your system, similar to a user agent). ungoogled-chromium flag.",
+     kOsAll, FEATURE_VALUE_TYPE(blink::features::kRemoveClientHints)},
 	// TODO: move all Supermium-specific flags to new source file.
     // NOTE: Adding a new flag requires adding a corresponding entry to enum
     // "LoginCustomFlags" in tools/metrics/histograms/enums.xml. See "Flag

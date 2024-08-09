@@ -34,6 +34,9 @@ namespace features {
 // Enables passing of mailbox backed Accelerated bitmap images to be passed
 // cross-process as mailbox references instead of serialized bitmaps in
 // shared memory.
+
+BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kRemoveClientHints);
+
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(
     kAcceleratedStaticBitmapImageSerialization);
 

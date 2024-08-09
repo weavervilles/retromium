@@ -836,6 +836,8 @@ void UpdateNavigationRequestClientUaHeaders(
     net::HttpRequestHeaders* headers,
     const std::optional<GURL>& request_url) {
   DCHECK(frame_tree_node);
+  if (base::FeatureList::IsEnabled(blink::features::kRemoveClientHints))
+    return;
   if (!ShouldAddClientHints(origin, frame_tree_node, delegate, request_url)) {
     return;
   }
@@ -857,6 +859,8 @@ void AddRequestClientHintsHeaders(
     FrameTreeNode* frame_tree_node,
     const blink::ParsedPermissionsPolicy& container_policy,
     const std::optional<GURL>& request_url) {
+  if (base::FeatureList::IsEnabled(blink::features::kRemoveClientHints))
+    return;
   ClientHintsExtendedData data(origin, frame_tree_node, delegate, request_url);
   UpdateIFramePermissionsPolicyWithDelegationSupportForClientHints(
       data, container_policy);
