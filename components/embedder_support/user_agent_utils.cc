@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/debug/stack_trace.h"
 #include "base/feature_list.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
@@ -222,7 +223,10 @@ const blink::UserAgentBrandList GetUserAgentBrandList(
 #if !BUILDFLAG(CHROMIUM_BRANDING)
   brand = version_info::GetProductName();
 #else
-  brand = std::string("Google Chrome");
+  if (!base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII("uach-custom-name").empty())
+	brand = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII("uach-custom-name");
+  else
+    brand = std::string("Google Chrome");
 #endif
   std::optional<std::string> maybe_brand_override =
       base::GetFieldTrialParamValueByFeature(features::kGreaseUACH,
